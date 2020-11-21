@@ -21,7 +21,8 @@ class RouteRequest:
 requestList=[]
 threadNumber_statistic=0
 logStringRedirect=""
-visitIpaddr=[] #"xxx.xxx.xx.xx"
+visitIpaddr=[] #In fact I never intend to record Ip addr and just do it for PV statistics
+visitTime=[]
 rteGroup=[]
 
 def LogPrint(astr,serious=0):
@@ -44,8 +45,11 @@ def getHtmlLog():
     formatStr=formatStr+"<h3>Total Page Visit:"+str(visitIpaddr.__len__())+"</h3>"
     formatStr=formatStr+"<h3>Online Threads(non statistic):"+str(len(threading.enumerate()))+"</h3>"
     formatStr=formatStr+"<hr>"
+    index=0
     for i in visitIpaddr:
-        formatStr=formatStr+"<p>"+i+"&nbsp;&nbsp;&nbsp;&nbsp;"+IPGET(i)+"</p>"
+        formatStr=formatStr+"<p>"+i+"&nbsp;&nbsp;&nbsp;&nbsp;"+IPGET(i)
+            +"&nbsp;&nbsp;&nbsp;&nbsp;"+visitTime[index]+"</p>"
+        index=index+1
     formatStr=formatStr+"<hr>"
     for i in rteGroup:
         formatStr=formatStr+"<p>"+i+"</p>"
@@ -74,6 +78,7 @@ class SessionHandler(threading.Thread):
             self.thread_num = len(threading.enumerate())
             if self.client_addr[0] not in visitIpaddr:
                 visitIpaddr.append(self.client_addr[0])
+                visitTime.append(time.asctime( time.localtime(time.time())))
             LogPrint("线程({},{},开启线程统计{})==用户[{},{}]连接，请求{}   {}".format(self.name,self.thread_num,threadNumber_statistic,self.client_addr[0],self.client_addr[1],requestHead,\
                 time.strftime("%m-%d %H:%M:%S", time.localtime()))) #/getRoute?from=ZGHA&to=ZJSY&valid=1111
             command=requestHead.split('?')[0]
@@ -112,9 +117,15 @@ class SessionHandler(threading.Thread):
                 requestList.append(requestInstance)
             elif command.__contains__("/getCycle"):
                 self.client_socket.send(bytes("HTTP/1.1 200 OK\r\nContent-Type:text/html\r\n\r\n"+config.NAVDAT_CYCLE,"gbk"))
-            elif command.__contains__("/getlog_aiueosashisuseso"):
+            elif command.__contains__("/getlog_"+config.BackstageKey):
                 self.client_socket.send(bytes("HTTP/1.1 200 OK\r\nContent-Type:text/html\r\n\r\n"+getHtmlLog(),"utf-8"))
-                
+            
+            elif command.__contains__("/alldatafile.zip"):
+                zipfile=open("alldatafile.zip","rb")
+                bytdata=zipfile.read()
+                zipfile.close()
+                self.client_socket.send(bytes("HTTP/1.1 200 OK\r\nContent-type:application/octet-stream\r\nAccept-Ranges:bytes\r\nAccept-Length:"+str(bytdata.__len__())+
+                    "\r\nContent-Disposition: attachment; filename=alldatafile.zip\r\n\r\n","utf-8")+bytdata)    
             else:
                 #webpagedat
                 self.client_socket.send(bytes("HTTP/1.1 200 OK\r\nContent-Type:text/html\r\n\r\n"+webpagedat,"utf-8"))
