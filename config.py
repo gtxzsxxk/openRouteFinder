@@ -7,5 +7,6 @@ NAVDAT_CYCLE="Aerosoft Airbus Extended v110 2006"
 #Website functions.
 LISTEN_PORT=8000
 DOMAIN_SUPPORT=False
-USER_DOMAIN="io3.top:8000"
-YourBingMapsKey="#############################"
+USER_DOMAIN="#####"
+YourBingMapsKey="####"
+BackstageKey="#####"
