@@ -1,11 +1,11 @@
 # Airway-Route-Finder
 #### 在线演示：http://www.routefinder.top
 #### Update comments
-This branch is an old branch of project Airway-Route-Finder,featuring the server written in python by myself and an offline python client. <br>
-Clone this project to your server or pc,make sure apData_as_v110_2006.dat NotoSansHans-Regular.ttf and navRTE_as_v110_2006.dat exist.If you don't have them,
+1. This branch is an old branch of project Airway-Route-Finder,featuring the server written in python by myself and an offline python client. <br>
+2. Clone this project to your server or pc,make sure apData_as_v110_2006.dat NotoSansHans-Regular.ttf and navRTE_as_v110_2006.dat exist.If you don't have them,
 you can make it by yourself through packData.py(you should have installed aerosoft navigraph data before),or download it at http://www.routefinder.top/alldatafile.zip<br>
-Then modify config.py<br>
-To start a local client,just start routefinder.py.To start a server,just start webFinder.py.<br>
+3. Then modify config.py<br>
+4. To start a local client,just start routefinder.py.To start a server,just start webFinder.py.<br>
 #### 简介
 RouteFinderLib是由Python编写的开源航路查询库。<br>
 使用dijkstra算法和aerosoft的导航数据。navRTE_as.dat是预烘焙好的航路数据文件。版本是1805。<br>
@@ -24,8 +24,3 @@ IID是点在nodeList的下标。使用IID表示点是为了迅速的找点。<br
 在dijkstra中寻找点，如果用名称一个一个搜是非常耗时间而且不准确的（有同名冲突点，因此我引入了点的hashcode）。<br>
 读出出度指向的下一个点，直接使用IID访问，提高了dijkstra执行效率。<br>
 <br>
-#### How to use
-Just clone this repository to your local pc.Your OS doesn't matter<br>
-		1. Check 'routefinder.py' and confirm the 'aerosoft navigate path' inside<br>		
-		2. If you want to use navigate database which is newer than '1805',please turn to 'packData.py'<br>
-		3. Open your shell.Execute 'routefinder.py'<br>
