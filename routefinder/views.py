@@ -7,6 +7,7 @@ import routefinder.validcode
 import random
 import RouteFinderLib
 import pickle
+from .models import PVlog
 
 navRTE=open(routefinder.config.SET_NAVDAT_PATH,"rb")
 PerloadNodeList=pickle.load(navRTE)
@@ -24,9 +25,36 @@ def favico(request):
     file.close()
     return HttpResponse(bytedata,content_type='image/jpg')
 
+def get_client_ip(request):
+    x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+    if x_forwarded_for:
+        ip = x_forwarded_for.split(',')[-1].strip()     
+    else:         
+        ip = request.META.get('REMOTE_ADDR')
+    return ip
+
 def index(request):
     context={}
     context["YourBingMapsKey"]=routefinder.config.YourBingMapsKey
+    ip=get_client_ip(request)
+    print(ip)
+    records=PVlog.objects.all()
+    haveIP=False
+    totalroutes=0
+    for i in records:
+        if i.usrIP==ip:
+            haveIP=True
+            i.TotalPV=i.TotalPV+1
+            i.save()
+        for j in i.Route.split('\r\n'):
+                if j.__len__()>4:
+                    totalroutes=totalroutes+1;
+    if haveIP==False:
+        s=PVlog(usrIP=ip,Place="unknown",Route="",TotalPV=1)
+        s.Place=s.IPGET(s.usrIP)
+        s.save()
+    context["pagevisit"]=records.__len__()
+    context["routecalc"]=totalroutes
     return render(request,"index.html",context)
 
 def getImage(request):
@@ -54,6 +82,15 @@ def getRoute(request,orig,dest,valid):
             return "算法发现Dijkstra丢失起点或终点，无法计算航路。"
         del objsearch
         return ans
-    return HttpResponse(SearchRoute(orig,dest))
+    response=SearchRoute(orig,dest)
+    route=response.split('||||')[0].split('\r\n')[0]
+    ip=get_client_ip(request)
+    records=PVlog.objects.all()
+    for i in records:
+        if i.usrIP==ip:
+            i.Route=i.Route+"\r\n"+route.replace("\r\n","")
+            print("添加航路至数据库"+route)
+            i.save()
+    return HttpResponse(response)
 
     
