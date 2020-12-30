@@ -1,4 +1,4 @@
-<!doctype html>
+<!DOCTYPE html>
 <html>
 
 <head>
@@ -18,7 +18,7 @@
         
         .form-control {
             border-radius: 5px;
-            border-color: grey;
+            border-color: rgb(128, 128, 128);
             border-style: solid;
             border-width: 1px;
             font-size: 16px;
@@ -29,13 +29,24 @@
 
 <body>
 
-    <div class="container" style="padding-top:10px;">
-        <p style="align-content: center;">请访问并收藏我们的新域名：<a href="http://www.routefinder.top">http://www.routefinder.top</a> &nbsp;&nbsp;&nbsp;开发动态：欢迎在
-            <a href="http://www.routefinder.top">GitHub</a> issue我。
-        </p>
+    <div class="container" style="padding:10px;">
+        <div class="row" style="margin: 5px;">
+            <p style="align-content: center;">请访问并收藏我们的新域名：<a href="http://www.routefinder.top">http://www.routefinder.top</a>
+                <span>开发动态：DJANGO VERSION tested OK and now is serving you.</span>
+                <span>该页面总计已被访问{{pagevisit}}次</span>
+                <span>共计查询航路{{routecalc}}次</span>
+            </p>
+        </div>
         <header class="page-header">
-            <h1>开源航路查询 <small style="font-size: 60%;">在线示例</small></h1>
-            <h3>OpenSource&nbsp;Airway&nbsp;Route&nbsp;Finder&nbsp;<small style="font-size: 60%;">Example&nbsp;Online</small></h3>
+            <div class="row">
+                <div class="col-md-6">
+                    <h1>开源航路查询&nbsp<small style="font-size: 60%;">在线示例</small></h1>
+                    <h3>OpenSource&nbsp;Airway&nbsp;Route&nbsp;Finder&nbsp;<small style="font-size: 60%;">Example&nbsp;Online</small></h3>
+                </div>
+                <div class="col-md-offset-8">
+                    <a href="index.html"><img src="https://s3.ax1x.com/2020/12/30/rXCQAO.md.png" width=300px alt="logo" border="0" /></a>
+                </div>
+            </div>
         </header>
         <ul class="nav nav-list">
             <li class="divider"></li>
@@ -56,15 +67,15 @@
                         <span class="inputspan">到达机场：</span>
                     </div>
                     <div class="col-md-4">
-                        <input type="text" class="form-control" placeholder="" maxlength="4" id="destbox" value="RCTP" style="text-transform:uppercase;" onkeyup="this.value=this.value.toUpperCase()" onfocusin="layer.tips('填写降落机场的ICAO代码', '#destbox')">
+                        <input type="text" class="form-control" placeholder="" maxlength="4" id="destbox" value="RCTP" style="text-transform:uppercase;" onkeyup="this.value=this.value.toUpperCase()" onfocusin="layer.tips('填写到达机场的ICAO代码', '#destbox')">
                     </div>
                 </div>
                 <div class="col-md-4">
                     <div class="col-md-4">
-                        <img id="imgctl" style="padding-right: 20px;line-height: 34px;">
+                        <img id="imgctl" style="width:90px;height:30px;padding-right: 20px;line-height: 34px;">
                     </div>
                     <div class="col-md-4">
-                        <input type="text" class="form-control" placeholder="" maxlength="4" id="codebox" onfocusin="layer.open({type:4,time:3000,content:['验证码','#codebox'],tips:1,shade:0,closeBtn:0})" value="">
+                        <input type="text" class="form-control" placeholder="" maxlength="4" id="codebox" value="" onfocusin="layer.open({type:4,time:3000,content:['验证码','#codebox'],tips:1,shade:0,closeBtn:0})">
                     </div>
                     <div class="col-md-4"><button id="searchBtn" type="button" class="btn btn-info" style="margin-left: 10px;" onclick="search()">查询</button></div>
                 </div>
@@ -78,15 +89,15 @@
             <div class="row">
                 <div class="col-md-6">
                     <div id="mapContainer" style="margin: 20px;height: 500px;">
-
                     </div>
                     <label class="checkbox-inline" style="margin: 20px;">
-            <input type="checkbox" id="drawNodeSelect" checked="true" value="" onchange="drawnodechange()">绘制航点
-          </label>
+                        <input type="checkbox" id="drawNodeSelect" checked="true" value=""
+                            onchange="drawnodechange()">绘制航点
+                    </label>
                     <label class="checkbox-inline" style="margin: 20px;">
-            <input type="checkbox" id="drawSIDSTARselect" checked="false" value=""
-              onchange="drawsidstarchange()">绘制进离场（实验特性）
-          </label>
+                        <input type="checkbox" id="drawSIDSTARselect" checked="false" value=""
+                            onchange="drawsidstarchange()">绘制进离场（实验特性）
+                    </label>
                 </div>
                 <div class="col-md-6">
                     <div class="panel panel-info" style="margin: 20px;">
@@ -94,16 +105,16 @@
                             <h3 class="panel-title">航路信息</h3>
                         </div>
                         <div class="panel-body">
-                            <div class="alert alert-info" style="margin-top: 20px;">
+                            <div id="searchTimeContainer" class="alert alert-info" style="margin-top: 20px;">
                                 <span id="searchTime">No result.</span>
                             </div>
-                            <div class="alert alert-info" style="margin-top: 20px;">
+                            <div id="routeInforContainer" class="alert alert-info" style="margin-top: 20px;">
                                 <span id="routeInfor">No result.</span>
                             </div>
-                            <div class="alert alert-info" style="margin-top: 20px;">
+                            <div id="routeDistContainer" class="alert alert-info" style="margin-top: 20px;">
                                 <span id="routeDist">No result.</span>
                             </div>
-                            <div class="alert alert-info" style="margin-top: 20px;">
+                            <div id="sidstart_suggestContainer" class="alert alert-info" style="margin-top: 20px;">
                                 <span id="sidstart_suggest">No result.</span>
                             </div>
 
@@ -126,13 +137,15 @@
                     </div>
                     <blockquote>
                         Developers
-                        <small>Shinoyasan.<a href="https://github.com/shinoyasan">View me and get sourcecode at GitHub.</a></small>
-                        <small>lzhbhlrPython.<a href="https://github.com/lzhbhlrPython">View my GitHub to get something interesting!</a></small>
+                        <small>Shinoyasan.<a href="https://github.com/shinoyasan">View me and get sourcecode at
+                                Github.</a></small>
+                        <small>lzhbhlrPython.<a href="https://github.com/lzhbhlrPython">View my GitHub to get something
+                                interesting!</a></small>
                     </blockquote>
                     <blockquote>
                         Thanks to:
                         <small>FSU7913 with his team <a href="https://bbs.chinafsu.com/">ChinaFSU</a> for his remarkable
-              contributions.Also the server provider Tang Yiheng.</small>
+                            contributions.Also the server provider Tang Yiheng.</small>
                     </blockquote>
                 </div>
             </div>
@@ -140,6 +153,10 @@
         </section>
     </div>
 </body>
+<script src="https://cdn.staticfile.org/jquery/2.1.1/jquery.min.js"></script>
+<script src="https://cdn.staticfile.org/twitter-bootstrap/3.3.7/js/bootstrap.min.js"></script>
+<script src='https://www.layuicdn.com/layer-v3.1.1/layer.js'></script>
+<script type='text/javascript' src='https://cn.bing.com/api/maps/mapcontrol?key={{YourBingMapsKey}}&callback=loadMapScenario' async defer></script>
 <script>
     var map;
     var begin_timestamp = 0.0;
@@ -360,18 +377,21 @@
 
     function clock() {
         ticks++;
-        if (ticks > 60) {
+        if (ticks > 450) {
             clockint = window.clearInterval(clockint);
             layer.open({
                 content: '本次查询失败，错误已被记录在后台，更多开发动态请关注我的GitHub。',
                 anim: 6,
                 resize: false,
-                time: 2 * 1000,
+                time: 4 * 1000,
                 shadeClose: true,
                 title: "抱歉",
                 icon: 5
             });
-
+            $("#searchTimeContainer").removeClass("alert-info");
+            $("#searchTimeContainer").addClass("alert-danger");
+            //TODO:
+            //Fix Bug:Offline Timeout Threshold is not a affirmatory time!
         }
         end_timestamp = new Date() / 1000;
         $('#searchTime').html("查询时间： " + (end_timestamp - begin_timestamp).toFixed(2) + " s");
@@ -419,9 +439,5 @@
         };
     }
 </script>
-<script src="https://cdn.staticfile.org/jquery/2.1.1/jquery.min.js"></script>
-<script src="https://cdn.staticfile.org/twitter-bootstrap/3.3.7/js/bootstrap.min.js"></script>
-<script type='text/javascript' src='https://www.layuicdn.com/layer-v3.1.1/layer.js'></script>
-<script type='text/javascript' src='https://cn.bing.com/api/maps/mapcontrol?key={{YourBingMapsKey}}&callback=loadMapScenario' async defer></script>
 
 </html>
