@@ -6,7 +6,7 @@
 #### Update comments
 1. This branch is the latest branch of project Airway-Route-Finder,featuring Django's using. <br>
 2. Clone this project to your server or pc,make sure apData_as_v110_2006.dat NotoSansHans-Regular.ttf and navRTE_as_v110_2006.dat exist in folder routefinder.If you don't have them,
-you can make it by yourself through packData.py in another branch(you should have installed aerosoft navigraph data before),or download it at http://www.routefinder.top/alldatafile.zip<br>
+you can make it by yourself through packData.py in another branch(you should have installed aerosoft navigraph data before),or 'unzip' it which hides in the folder 'routefinder' named alldatafile.rar.<br>
 3. Then modify routefinder/config.py<br>
 4. You should fit it into an WSGI supporting server like nginx.<br>
 ---------------------------------------------
