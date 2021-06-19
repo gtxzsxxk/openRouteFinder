@@ -6,5 +6,5 @@ NAVDAT_CYCLE = "2102,25FEB25MAR/21,2101,28JAN24FEB/21"
 
 # Website functions.
 LISTEN_PORT = 9807
-YourBingMapsKey = "AuB2y4-uXVJCqA56w85A-kwhRMjaYJ_P1Ed6qLwhT5Ti1Cd93y5C87q1QIpXwtWW"
-BackstageKey = "acoustic"
+YourBingMapsKey = "Use Your Own Key"
+BackstageKey = "set your self"
