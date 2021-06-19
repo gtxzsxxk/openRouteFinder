@@ -1,5 +1,3 @@
-import threading
-import time
 import RouteFinderLib
 import pickle
 import config
@@ -22,31 +20,32 @@ IID是点在nodeList的下标。使用IID表示点是为了迅速的找点。
 读出出度指向的下一个点，直接使用IID访问，提高了dijkstra执行效率。
 """
 
-navRTE=open(config.SET_NAVDAT_PATH,"rb")
-PerloadNodeList=pickle.load(navRTE)
+navRTE = open(config.SET_NAVDAT_PATH, "rb")
+PerloadNodeList = pickle.load(navRTE)
 navRTE.close()
 
-apDat=open(config.SET_APDAT_PATH,"rb")
-RouteFinderLib.airport_maps=pickle.load(apDat)
+apDat = open(config.SET_APDAT_PATH, "rb")
+RouteFinderLib.airport_maps = pickle.load(apDat)
 apDat.close()
 
-def SearchRoute(orig,dest):
-    objsearch=RouteFinderLib.RTFCALC()
-    if RouteFinderLib.airport_maps.__contains__(orig)==False or RouteFinderLib.airport_maps.__contains__(dest)==False:
+
+def SearchRoute(orig, dest):
+    if RouteFinderLib.airport_maps.__contains__(orig) is False or RouteFinderLib.airport_maps.__contains__(dest) is False:
         return None
-    objsearch.nodeList=PerloadNodeList
-    objsearch.startNode=objsearch.ReadSIDAirport(orig)
-    objsearch.endNode=objsearch.ReadSTARAirport(dest)
-    ans=objsearch.Dijkstra(objsearch.startNode.iid,objsearch.endNode.iid)
+    objsearch = RouteFinderLib.RTFCALC()
+    objsearch.nodeList = PerloadNodeList
+    objsearch.startNode = objsearch.ReadSIDAirport(orig)
+    objsearch.endNode = objsearch.ReadSTARAirport(dest)
+    ans = objsearch.Dijkstra(objsearch.startNode.iid, objsearch.endNode.iid)
+    if objsearch.startNode is None or objsearch.endNode is None:
+        return None
     del objsearch
     return ans
 
-navRTE=open(config.SET_NAVDAT_PATH,"rb")
-RouteFinderLib.nodeList=pickle.load(navRTE)
-navRTE.close()
+
 while True:
-    orig=input("请输入您的起始机场ICAO：")
-    dest=input("请输入您的终止机场ICAO：")
-    endNode=None
-    #orig="ZGHA";dest="ZJSY"
-    SearchRoute(orig,dest)
+    orig = input("请输入您的起始机场ICAO：")
+    dest = input("请输入您的终止机场ICAO：")
+    endNode = None
+    # orig="ZGHA";dest="ZJSY"
+    print(SearchRoute(orig, dest))
