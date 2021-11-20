@@ -57,27 +57,27 @@
             </div>
         </div>
         <div class="row">
-            <div class="col-md-2 col-6">
+            <div class="col-sm-2 col-6">
                 <div style="margin-top:10px" class="form-group">
                     <label>出发机场</label>
                     <input type="text" class="form-control" style="text-transform:uppercase" maxlength="4"
-                        placeholder="DEP" v-model="deperature">
+                        placeholder="DEP" v-model="departure">
                 </div>
             </div>
-            <div class="col-md-2 col-6">
+            <div class="col-sm-2 col-6">
                 <div style="margin-top:10px" class="form-group">
                     <label>到达机场</label>
                     <input type="text" class="form-control" style="text-transform:uppercase" maxlength="4"
                         placeholder="ARR" v-model="arrival">
                 </div>
             </div>
-            <div class="col-md-2 col-6">
+            <div class="col-sm-2 col-6">
                 <div style="margin-top:10px">
                     <label>验证码图像</label>
                     <img v-bind:src="validsrc" style="width: 113.4px;height: 37.99px;" />
                 </div>
             </div>
-            <div class="col-md-2 col-6">
+            <div class="col-sm-2 col-6">
                 <div style="margin-top:10px" class="form-group">
                     <label>确认验证码</label>
                     <input type="text" class="form-control" maxlength="4" placeholder="****" v-model="validcode">
@@ -94,26 +94,35 @@
         <div class="row" v-show="resultdisp" id='resultdisplayer'>
             <div class="col-sm-6">
                 <div id="mapContainer" style="margin-top: 20px;height: 500px;"></div>
-                <div class="table-responsive" style="margin-top: 10px;">
-                    <table class="table table-striped table-hover" v-if="resultdisp">
-                        <thead>
-                            <tr>
-                                <th>机场</th>
-                                <th>纬度</th>
-                                <th>经度</th>
-                                <th>跑道</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr v-for="(item,i) in dep_arr_rwy">
-                                <td>{{item[0]}}</td>
-                                <td>{{item[1].toFixed(3)}}</td>
-                                <td>{{item[2].toFixed(3)}}</td>
-                                <td><span v-for="(sitem,si) in item[3]">{{sitem}}&nbsp;</span></td>
+                <div class="card" style="margin-top: 10px" v-if="resultdisp">
+                    <div class="card-body">
+                        <h4 class="card-title">机场信息</h4>
+                        <!--div class="table-responsive" style="margin-top: 10px;">
+                            <table class="table table-striped table-hover" v-if="resultdisp">
+                                <thead>
+                                    <tr>
+                                        <th>机场</th>
+                                        <th>纬度</th>
+                                        <th>经度</th>
+                                        <th>跑道</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr v-for="(item,i) in dep_arr_rwy">
+                                        <td>{{item[0]}}</td>
+                                        <td>{{item[1].toFixed(3)}}</td>
+                                        <td>{{item[2].toFixed(3)}}</td>
+                                        <td><span v-for="(sitem,si) in item[3]">{{sitem}}&nbsp;</span></td>
 
-                            </tr>
-                        </tbody>
-                    </table>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div-->
+                        <blockquote v-for="(item,i) in dep_arr_rwy">
+                            <h6>{{item[3]}}</h6> ICAO:{{item[0]}} 纬度：{{item[1].toFixed(3)}} 经度：{{item[2].toFixed(3)}}
+                            可用跑道：<span v-for="(sitem,si) in item[4]">{{sitem}}&nbsp;</span>
+                        </blockquote>
+                    </div>
                 </div>
             </div>
             <div class="col-sm-6" style="margin-top: 20px;" id="resultdisp">
@@ -153,6 +162,12 @@
                                 </div>
                             </div>
                         </div>
+                        <blockquote>
+                            {{weatherDEP}}
+                        </blockquote>
+                        <blockquote>
+                            {{weatherARR}}
+                        </blockquote>
                         <div id="accordion">
                             <div class="card">
                                 <div class="card-header">
@@ -224,6 +239,9 @@
             app.btn_text = "查询";
             app.serverQueryTime = jsonObj.total_time;
             app.distance = jsonObj.distance;
+            app.weatherDEP = jsonObj.weather[0];
+            app.weatherARR = jsonObj.weather[1];
+            app.airportName = jsonObj.airportName;
             SIDnode = jsonObj.nodeinformation[1];
             STARnode = jsonObj.nodeinformation[jsonObj.nodeinformation.length - 2];
             let SID_PROG = jsonObj.DepArrProc[SIDnode[0]];
@@ -347,7 +365,7 @@
                 ex = STARLIST[0][1];
                 ey = STARLIST[0][2];
             }
-            
+
             //Display Arrival Node on the map
             let arr_runway_direction = parseInt(STAR_RUNWAY) * 10;
             window.arr_runway_direction = arr_runway_direction;
@@ -402,7 +420,7 @@
                 validsrc: window.location.href.split('#')[0] + "/getImage",
                 btn_text: "查询",
                 btn_available: true,
-                deperature: "ZGHA",
+                departure: "ZGHA",
                 arrival: "ZJSY",
                 validcode: "",
                 route: "",
@@ -413,7 +431,10 @@
                 STAR_PROG: [],
                 SID_CHOSEN: 0,
                 STAR_CHOSEN: 0,
-                node_infor: []
+                node_infor: [],
+                weatherDEP: "",
+                weatherARR: "",
+                airportName: []
             },
             computed: {
                 dep_arr_rwy: function () {
@@ -436,8 +457,10 @@
                                 STAR_RUNWAY.push(RtfDataStruct.DepArrProc[STARnode[0]][i][1]);
                         }
                     }
-
+                    console.log(RtfDataStruct.airportName);
+                    dep_airport.push(RtfDataStruct.airportName[0]);
                     dep_airport.push(SID_RUNWAY);
+                    arr_airport.push(RtfDataStruct.airportName[1]);
                     arr_airport.push(STAR_RUNWAY);
                     return [dep_airport, arr_airport];
                 }
@@ -448,7 +471,7 @@
                     this.btn_text = "正在查询航路";
                     queryTime = 0;
                     INT = window.setInterval(TimerTick, 10);
-                    let requestUrl = window.location.href.split('#')[0] + "/getRoute?from=" + this.deperature.toUpperCase() + "&dest=" + this.arrival.toUpperCase() + "&valid=" + this.validcode;
+                    let requestUrl = window.location.href.split('#')[0] + "/getRoute?from=" + this.departure.toUpperCase() + "&dest=" + this.arrival.toUpperCase() + "&valid=" + this.validcode;
                     $.ajax({
                         url: requestUrl,
                         type: "get",

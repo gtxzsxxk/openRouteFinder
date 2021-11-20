@@ -9,6 +9,7 @@ import config
 import traceback
 import requests
 import json
+import metarKeeper
 
 
 class RouteRequest:
@@ -117,10 +118,12 @@ class SessionHandler(threading.Thread):
                         HttpResponse(self.client_socket, "无法解析航路或查询的数据不存在。")
                         requestList.remove(remoteInstance)
                     else:
-                        rte = json.loads(data)["route"]
+                        touser=json.loads(data)
+                        rte = touser["route"]
+                        touser["weather"]=[mk.readMetar(ORIG),mk.readMetar(DEST)]
                         if rte not in rteGroup:
                             rteGroup.append(rte)
-                        HttpResponse(self.client_socket, data)
+                        HttpResponse(self.client_socket, json.dumps(touser))
                         requestList.remove(remoteInstance)
                 else:
                     HttpResponse(self.client_socket, "No Result.")
@@ -206,6 +209,8 @@ def SearchRoute(orig, dest):
     del objsearch
     return ans
 
+mk=metarKeeper.metarKeeper()
+mk.start()
 
 server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 server_socket.bind(("", config.LISTEN_PORT))

@@ -93,13 +93,15 @@ class RouteInformation:
     nodeinformation = []
     # 进离场信息
     DepArrProc = {}
+    airportName=[]
 
-    def __init__(self, sttime: str, route: str, dist: str, listobj: list, DepArrProc: dict):
+    def __init__(self, sttime: str, route: str, dist: str, listobj: list, DepArrProc: dict,airportName:list):
         self.total_time = sttime
         self.route = route
         self.distance = dist
         self.nodeinformation = listobj
         self.DepArrProc = DepArrProc
+        self.airportName=airportName
 
     def GetJSON(self):
         dict_temp = {}
@@ -109,6 +111,7 @@ class RouteInformation:
         dict_temp['distance'] = self.distance
         dict_temp['nodeinformation'] = self.nodeinformation
         dict_temp['DepArrProc'] = self.DepArrProc
+        dict_temp['airportName'] = self.airportName
         return json.dumps(dict_temp)
 
 
@@ -127,6 +130,9 @@ class RTFCALC:
     {‘进离场点名称':[ '程序名称','使用跑道',['点名称',纬度，经度] ] }
     """
     DepArrProc = {}
+
+    # 机场名称
+    airportName=[]
 
     """ For Data Read Only """
     nodeReadCnt = 0
@@ -211,7 +217,7 @@ class RTFCALC:
             nodesinfor = self.getEveryNodeInforList(targetNode.routelist)
             # 创建查询结果对象
             routeObj = RouteInformation(
-                sttime, routeTotal, distStr, nodesinfor, self.DepArrProc)
+                sttime, routeTotal, distStr, nodesinfor, self.DepArrProc,self.airportName)
 
         # 转化为JSON数据输出
         return routeObj.GetJSON()
@@ -268,6 +274,7 @@ class RTFCALC:
         apLon = 0.0
         for i in apdat:
             if i.__contains__(ICAO):
+                self.airportName.append(i.split(',')[2])
                 apLat = float(i.split(',')[3])
                 apLon = float(i.split(',')[4])
                 break
@@ -337,6 +344,7 @@ class RTFCALC:
         apLon = 0.0
         for i in apdat:
             if i.__contains__(ICAO):
+                self.airportName.append(i.split(',')[2])
                 apLat = float(i.split(',')[3])
                 apLon = float(i.split(',')[4])
                 break
