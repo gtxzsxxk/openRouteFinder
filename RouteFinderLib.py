@@ -272,6 +272,7 @@ class RTFCALC:
             apdat = airport_maps["GLOBAL"]
         apLat = 0.0
         apLon = 0.0
+        self.airportName=[]
         for i in apdat:
             if i.__contains__(ICAO):
                 self.airportName.append(i.split(',')[2])
