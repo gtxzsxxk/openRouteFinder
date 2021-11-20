@@ -1,5 +1,10 @@
 # Airway-Route-Finder
-#### 在线演示：http://routefinder.top:9807/
+#### 在线演示：http://routefinder.top/
+#### 如何上手急用
+1. 克隆当前分支
+2. 配置config.py
+3. 运行`python3 webFinder.py`
+4. 高枕无忧
 #### Update comments
 1. This branch is an old branch of project Airway-Route-Finder,featuring the server written in python by myself and an offline python client. <br>
 2. Clone this project to your server or pc,make sure apData_as_v110_2006.dat NotoSansHans-Regular.ttf and navRTE_as_v110_2006.dat exist.If you don't have them,
