@@ -25,18 +25,15 @@ PerloadNodeList = pickle.load(navRTE)
 navRTE.close()
 
 apDat = open(config.SET_APDAT_PATH, "rb")
-RouteFinderLib.airport_maps = pickle.load(apDat)
+airport_maps = pickle.load(apDat)
 apDat.close()
 
 
 def SearchRoute(orig, dest):
-    if RouteFinderLib.airport_maps.__contains__(orig) is False or RouteFinderLib.airport_maps.__contains__(dest) is False:
+    if airport_maps.__contains__(orig) is False or airport_maps.__contains__(dest) is False:
         return None
-    objsearch = RouteFinderLib.RTFCALC()
-    objsearch.nodeList = PerloadNodeList
-    objsearch.startNode = objsearch.ReadSIDAirport(orig)
-    objsearch.endNode = objsearch.ReadSTARAirport(dest)
-    ans = objsearch.Dijkstra(objsearch.startNode.iid, objsearch.endNode.iid)
+    objsearch = RouteFinderLib.RTFCALC(airport_maps, PerloadNodeList, config.NAVDAT_CYCLE)
+    ans = objsearch.Dijkstra(orig, dest)
     if objsearch.startNode is None or objsearch.endNode is None:
         return None
     del objsearch

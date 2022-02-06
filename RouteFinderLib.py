@@ -1,14 +1,10 @@
 import math
 import time
 import heapq
-import config
 import json
 import os
 
 # IID is the index of the node in nodeList
-
-ASDATA_PATH = config.LOCAL_ASDATA_PATH
-
 
 class Edge:
     nfrom = 0  # IID
@@ -85,44 +81,20 @@ def GetDistance_KM(lat1, lon1, lat2, lon2):
     return s
 
 
-class RouteInformation:
-    total_time = ""
-    route = ""
-    distance = ""
-    # 航点信息：[名称，纬度，经度]
-    nodeinformation = []
-    # 进离场信息
-    DepArrProc = {}
-    airportName=[]
-
-    def __init__(self, sttime: str, route: str, dist: str, listobj: list, DepArrProc: dict,airportName:list):
-        self.total_time = sttime
-        self.route = route
-        self.distance = dist
-        self.nodeinformation = listobj
-        self.DepArrProc = DepArrProc
-        self.airportName=airportName
-
-    def GetJSON(self):
-        dict_temp = {}
-        dict_temp["data_version"]=config.NAVDAT_CYCLE
-        dict_temp['total_time'] = self.total_time
-        dict_temp['route'] = self.route
-        dict_temp['distance'] = self.distance
-        dict_temp['nodeinformation'] = self.nodeinformation
-        dict_temp['DepArrProc'] = self.DepArrProc
-        dict_temp['airportName'] = self.airportName
-        return json.dumps(dict_temp)
-
-
-airport_maps = {}  # {'ICAO':'alldata'}
-
+def RouteInformation(data_version: str, sttime: str, route: str, dist: str, listobj: list, DepArrProc: dict, airportName: list):
+    dict_temp = {}
+    dict_temp['data_version'] = data_version
+    dict_temp['total_time'] = sttime
+    dict_temp['route'] = route
+    dict_temp['distance'] = dist
+    dict_temp['nodeinformation'] = listobj
+    dict_temp['DepArrProc'] = DepArrProc
+    dict_temp['airportName'] = airportName
+    return json.dumps(dict_temp)
 
 class RTFCALC:
 
-    nodeList = []
     edgeRGB_dic = {}
-    startNode: Node = None
     pstartNode: searchingNode = None
 
     """
@@ -132,14 +104,19 @@ class RTFCALC:
     DepArrProc = {}
 
     # 机场名称
-    airportName=[]
+    airportName = []
 
     """ For Data Read Only """
     nodeReadCnt = 0
     edgecnt = 0
     datlen = 0
     """ End Of Data Read """
-
+    
+    def __init__(self, airport_maps, nodeList, version):
+        self.airport_maps = airport_maps
+        self.nodeList = nodeList
+        self.data_version = version
+        
     # 计算两个点之间的距离，传入的是两个点在nodeList中的下标值
     def CalcDist(self, iid1, iid2):
         nodeinstant1 = self.nodeList[iid1]
@@ -151,7 +128,11 @@ class RTFCALC:
         return GetDistance_KM(px1, py1, px2, py2)
 
     # 执行Dijkstra函数，计算航路。start是起始点的下标，end同上。
-    def Dijkstra(self, start, end):
+    def Dijkstra(self, orig, dest):
+        self.startNode = self.ReadSIDAirport(orig)
+        self.endNode = self.ReadSTARAirport(dest)
+        start = self.startNode.iid
+        end = self.endNode.iid
         timestart = time.time()
         allNodeDist = []
         for i in self.nodeList:
@@ -207,7 +188,7 @@ class RTFCALC:
         routeObj = None
         if targetNode is None:
             print("No result.")
-            routeObj = RouteInformation(sttime, "No result.", "0.00 km", None)
+            routeObj = RouteInformation(self.data_version, sttime, "No result.", "0.00 km", None, None, None)
         else:
             # 航路距离
             distStr = "%.2f km" % targetNode.dist
@@ -217,10 +198,10 @@ class RTFCALC:
             nodesinfor = self.getEveryNodeInforList(targetNode.routelist)
             # 创建查询结果对象
             routeObj = RouteInformation(
-                sttime, routeTotal, distStr, nodesinfor, self.DepArrProc,self.airportName)
+                self.data_version, sttime, routeTotal, distStr, nodesinfor, self.DepArrProc, self.airportName)
 
-        # 转化为JSON数据输出
-        return routeObj.GetJSON()
+        # 输出JSON数据
+        return routeObj
 
     def FindNodeByNAME(self, name, x, y):
         for j in self.nodeList:
@@ -257,19 +238,8 @@ class RTFCALC:
 
     def ReadSIDAirport(self, ICAO):
         ICAO = ICAO.upper()
-        datasource = ""
-        apdat = ""
-        if airport_maps.__len__() == 0:
-            file = open(ASDATA_PATH+"\\proc\\"+ICAO+".txt", "r")
-            datasource = file.read()
-            file.seek(0)
-            file.close()
-            apfile = open(ASDATA_PATH+"\\Airports.txt", "r")
-            apdat = apfile.readlines()
-            apfile.close()
-        else:
-            datasource = airport_maps[ICAO]
-            apdat = airport_maps["GLOBAL"]
+        datasource = self.airport_maps[ICAO]
+        apdat = self.airport_maps["GLOBAL"]
         apLat = 0.0
         apLon = 0.0
         self.airportName=[]
@@ -325,22 +295,8 @@ class RTFCALC:
 
     def ReadSTARAirport(self, ICAO):
         ICAO = ICAO.upper()
-        datasource = ""
-        apdat = ""
-        if airport_maps.__len__() == 0:
-            file = open(ASDATA_PATH+"\\proc\\"+ICAO+".txt", "r")
-            datasource = file.read()
-            file.seek(0)
-
-            file.close()
-
-            apfile = open(ASDATA_PATH+"\\Airports.txt", "r")
-            apdat = apfile.readlines()
-            apfile.close()
-        else:
-            datasource = airport_maps[ICAO]
-            apdat = airport_maps["GLOBAL"]
-
+        datasource = self.airport_maps[ICAO]
+        apdat = self.airport_maps["GLOBAL"]
         apLat = 0.0
         apLon = 0.0
         for i in apdat:
@@ -387,8 +343,11 @@ class RTFCALC:
         self.nodeList.append(airport_node)
         return airport_node
 
-    def ReadASData(self):
-        file = open(os.path.join(ASDATA_PATH, "ATS.txt"), "r")
+    def ReadASData(self, data_path):
+        apfile = open(os.path.join(data_path, "Airports.txt"), "r")
+        self.airport_maps["GLOBAL"] = apfile.readlines()
+        apfile.close()
+        file = open(os.path.join(data_path, "ATS.txt"), "r")
         datlines = file.readlines()
         datlen = datlines.__len__()
         nodenamelist = []  # (nodename,hash)
@@ -408,16 +367,15 @@ class RTFCALC:
                 if set2 not in nodenamelist:
                     self.nodeList.append(nod2)
                     nodenamelist.append(set2)
-                self.nodeReadCnt = self.nodeReadCnt+1
-                if self.nodeReadCnt % 3000 == 0:
-                    self.process_bar("输入点集", self.nodeReadCnt/datlen)
+            self.nodeReadCnt = self.nodeReadCnt+1
+            self.process_bar("输入点集", self.nodeReadCnt/datlen)
         edgename = ""
-        print("\r开始读边")
+        print()
+        print("开始读边")
         for i in datlines:
             if i.split(',')[0] == 'A':
                 edgename = i.split(',')[1]
-                continue
-            if i.split(',')[0] == 'S':
+            elif i.split(',')[0] == 'S':
                 previousNode = self.FindNodeByNAME(i.split(',')[1], float(
                     i.split(',')[2]), float(i.split(',')[3]))
                 nextNode = self.FindNodeByNAME(i.split(',')[4], float(
@@ -426,13 +384,13 @@ class RTFCALC:
                     Edge(previousNode, nextNode, edgename, 0,
                          0, 0))
             self.edgecnt = self.edgecnt+1
-            if self.edgecnt % 3000 == 0:
-                self.process_bar("计算航路链接", self.edgecnt/datlen)
+            self.process_bar("计算航路链接", self.edgecnt/datlen)
         file.close()
+        print()
         print("读入："+str(self.edgecnt)+"条边")
 
     def process_bar(self, name, percent, total_length=25):
-        bar = ''.join(["▮"] * int(percent * total_length)) + ''
+        bar = ''.join(["▮"] * int(round(percent) * total_length)) + ''
         bar = '\r' + '[' + \
             bar.ljust(total_length) + \
             ' {:0>4.1f}%|'.format(percent*100) + '100%,'+name+']'
