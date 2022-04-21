@@ -1,12 +1,15 @@
 # Global Settings.If finished deployments,just reset the items below.
 # LOCAL_ASDATA_PATH should be a Navigraph data of Aerosoft.
-SET_NAVDAT_PATH = "navidata_2201.map"
-SET_APDAT_PATH = "airport_2201.air"
 LOCAL_ASDATA_PATH = "/path/to/your/asdata"
-NAVDAT_CYCLE = "AIRAC;2201,27JAN24FEB/22,2113,30DEC26JAN/22"
 
-# Website functions.
+# Website function settings.
 LISTEN_PORT = 9807
 METAR_UPDATE_MINUTE = 15
 YourBingMapsKey = "Use Your Own Key"
 BackstageKey = "set your self"
+
+# Settings below would be automatically updated after running the packData.py.
+# There is no need to manually modify them if they are correct.
+SET_NAVDAT_PATH = "navidata_airport_2204.air.map"
+SET_APDAT_PATH = "airport_navidata_2204.map.air"
+NAVDAT_CYCLE = "2204,21APR19MAY/22,2203,24MAR20APR/22"
