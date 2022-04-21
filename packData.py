@@ -34,3 +34,46 @@ else:
     pickle.dump(obj.nodeList, packedFile)
     print("数据生成完毕")
     packedFile.close()
+
+#Automatically update config.py
+print('正在更新config.py配置文件')
+
+if mode == 'Y':
+    config.SET_APDAT_PATH = "airport_" + cycle + ".air"
+else:
+    config.SET_NAVDAT_PATH = "navidata_"+ cycle + ".map"
+
+with open(os.path.join(config.LOCAL_ASDATA_PATH ,'Cycle.txt'),'r+') as f:
+    config.NAVDAT_CYCLE = f.read()
+
+content = '''# Global Settings.If finished deployments,just reset the items below.
+# LOCAL_ASDATA_PATH should be a Navigraph data of Aerosoft.
+LOCAL_ASDATA_PATH = "{}"
+
+# Website function settings.
+LISTEN_PORT = {}
+METAR_UPDATE_MINUTE = {}
+YourBingMapsKey = "{}"
+BackstageKey = "{}"
+
+# Settings below would be automatically updated after running the packData.py.
+# There is no need to manually modify them if they are correct.
+SET_NAVDAT_PATH = "{}"
+SET_APDAT_PATH = "{}"
+NAVDAT_CYCLE = "{}"
+'''.format(config.LOCAL_ASDATA_PATH,
+           config.LISTEN_PORT,
+           config.METAR_UPDATE_MINUTE,
+           config.YourBingMapsKey,
+           config.BackstageKey,
+           config.SET_NAVDAT_PATH,
+           config.SET_APDAT_PATH,
+           config.NAVDAT_CYCLE)
+
+confFile = open("./config.py","w+")
+confFile.write(content)
+confFile.close()
+
+print(content)
+print('更新成功')
+
