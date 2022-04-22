@@ -81,14 +81,15 @@ def GetDistance_KM(lat1, lon1, lat2, lon2):
     return s
 
 
-def RouteInformation(data_version: str, sttime: str, route: str, dist: str, listobj: list, DepArrProc: dict, airportName: list):
+def RouteInformation(data_version: str, sttime: str, route: str, dist: str, listobj: list, SID: dict, STAR: dict, airportName: list):
     dict_temp = {}
     dict_temp['data_version'] = data_version
     dict_temp['total_time'] = sttime
     dict_temp['route'] = route
     dict_temp['distance'] = dist
     dict_temp['nodeinformation'] = listobj
-    dict_temp['DepArrProc'] = DepArrProc
+    dict_temp['SID'] = SID 
+    dict_temp['STAR'] = STAR 
     dict_temp['airportName'] = airportName
     return json.dumps(dict_temp)
 
@@ -99,9 +100,10 @@ class RTFCALC:
 
     """
     储存进离场信息。
-    {‘进离场点名称':[ '程序名称','使用跑道',['点名称',纬度，经度] ] }
+    SID/STAR = {‘进/离场点名称':[ '程序名称','使用跑道',['点名称',纬度，经度] ] }
     """
-    DepArrProc = {}
+    SID = {}
+    STAR = {}
 
     # 机场名称
     airportName = []
@@ -198,7 +200,7 @@ class RTFCALC:
             nodesinfor = self.getEveryNodeInforList(targetNode.routelist)
             # 创建查询结果对象
             routeObj = RouteInformation(
-                self.data_version, sttime, routeTotal, distStr, nodesinfor, self.DepArrProc, self.airportName)
+                self.data_version, sttime, routeTotal, distStr, nodesinfor, self.SID, self.STAR, self.airportName)
 
         # 输出JSON数据
         return routeObj
@@ -258,10 +260,6 @@ class RTFCALC:
             perline = i.split('\n')
             # print(perline)
             if perline[0].__contains__("SID,"):
-                """储存进离场信息。
-                {‘进离场点名称':[ '程序名称','使用跑道',['点名称',纬度，经度] ] }
-                DepArrProc = {}
-                """
                 nextName = perline[perline.__len__()-1].split(',')[1]
                 lat = float(perline[perline.__len__()-1].split(',')[2])
                 lon = float(perline[perline.__len__()-1].split(',')[3])
@@ -285,11 +283,11 @@ class RTFCALC:
                             [tt.split(',')[1], float(tt.split(',')[2]), float(tt.split(',')[3])])
                 proc=[perline[0].split(',')[1], perline[0].split(',')[2], tempnodeinfor]
                 print("机场"+ICAO+"添加进离场程序:",proc[0])
-                if not self.DepArrProc.__contains__(tfNode.name):
-                    self.DepArrProc[tfNode.name] = [proc]
+                if not self.SID.__contains__(tfNode.name):
+                    self.SID[tfNode.name] = [proc]
                 else:
-                    if not proc in self.DepArrProc[tfNode.name]:
-                        self.DepArrProc[tfNode.name].append(proc)
+                    if not proc in self.SID[tfNode.name]:
+                        self.SID[tfNode.name].append(proc)
         self.nodeList.append(airport_node)
         return airport_node
 
@@ -335,11 +333,11 @@ class RTFCALC:
                             [tt.split(',')[1], float(tt.split(',')[2]), float(tt.split(',')[3])])
                 proc=[perline[0].split(',')[1], perline[0].split(',')[2], tempnodeinfor]
                 print("机场"+ICAO+"添加进离场程序:",proc[0])
-                if not self.DepArrProc.__contains__(tfNode.name):
-                    self.DepArrProc[tfNode.name] = [proc]
+                if not self.STAR.__contains__(tfNode.name):
+                    self.STAR[tfNode.name] = [proc]
                 else:
-                    if not proc in self.DepArrProc[tfNode.name]:
-                        self.DepArrProc[tfNode.name].append(proc)
+                    if not proc in self.STAR[tfNode.name]:
+                        self.STAR[tfNode.name].append(proc)
         self.nodeList.append(airport_node)
         return airport_node
 
