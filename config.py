@@ -10,6 +10,6 @@ BackstageKey = "set your self"
 
 # Settings below would be automatically updated after running the packData.py.
 # There is no need to manually modify them if they are correct.
-SET_NAVDAT_PATH = "navidata_airport_2204.air.map"
-SET_APDAT_PATH = "airport_navidata_2204.map.air"
+SET_NAVDAT_PATH = "navidata_2204.map"
+SET_APDAT_PATH = "airport_2204.air"
 NAVDAT_CYCLE = "2204,21APR19MAY/22,2203,24MAR20APR/22"

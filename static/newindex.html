@@ -244,12 +244,12 @@
             app.airportName = jsonObj.airportName;
             SIDnode = jsonObj.nodeinformation[1];
             STARnode = jsonObj.nodeinformation[jsonObj.nodeinformation.length - 2];
-            let SID_PROG = jsonObj.DepArrProc[SIDnode[0]];
+            let SID_PROG = jsonObj.SID[SIDnode[0]];
             app.SID_PROG.length = 0;
             for (let i in SID_PROG) {
                 app.SID_PROG.push(SID_PROG[i][0]);
             }
-            let STAR_PROG = jsonObj.DepArrProc[STARnode[0]];
+            let STAR_PROG = jsonObj.STAR[STARnode[0]];
             app.STAR_PROG.length = 0;
             for (let i in STAR_PROG) {
                 app.STAR_PROG.push(STAR_PROG[i][0]);
