@@ -276,20 +276,20 @@
             SIDNAME = app.SID_PROG[app.SID_CHOSEN];
             let SIDLIST = [];
             let SID_RUNWAY = '';
-            for (let i in RtfDataStruct.DepArrProc[SIDnode[0]]) {
-                if (RtfDataStruct.DepArrProc[SIDnode[0]][i][0] == SIDNAME) {
-                    SIDLIST = RtfDataStruct.DepArrProc[SIDnode[0]][i][2];
-                    SID_RUNWAY = RtfDataStruct.DepArrProc[SIDnode[0]][i][1];
+            for (let i in RtfDataStruct.SID[SIDnode[0]]) {
+                if (RtfDataStruct.SID[SIDnode[0]][i][0] == SIDNAME) {
+                    SIDLIST = RtfDataStruct.SID[SIDnode[0]][i][2];
+                    SID_RUNWAY = RtfDataStruct.SID[SIDnode[0]][i][1];
                     break;
                 }
             }
             STARNAME = app.STAR_PROG[app.STAR_CHOSEN];
             let STARLIST = [];
             let STAR_RUNWAY = '';
-            for (let i in RtfDataStruct.DepArrProc[STARnode[0]]) {
-                if (RtfDataStruct.DepArrProc[STARnode[0]][i][0] == STARNAME) {
-                    STARLIST = RtfDataStruct.DepArrProc[STARnode[0]][i][2];
-                    STAR_RUNWAY = RtfDataStruct.DepArrProc[STARnode[0]][i][1];
+            for (let i in RtfDataStruct.STAR[STARnode[0]]) {
+                if (RtfDataStruct.STAR[STARnode[0]][i][0] == STARNAME) {
+                    STARLIST = RtfDataStruct.STAR[STARnode[0]][i][2];
+                    STAR_RUNWAY = RtfDataStruct.STAR[STARnode[0]][i][1];
                     break;
                 }
             }
@@ -443,18 +443,18 @@
 
                     let SIDNAME = app.SID_PROG[app.SID_CHOSEN];
                     let SID_RUNWAY = [];
-                    for (let i in RtfDataStruct.DepArrProc[SIDnode[0]]) {
-                        if (RtfDataStruct.DepArrProc[SIDnode[0]][i][0] == SIDNAME) {
-                            if (SID_RUNWAY.indexOf(RtfDataStruct.DepArrProc[SIDnode[0]][i][1]) == -1)
-                                SID_RUNWAY.push(RtfDataStruct.DepArrProc[SIDnode[0]][i][1]);
+                    for (let i in RtfDataStruct.SID[SIDnode[0]]) {
+                        if (RtfDataStruct.SID[SIDnode[0]][i][0] == SIDNAME) {
+                            if (SID_RUNWAY.indexOf(RtfDataStruct.SID[SIDnode[0]][i][1]) == -1)
+                                SID_RUNWAY.push(RtfDataStruct.SID[SIDnode[0]][i][1]);
                         }
                     }
                     let STARNAME = app.STAR_PROG[app.STAR_CHOSEN];
                     let STAR_RUNWAY = [];
-                    for (let i in RtfDataStruct.DepArrProc[STARnode[0]]) {
-                        if (RtfDataStruct.DepArrProc[STARnode[0]][i][0] == STARNAME) {
-                            if (STAR_RUNWAY.indexOf(RtfDataStruct.DepArrProc[STARnode[0]][i][1]) == -1)
-                                STAR_RUNWAY.push(RtfDataStruct.DepArrProc[STARnode[0]][i][1]);
+                    for (let i in RtfDataStruct.STAR[STARnode[0]]) {
+                        if (RtfDataStruct.STAR[STARnode[0]][i][0] == STARNAME) {
+                            if (STAR_RUNWAY.indexOf(RtfDataStruct.STAR[STARnode[0]][i][1]) == -1)
+                                STAR_RUNWAY.push(RtfDataStruct.STAR[STARnode[0]][i][1]);
                         }
                     }
                     console.log(RtfDataStruct.airportName);

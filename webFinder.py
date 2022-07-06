@@ -126,7 +126,7 @@ class SessionHandler(threading.Thread):
                         HttpResponse(self.client_socket, json.dumps(touser))
                         requestList.remove(remoteInstance)
                 else:
-                    HttpResponse(self.client_socket, "No Result.")
+                    HttpResponse(self.client_socket, "鉴权失败。")
             elif command.__contains__("/getImage"):
                 requestInstance = RouteRequest(client_address)
                 imageBytes = validcode.getImageBytes(requestInstance.validnum)
@@ -143,13 +143,6 @@ class SessionHandler(threading.Thread):
                 b64=validcode.RotateImage(angle)
                 HttpResponse(self.client_socket, b64)
                 #self.client_socket.send(bytes("HTTP/1.1 200 OK\r\nContent-type:image/png\r\n\r\n"+b64, "utf-8"))
-
-            elif command.__contains__("/alldatafile.zip"):
-                zipfile = open("static/alldatafile.zip", "rb")
-                bytdata = zipfile.read()
-                zipfile.close()
-                self.client_socket.send(bytes("HTTP/1.1 200 OK\r\nContent-type:application/octet-stream\r\nAccept-Ranges:bytes\r\nAccept-Length:"+str(bytdata.__len__()) +
-                                              "\r\nContent-Disposition: attachment; filename=alldatafile.zip\r\n\r\n", "utf-8")+bytdata)
 
             elif command.__contains__("/favicon.ico"):
                 favdat = open("static/favicon.ico", "rb")
