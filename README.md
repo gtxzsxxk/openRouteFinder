@@ -2,7 +2,8 @@
 # <center>Airway-Route-Finder</center>
 #### <center>This is a Web version working in Django Framework</center>
 --------------------------------------------
-#### 在线演示：http://www.routefinder.top
+#### I'm going to rewrite it one day !!!!!!!!!!!!!!
+#### 在线演示：http://routefinder.top
 #### Update comments
 1. This branch is the latest branch of project Airway-Route-Finder,featuring Django's using. <br>
 2. Clone this project to your server or pc,make sure apData_as_v110_2006.dat NotoSansHans-Regular.ttf and navRTE_as_v110_2006.dat exist in folder routefinder.If you don't have them,
