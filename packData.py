@@ -3,10 +3,10 @@ import RouteFinderLib
 import os
 import config
 
-mode = input("Read Airports' data?(Y/N):")
-cycle = input("Input Data Version:")
+mode = input("Read Airports' data?(y/n strictly):")
+cycle = input("Input Data Version (such as 2206):")
 
-if mode == "Y":
+if mode == "y":
     airport_data = {}
     for home, dirs, files in os.walk(os.path.join(config.LOCAL_ASDATA_PATH, "proc")):
         for filename in files:
@@ -38,7 +38,7 @@ else:
 #Automatically update config.py
 print('正在更新config.py配置文件')
 
-if mode == 'Y':
+if mode == 'y':
     config.SET_APDAT_PATH = "airport_" + cycle + ".air"
 else:
     config.SET_NAVDAT_PATH = "navidata_"+ cycle + ".map"

@@ -177,7 +177,7 @@ class SessionHandler(threading.Thread):
 
 
 def GetWebPageData():
-    webfile = open("static/newindex.html", "r", encoding='UTF-8')
+    webfile = open("static/index.html", "r", encoding='UTF-8')
     webpagedat = webfile.read()
     webfile.close()
 
