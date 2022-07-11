@@ -2,9 +2,9 @@
 # <center>Airway-Route-Finder</center>
 #### <center>This is a Web version working in Django Framework</center>
 --------------------------------------------
-# I'm going to rewrite it one day !!!!!!!!!!!!!!
+# I'm going to rewrite it in golang one day !!!!!!!!!!!!!!
 # Airway-Route-Finder
-#### 在线演示：http://routefinder.top:9807/
+#### 在线演示：http://routefinder.top/
 #### 如何上手急用
 1. 克隆当前分支
 2. 配置config.py
