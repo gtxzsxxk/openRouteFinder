@@ -1,6 +1,5 @@
 ![Airway-Route-Finder](https://socialify.git.ci/shinoyasan/Airway-Route-Finder/image?description=1&font=KoHo&forks=1&issues=1&language=1&logo=https%3A%2F%2Fs3.ax1x.com%2F2020%2F12%2F30%2FrX9Ayt.png&owner=1&pattern=Overlapping%20Hexagons&pulls=1&stargazers=1&theme=Light)
 # <center>Airway-Route-Finder</center>
-#### <center>This is a Web version working in Django Framework</center>
 --------------------------------------------
 # I'm going to rewrite it in golang one day !!!!!!!!!!!!!!
 # Airway-Route-Finder
@@ -10,12 +9,7 @@
 2. 配置config.py
 3. 运行`python3 webFinder.py`
 4. 高枕无忧
-#### Update comments
-1. This branch is an old branch of project Airway-Route-Finder,featuring the server written in python by myself and an offline python client. <br>
-2. Clone this project to your server or pc,make sure apData_as_v110_2006.dat NotoSansHans-Regular.ttf and navRTE_as_v110_2006.dat exist.If you don't have them,
-you can make it by yourself through packData.py(you should have installed aerosoft navigraph data before),or download it at http://www.routefinder.top/alldatafile.zip<br>
-3. Then modify config.py<br>
-4. To start a local client,just start routefinder.py.To start a server,just start webFinder.py.<br>
+5. 下面的简介并不适用于当前版本。但上面4步是`TOTALLY RELIABLE`
 #### 简介
 RouteFinderLib是由Python编写的开源航路查询库。<br>
 使用dijkstra算法和aerosoft的导航数据。navRTE_as.dat是预烘焙好的航路数据文件。版本是1805。<br>
