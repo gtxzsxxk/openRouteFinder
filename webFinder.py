@@ -45,7 +45,7 @@ def IPGET(ip):
 
 
 def HttpResponse(sock: socket.socket, dat: str):
-    head = "HTTP/1.1 200 OK\r\nContent-Type:text/html\r\nServer: shinoyasan/AirwayRouteFinder\r\nAccess-Control-Allow-Origin: *\r\n\r\n"
+    head = "HTTP/1.1 200 OK\r\nContent-Type:text/html\r\nServer: gtxzsxxk/AirwayRouteFinder\r\nAccess-Control-Allow-Origin: *\r\n\r\n"
     total = head+dat
     sock.send(bytes(total, "utf-8"))
 
