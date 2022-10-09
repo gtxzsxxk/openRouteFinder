@@ -190,10 +190,10 @@ class RTFCALC:
         routeObj = None
         if targetNode is None:
             print("No result.")
-            routeObj = RouteInformation(self.data_version, sttime, "No result.", "0.00 km", None, None, None)
+            routeObj = RouteInformation(self.data_version, sttime, "No result.", "0.00 nm / 0.00 km", None, None, None)
         else:
             # 航路距离
-            distStr = "%.2f km" % targetNode.dist
+            distStr = "%.2f nm / %.2f km" % (targetNode.dist/1.852,targetNode.dist)
             # 合并同一条航线上的航点
             routeTotal = self.SortRoute(targetNode.routelist)
             print(routeTotal, targetNode.dist)
