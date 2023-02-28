@@ -1,7 +1,7 @@
 ![Airway-Route-Finder](https://socialify.git.ci/gtxzsxxk/Airway-Route-Finder/image?description=1&font=KoHo&forks=1&issues=1&language=1&logo=https%3A%2F%2Fs3.ax1x.com%2F2020%2F12%2F30%2FrX9Ayt.png&owner=1&pattern=Overlapping%20Hexagons&pulls=1&stargazers=1&theme=Light)
 # <center>Airway-Route-Finder</center>
 --------------------------------------------
-# I'm going to rewrite it in golang one day !!!!!!!!!!!!!!
+# ~I'm going to rewrite it in golang one day~ Nomore golang I say. I love python. !!!!!!!!!!!!!!
 # Airway-Route-Finder
 #### 在线演示：http://routefinder.top/
 #### 如何上手急用
