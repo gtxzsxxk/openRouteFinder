@@ -1,6 +1,7 @@
+#include "NavDataReader.h"
 #include <iostream>
 
 int main() {
-    std::cout << "Hello, World!" << std::endl;
+    auto Reader = NavDataReader("../tests/navdata/");
     return 0;
 }

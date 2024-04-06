@@ -3,4 +3,6 @@ project(openRouteFinder)
 
 set(CMAKE_CXX_STANDARD 20)
 
-add_executable(openRouteFinder src/main.cpp)
+add_executable(openRouteFinder src/main.cpp
+        src/NavDataReader.cpp
+        src/NavDataReader.h)
