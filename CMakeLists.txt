@@ -3,4 +3,4 @@ project(openRouteFinder)
 
 set(CMAKE_CXX_STANDARD 20)
 
-add_executable(openRouteFinder main.cpp)
+add_executable(openRouteFinder src/main.cpp)
