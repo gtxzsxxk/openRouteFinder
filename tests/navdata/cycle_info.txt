@@ -1,0 +1,18 @@
+AIRAC cycle    : 2402
+Version        : 1
+Valid (from/to): 22/FEB/2024 - 21/MAR/2024
+
+Forum          : http://forum.navigraph.com
+
+Data provided by Navigraph - www.navigraph.com - Source data copyright (c) 2024 Jeppesen
+This data may be used for ground based recreational computer game
+simulation software only, and may not be recompiled, interpreted,
+or distributed for any purpose without the written consent of Navigraph.
+The contents of this database is dated and must not be used for real
+world navigation as it is unlawful and unsafe to do so.
+
+This file is intended for Navigraph support use only and may not be changed, read or
+further processed by any 3rd party developer/addon.
+
+Parser-Version : DFD v1.0 24.0115 (c) Richard Stefan
+Files parsed on: 11/02/2024
