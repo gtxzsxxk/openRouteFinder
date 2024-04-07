@@ -32,7 +32,7 @@ enum NAVAID_FREQ_UNIT {
 };
 
 enum AIRWAY_TYPE {
-    AIRWAY_LOW,
+    AIRWAY_LOW = 1,
     AIRWAY_HIGH
 };
 
