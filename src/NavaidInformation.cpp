@@ -4,6 +4,7 @@
 
 #include "NavaidInformation.h"
 #include <cstdio>
+#include <cmath>
 
 NavaidInformation::NavaidInformation(const std::string &Line, int &Failed, bool FromFixes) {
     /* 12  48.364333333   17.198027778     2357    11600    25      0.000  MLC ENRT LZ CMELE (MALACKY) TACAN DME */
@@ -62,4 +63,32 @@ std::string NavaidInformation::toUniqueKey(const NavaidInformation &navaidInform
 
 std::string NavaidInformation::toUniqueKey(const std::string &Identifier, const std::string &RegionCode) {
     return Identifier + " " + RegionCode;
+}
+
+const std::string &NavaidInformation::getIdentifier() const {
+    return Identifier;
+}
+
+const std::string &NavaidInformation::getRegionCode() const {
+    return RegionCode;
+}
+
+
+double NavaidInformation::operator*(const NavaidInformation &node) const {
+    const auto PI = 3.1415926;
+    const auto EARTH_RADIUS = 6378.137;
+
+    auto Rad = [PI](double deg) { return deg * PI / 180.0; };
+    auto radLat1 = Rad(Latitude);
+    auto radLat2 = Rad(node.Latitude);
+    auto a = radLat1 - radLat2;
+    auto b = Rad(Longitude) - Rad(node.Longitude);
+    auto s = 2 * asin(sqrt(pow(sin(a / 2), 2) + cos(radLat1) * cos(radLat2) * pow(sin(b / 2), 2)));
+    s *= EARTH_RADIUS;
+
+    return s;
+}
+
+const std::vector<Airway> &NavaidInformation::getEdges() const {
+    return Edges;
 }
