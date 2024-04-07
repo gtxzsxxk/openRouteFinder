@@ -3,34 +3,31 @@
 //
 
 #include "NavaidInformation.h"
-#include <sstream>
-#include <regex>
-#include <chrono>
+#include <cstdio>
 
-NavaidInformation::NavaidInformation(const std::string &Line) {
+NavaidInformation::NavaidInformation(const std::string &Line, int &Failed) {
     /* 12  48.364333333   17.198027778     2357    11600    25      0.000  MLC ENRT LZ CMELE (MALACKY) TACAN DME */
-    auto t1=std::chrono::steady_clock::now();
-    std::stringstream stream(Line);
     int typeCode;
+    [[gnu::unused]] char unusedData[16];
     [[gnu::unused]] double unusedClass;
-    stream >> typeCode;
-    Type = (NAVAID_CODE) typeCode;
-    stream >> Latitude;
-    stream >> Longitude;
-    stream >> Elevation;
-    stream >> Freq;
-    stream >> typeCode;
-    stream >> unusedClass;
-    stream >> Identifier;
-    stream >> ICAO;
-    stream >> RegionCode;
-    std::getline(stream, FullName);
-    auto t2=std::chrono::steady_clock::now();
-    auto dr_us=std::chrono::duration<double,std::micro>(t2-t1).count();
-}
+    char ICAOBuffer[16];
+    char IdentifierBuffer[16];
+    char RegionCodeBuffer[16];
+    char FullNameBuffer[32];
 
-bool NavaidInformation::validNavaidLine(const std::string &Line) {
-    static const std::regex reg(
-            R"(^[0-9]+\s*[0-9]+\.*[0-9]+\s*[0-9]+\.*[0-9]+\s*[0-9]+\s*[0-9]+\s*[0-9]+\s*[0-9]+\.*[0-9]+\s*\w+\s*\w+\s*\w+\s*.*$)");
-    return std::regex_match(Line, reg);
+    int result = sscanf(Line.c_str(), "%d %lf %lf %d %d %s %lf %s %s %s %[^\\n]", &typeCode,
+                        &Latitude, &Longitude, &Elevation, &Freq, unusedData, &unusedClass, IdentifierBuffer,
+                        ICAOBuffer, RegionCodeBuffer, FullNameBuffer);
+
+    if (result != 11) {
+        Failed = 1;
+    } else {
+        Failed = 0;
+    }
+
+    Type = (NAVAID_CODE) typeCode;
+    Identifier = std::string(IdentifierBuffer);
+    ICAO = std::string(ICAOBuffer);
+    RegionCode = std::string(RegionCodeBuffer);
+    FullName = std::string(FullNameBuffer);
 }

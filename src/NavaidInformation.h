@@ -36,8 +36,7 @@ class NavaidInformation {
     std::string RegionCode;
     std::string FullName;
 public:
-    static bool validNavaidLine(const std::string &Line);
-    NavaidInformation(const std::string &Line);
+    NavaidInformation(const std::string &Line, int &Failed);
 };
 
 

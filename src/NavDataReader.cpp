@@ -59,12 +59,14 @@ void NavDataReader::readAllNavaids() {
         std::string buffer;
         std::getline(input, buffer);
         double dr_us;
-        auto t1=std::chrono::steady_clock::now();
-        if (NavaidInformation::validNavaidLine(buffer)) {
-            auto t2=std::chrono::steady_clock::now();
-            Navaids.emplace_back(buffer);
-
-            dr_us=std::chrono::duration<double,std::micro>(t2-t1).count();
+        auto t1 = std::chrono::steady_clock::now();
+        auto t2 = std::chrono::steady_clock::now();
+        int failed = 0;
+        auto node = NavaidInformation(buffer, failed);
+        if (!failed) {
+            Navaids.emplace_back(std::move(node));
         }
+
+        dr_us = std::chrono::duration<double, std::micro>(t2 - t1).count();
     }
 }
