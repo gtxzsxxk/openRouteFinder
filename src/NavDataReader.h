@@ -31,8 +31,8 @@ class NavDataReader {
 
     static std::string getStringFromRegex(const std::string &Source, const std::string &RegexStr);
 
-    std::map<std::string, NavaidInformation> Navaids;
-    std::map<std::string, NavaidInformation> FixesCache;
+    mutable std::map<std::string, NavaidInformation> Navaids;
+    mutable std::map<std::string, NavaidInformation> FixesCache;
 
     const NavaidInformation *
     getNodeFromNavaidsOrFixesCache(const std::string &Identifier, const std::string &RegionCode, int FromType);
@@ -46,7 +46,11 @@ public:
 
     void readAirways();
 
-    const NavaidInformation *getNodeFromNavaids(const std::string &Identifier, const std::string &RegionCode);
+    const NavaidInformation *getNodeFromNavaids(const std::string &Identifier, const std::string &RegionCode) const;
+
+    const NavaidInformation *getNodeFromNavaids(const NavaidInformation &Node) const;
+
+    [[nodiscard]] const std::map<std::string, NavaidInformation> &getNavaids() const;
 };
 
 
