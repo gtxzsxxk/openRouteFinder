@@ -6,6 +6,8 @@
 #define OPENROUTEFINDER_NAVAIDINFORMATION_H
 
 #include <string>
+#include <utility>
+#include <vector>
 
 enum NAVAID_CODE {
     NAVAID_CODE_NDB = 2,
@@ -29,16 +31,38 @@ enum NAVAID_FREQ_UNIT {
     FREQ_MHZ
 };
 
+enum AIRWAY_TYPE {
+    AIRWAY_LOW,
+    AIRWAY_HIGH
+};
+
+class NavaidInformation;
+
+class Airway {
+public:
+    std::string Name;
+    std::string NextNavaidName;
+    AIRWAY_TYPE AirwayType;
+    int AirwayBaseHeight;
+    int AirwayTopHeight;
+    const NavaidInformation *NextNavaid;
+
+    Airway() = default;
+};
+
 class NavaidInformation {
     NAVAID_CODE Type;
-    double Latitude;
-    double Longitude;
-    int Elevation;
-    int Freq;
+    double Latitude{};
+    double Longitude{};
+    int Elevation{};
+    int Freq{};
     std::string Identifier;
     std::string ICAO;
     std::string RegionCode;
     std::string FullName;
+
+    mutable std::vector<Airway> Edges;
+
 public:
 
     NavaidInformation(const std::string &Line, int &Failed, bool FromFixes = false);
@@ -47,6 +71,8 @@ public:
                                                                         RegionCode(std::move(RegionCode)) {}
 
     friend bool operator<(const NavaidInformation &lhs, const NavaidInformation &rhs);
+
+    void addAirway(const Airway &airway) const;
 };
 
 

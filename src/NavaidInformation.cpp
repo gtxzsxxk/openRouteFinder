@@ -57,3 +57,7 @@ bool operator<(const NavaidInformation &lhs, const NavaidInformation &rhs) {
     std::string cmp2 = rhs.Identifier + " " + rhs.RegionCode;
     return cmp1 < cmp2;
 }
+
+void NavaidInformation::addAirway(const Airway &airway) const{
+    Edges.push_back(airway);
+}
