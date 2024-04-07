@@ -26,18 +26,27 @@ class NavDataReader {
     std::string DataValidRange;
 
     std::string getFileFullPath(const std::string &RelaPath);
+
     void printCycleInformation();
-    static std::string getStringFromRegex(const std::string& Source, const std::string& RegexStr);
+
+    static std::string getStringFromRegex(const std::string &Source, const std::string &RegexStr);
 
     std::set<NavaidInformation> Navaids;
     std::set<NavaidInformation> FixesCache;
+
+    const NavaidInformation *
+    getNodeFromNavaidsOrFixesCache(const std::string &Identifier, const std::string &RegionCode, int FromType);
 
 public:
     NavDataReader(std::string DataPath);
 
     void readNavaids();
+
     void cacheFixes();
+
     void readAirways();
+
+    const NavaidInformation *getNodeFromNavaids(const std::string &Identifier, const std::string &RegionCode);
 };
 
 
