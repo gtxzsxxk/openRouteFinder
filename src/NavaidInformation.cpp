@@ -31,3 +31,9 @@ NavaidInformation::NavaidInformation(const std::string &Line, int &Failed) {
     RegionCode = std::string(RegionCodeBuffer);
     FullName = std::string(FullNameBuffer);
 }
+
+bool operator<(const NavaidInformation &lhs, const NavaidInformation &rhs) {
+    std::string cmp1 = lhs.Identifier + " " + lhs.RegionCode;
+    std::string cmp2 = rhs.Identifier + " " + rhs.RegionCode;
+    return cmp1 < cmp2;
+}

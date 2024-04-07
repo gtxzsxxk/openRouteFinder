@@ -39,7 +39,13 @@ class NavaidInformation {
     std::string RegionCode;
     std::string FullName;
 public:
-    NavaidInformation(const std::string &Line, int &Failed);
+
+    NavaidInformation(const std::string &Line, int &Failed, bool FromFixes = false);
+
+    NavaidInformation(std::string Identifier, std::string RegionCode) : Identifier(std::move(Identifier)),
+                                                                        RegionCode(std::move(RegionCode)) {}
+
+    friend bool operator<(const NavaidInformation &lhs, const NavaidInformation &rhs);
 };
 
 

@@ -18,8 +18,6 @@ NavDataReader::NavDataReader(std::string DataPath) : DataPath(std::move(DataPath
         return;
     }
 
-    Navaids.reserve(NAVAIDS_VECTOR_RESERVE);
-
     std::string buffer;
     std::getline(input, buffer);
     DataProvider = getStringFromRegex(buffer, "^([A-Za-z]*) cycle\\s*:\\s*[0-9]*$");
@@ -64,7 +62,7 @@ void NavDataReader::readAllNavaids() {
         int failed = 0;
         auto node = NavaidInformation(buffer, failed);
         if (!failed) {
-            Navaids.emplace_back(std::move(node));
+            Navaids.insert(std::move(node));
         }
 
         dr_us = std::chrono::duration<double, std::micro>(t2 - t1).count();

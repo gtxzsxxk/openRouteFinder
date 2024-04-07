@@ -12,14 +12,14 @@
 #include <cstdio>
 #include <fstream>
 #include <regex>
-#include <vector>
+#include <set>
 
 class NavDataReader {
     const std::string DataPath;
     static constexpr std::string DATA_PATH_CYCLE_INFO = "cycle_info.txt";
     static constexpr std::string DATA_PATH_AIRWAY = "earth_awy.dat";
     static constexpr std::string DATA_PATH_NAVAIDS = "earth_nav.dat";
-    static const size_t NAVAIDS_VECTOR_RESERVE = 10000;
+    static constexpr std::string DATA_PATH_FIXES = "earth_fix.dat";
     std::string DataProvider;
     std::string DataCycle;
     std::string DataRevision;
@@ -29,7 +29,7 @@ class NavDataReader {
     void printCycleInformation();
     static std::string getStringFromRegex(const std::string& Source, const std::string& RegexStr);
 
-    std::vector<NavaidInformation> Navaids;
+    std::set<NavaidInformation> Navaids;
 
 public:
     NavDataReader(std::string DataPath);
