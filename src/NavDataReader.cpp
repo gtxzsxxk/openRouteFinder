@@ -63,7 +63,7 @@ void NavDataReader::readNavaids() {
         int failed = 0;
         auto node = NavaidInformation(buffer, failed);
         if (!failed) {
-            Navaids.insert(std::move(node));
+            Navaids[NavaidInformation::toUniqueKey(node)] = node;
         }
 
         dr_us = std::chrono::duration<double, std::micro>(t2 - t1).count();
@@ -112,11 +112,11 @@ void NavDataReader::readAirways() {
         }
 
         if (fromType == NAVAID_CODE_FIX) {
-            Navaids.insert(*fromNavaid);
+            Navaids[NavaidInformation::toUniqueKey(*fromNavaid)] = *fromNavaid;
         }
 
         if (toType == NAVAID_CODE_FIX) {
-            Navaids.insert(*toNavaid);
+            Navaids[NavaidInformation::toUniqueKey(*toNavaid)] = *toNavaid;
         }
 
         if (direction == 'N') {
@@ -164,7 +164,7 @@ void NavDataReader::cacheFixes() {
         int failed = 0;
         auto node = NavaidInformation(buffer, failed, true);
         if (!failed) {
-            FixesCache.insert(std::move(node));
+            FixesCache[NavaidInformation::toUniqueKey(node)] = node;
         }
 
         dr_us = std::chrono::duration<double, std::micro>(t2 - t1).count();
@@ -177,17 +177,17 @@ NavDataReader::getNodeFromNavaidsOrFixesCache(const std::string &Identifier, con
     const NavaidInformation *desiredNavaid = nullptr;
 
     if (FromType != NAVAID_CODE_FIX) {
-        auto iter = Navaids.find(NavaidInformation(Identifier, RegionCode));
-        if (iter != Navaids.end()) {
-            desiredNavaid = &(*iter);
+        auto key = NavaidInformation::toUniqueKey(Identifier, RegionCode);
+        if (Navaids.count(key)) {
+            desiredNavaid = &Navaids[key];
         } else {
             std::cerr << "Unable to locate Navaid " << Identifier << " @ " << RegionCode << std::endl;
         }
     } else {
         /* 从FIXES缓存里读。不能把FIXES直接全部加入总点集，这只会大大的降低效率。 */
-        auto iter = FixesCache.find(NavaidInformation(Identifier, RegionCode));
-        if (iter != Navaids.end()) {
-            desiredNavaid = &(*iter);
+        auto key = NavaidInformation::toUniqueKey(Identifier, RegionCode);
+        if (FixesCache.count(key)) {
+            desiredNavaid = &FixesCache[key];
         } else {
             std::cerr << "Unable to locate Fixes " << Identifier << " @ " << RegionCode << std::endl;
         }
@@ -198,9 +198,9 @@ NavDataReader::getNodeFromNavaidsOrFixesCache(const std::string &Identifier, con
 
 const NavaidInformation *
 NavDataReader::getNodeFromNavaids(const std::string &Identifier, const std::string &RegionCode) {
-    auto iter = Navaids.find(NavaidInformation(Identifier, RegionCode));
-    if (iter != Navaids.end()) {
-        return &(*iter);
+    auto key = NavaidInformation::toUniqueKey(Identifier, RegionCode);
+    if (Navaids.count(key)) {
+        return &Navaids[key];
     } else {
         std::cerr << "Unable to locate Navaid " << Identifier << " @ " << RegionCode << std::endl;
     }

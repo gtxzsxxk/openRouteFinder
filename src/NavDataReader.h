@@ -12,7 +12,7 @@
 #include <cstdio>
 #include <fstream>
 #include <regex>
-#include <set>
+#include <map>
 
 class NavDataReader {
     const std::string DataPath;
@@ -31,8 +31,8 @@ class NavDataReader {
 
     static std::string getStringFromRegex(const std::string &Source, const std::string &RegexStr);
 
-    std::set<NavaidInformation> Navaids;
-    std::set<NavaidInformation> FixesCache;
+    std::map<std::string, NavaidInformation> Navaids;
+    std::map<std::string, NavaidInformation> FixesCache;
 
     const NavaidInformation *
     getNodeFromNavaidsOrFixesCache(const std::string &Identifier, const std::string &RegionCode, int FromType);
