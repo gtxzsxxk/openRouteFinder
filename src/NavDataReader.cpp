@@ -122,24 +122,24 @@ void NavDataReader::readAirways() {
         if (direction == 'N') {
             /* 添加顺向的航路 */
             airway.NextNavaidName = std::string(toNavaidBuffer);
-            airway.NextNavaid = toNavaid;
+            airway.NextNavaidKey = NavaidInformation::toUniqueKey(toNavaidBuffer, toRegionBuffer);
             fromNavaid->addAirway(airway);
 
             /* 添加反向的航路 */
             auto airwayReversed = airway;
             airwayReversed.NextNavaidName = std::string(fromNavaidBuffer);
-            airwayReversed.NextNavaid = fromNavaid;
+            airwayReversed.NextNavaidKey = NavaidInformation::toUniqueKey(fromNavaidBuffer, fromRegionBuffer);
             toNavaid->addAirway(airwayReversed);
         } else if (direction == 'F') {
             /* 添加顺向的航路 */
             airway.NextNavaidName = std::string(toNavaidBuffer);
-            airway.NextNavaid = toNavaid;
+            airway.NextNavaidKey = NavaidInformation::toUniqueKey(toNavaidBuffer, toRegionBuffer);
             fromNavaid->addAirway(airway);
         } else if (direction == 'B') {
             /* 添加反向的航路 */
             auto airwayReversed = airway;
             airwayReversed.NextNavaidName = std::string(fromNavaidBuffer);
-            airwayReversed.NextNavaid = fromNavaid;
+            airwayReversed.NextNavaidKey = NavaidInformation::toUniqueKey(fromNavaidBuffer, fromRegionBuffer);
             toNavaid->addAirway(airwayReversed);
         } else {
             std::cerr << "Airway rule mismatched" << std::endl;
@@ -197,12 +197,27 @@ NavDataReader::getNodeFromNavaidsOrFixesCache(const std::string &Identifier, con
 }
 
 const NavaidInformation *
-NavDataReader::getNodeFromNavaids(const std::string &Identifier, const std::string &RegionCode) {
+NavDataReader::getNodeFromNavaids(const std::string &Identifier, const std::string &RegionCode) const {
     auto key = NavaidInformation::toUniqueKey(Identifier, RegionCode);
     if (Navaids.count(key)) {
         return &Navaids[key];
     } else {
         std::cerr << "Unable to locate Navaid " << Identifier << " @ " << RegionCode << std::endl;
+    }
+
+    return nullptr;
+}
+
+const std::map<std::string, NavaidInformation> &NavDataReader::getNavaids() const {
+    return Navaids;
+}
+
+const NavaidInformation *NavDataReader::getNodeFromNavaids(const NavaidInformation &Node) const {
+    auto key = NavaidInformation::toUniqueKey(Node);
+    if (Navaids.count(key)) {
+        return &Navaids[key];
+    } else {
+        std::cerr << "Unable to locate Navaid " << Node.getIdentifier() << " @ " << Node.getRegionCode() << std::endl;
     }
 
     return nullptr;

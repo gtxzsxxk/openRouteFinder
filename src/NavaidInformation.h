@@ -42,10 +42,10 @@ class Airway {
 public:
     std::string Name;
     std::string NextNavaidName;
+    std::string NextNavaidKey;
     AIRWAY_TYPE AirwayType;
     int AirwayBaseHeight;
     int AirwayTopHeight;
-    const NavaidInformation *NextNavaid;
 
     Airway() = default;
 };
@@ -78,7 +78,13 @@ public:
 
     void addAirway(const Airway &airway) const;
 
+    const std::string &getIdentifier() const;
 
+    const std::string &getRegionCode() const;
+
+    const std::vector<Airway> &getEdges() const;
+
+    double operator*(const NavaidInformation &node) const;
 };
 
 
