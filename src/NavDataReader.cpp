@@ -68,3 +68,25 @@ void NavDataReader::readAllNavaids() {
         dr_us = std::chrono::duration<double, std::micro>(t2 - t1).count();
     }
 }
+void NavDataReader::cacheFixes() {
+    std::ifstream input(getFileFullPath(DATA_PATH_FIXES), std::ios_base::in);
+    if (!input.is_open()) {
+        std::cerr << "Failed to open fixes file." << std::endl;
+        return;
+    }
+    std::cout << "Caching Fixes ..." <<std::endl;
+    while (!input.eof()) {
+        std::string buffer;
+        std::getline(input, buffer);
+        double dr_us;
+        auto t1 = std::chrono::steady_clock::now();
+        auto t2 = std::chrono::steady_clock::now();
+        int failed = 0;
+        auto node = NavaidInformation(buffer, failed, true);
+        if (!failed) {
+            FixesCache.insert(std::move(node));
+        }
+
+        dr_us = std::chrono::duration<double, std::micro>(t2 - t1).count();
+    }
+}

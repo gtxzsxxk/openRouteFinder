@@ -30,11 +30,14 @@ class NavDataReader {
     static std::string getStringFromRegex(const std::string& Source, const std::string& RegexStr);
 
     std::set<NavaidInformation> Navaids;
+    std::set<NavaidInformation> FixesCache;
 
 public:
     NavDataReader(std::string DataPath);
 
-    void readAllNavaids();
+    void readNavaids();
+    void cacheFixes();
+    void readAirways();
 };
 
 
