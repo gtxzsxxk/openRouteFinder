@@ -1,4 +1,5 @@
 #include "NavDataReader.h"
+#include "RouteFinder.h"
 #include <iostream>
 #include <chrono>
 
@@ -19,7 +20,8 @@ int main() {
     t2 = std::chrono::steady_clock::now();
     dr_us = std::chrono::duration<double, std::micro>(t2 - t1).count();
 
-    auto r1 = reader.getNodeFromNavaids("DAPRO", "ZH");
+    auto routeFinder = RouteFinder(reader);
+    routeFinder.calculateShortestRoute(NavaidInformation("YIN","ZG"), NavaidInformation("DUGEB","ZB"));
 
     return 0;
 }

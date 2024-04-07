@@ -9,4 +9,6 @@ add_executable(openRouteFinder src/main.cpp
         src/AirportInformation.cpp
         src/AirportInformation.h
         src/NavaidInformation.cpp
-        src/NavaidInformation.h)
+        src/NavaidInformation.h
+        src/RouteFinder.cpp
+        src/RouteFinder.h)
