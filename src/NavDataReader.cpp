@@ -46,13 +46,14 @@ std::string NavDataReader::getStringFromRegex(const std::string &Source, const s
     return {};
 }
 
-void NavDataReader::readAllNavaids() {
+void NavDataReader::readNavaids() {
     std::ifstream input(getFileFullPath(DATA_PATH_NAVAIDS), std::ios_base::in);
     if (!input.is_open()) {
         std::cerr << "Failed to open navaid file." << std::endl;
         return;
     }
     Navaids.clear();
+    std::cout << "Loading Navaids ..." <<std::endl;
     while (!input.eof()) {
         std::string buffer;
         std::getline(input, buffer);
