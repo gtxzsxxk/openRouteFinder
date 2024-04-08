@@ -15,6 +15,14 @@ RouteFinder::calculateShortestRoute(const NavaidInformation &Start, const Navaid
     auto realStartNode = NavaidCompare::getNavaidCompareFromMap(NavCompares, NavaidInformation::toUniqueKey(Start));
     auto realEndNode = NavaidCompare::getNavaidCompareFromMap(NavCompares, NavaidInformation::toUniqueKey(End));
 
+    if(!realStartNode) {
+        return {realEndNode};
+    }
+
+    if(!realEndNode) {
+        return {};
+    }
+
     realStartNode->DistanceToStart = 0;
 
     std::priority_queue<NavaidCompare *, std::vector<NavaidCompare *>, NavaidCompare> q;
