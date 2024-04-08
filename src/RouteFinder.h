@@ -17,17 +17,17 @@
 
 class RouteFinder {
     std::map<std::string, NavaidCompare> NavCompareSourceData;
+    std::vector<NavaidCompare> NavCompareCache;
     const NavDataReader &DataReader;
+
+    NavaidCompare * getNavaidFromCacheByKey(const std::string &Key);
+    NavaidCompare * getNavaidFromCacheByKey(const NavaidInformation &Node);
 
 public:
 
     RouteFinder() = delete;
 
-    explicit RouteFinder(const NavDataReader &Reader) : DataReader(Reader) {
-        for (const auto &Element: Reader.getNavaids()) {
-            NavCompareSourceData[Element.first] = NavaidCompare(Element.second);
-        }
-    };
+    explicit RouteFinder(const NavDataReader &Reader);
 
     RouteResult calculateShortestRoute(const NavaidInformation &Start,
                                        const NavaidInformation &End,

@@ -67,6 +67,10 @@ std::string NavaidInformation::toUniqueKey(const NavaidInformation &navaidInform
     return navaidInformation.Identifier + " " + navaidInformation.RegionCode;
 }
 
+std::string NavaidInformation::toUniqueKey(const NavaidInformation *navaidInformation) {
+    return navaidInformation->Identifier + " " + navaidInformation->RegionCode;
+}
+
 std::string NavaidInformation::toUniqueKey(const std::string &Identifier, const std::string &RegionCode) {
     return Identifier + " " + RegionCode;
 }
@@ -95,6 +99,6 @@ double NavaidInformation::operator*(const NavaidInformation &node) const {
     return s;
 }
 
-const std::vector<Airway> &NavaidInformation::getEdges() const {
+std::vector<Airway> &NavaidInformation::getEdges() {
     return Edges;
 }

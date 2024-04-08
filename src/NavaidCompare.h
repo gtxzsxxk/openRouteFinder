@@ -10,6 +10,7 @@
 
 class NavaidCompare : public NavaidInformation {
 public:
+    int ID;
     double DistanceToStart;
     bool ShortestDiscovered;
     NavaidCompare *ComeFrom = nullptr;

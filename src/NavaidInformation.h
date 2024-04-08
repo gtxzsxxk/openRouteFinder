@@ -44,6 +44,7 @@ public:
     std::string Name;
     std::string NextNavaidName;
     std::string NextNavaidKey;
+    int NextNavaidCacheIndex;
     AIRWAY_TYPE AirwayType;
     int AirwayBaseHeight;
     int AirwayTopHeight;
@@ -70,6 +71,8 @@ public:
 
     static std::string toUniqueKey(const NavaidInformation &navaidInformation);
 
+    static std::string toUniqueKey(const NavaidInformation *navaidInformation);
+
     static std::string toUniqueKey(const std::string &Identifier, const std::string &RegionCode);
 
     NavaidInformation(const std::string &Line, int &Failed, bool FromFixes = false);
@@ -83,7 +86,7 @@ public:
 
     const std::string &getRegionCode() const;
 
-    const std::vector<Airway> &getEdges() const;
+    std::vector<Airway> &getEdges();
 
     double operator*(const NavaidInformation &node) const;
 };

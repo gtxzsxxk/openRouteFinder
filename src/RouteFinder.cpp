@@ -83,10 +83,8 @@ RouteFinder::calculateShortestRoute(const NavaidInformation &Start, const Navaid
 
     std::vector<WriteHistory> LocalHistory;
 
-    auto &NavCompares = NavCompareSourceData;
-
-    auto realStartNode = NavaidCompare::getNavaidCompareFromMap(NavCompares, NavaidInformation::toUniqueKey(Start));
-    auto realEndNode = NavaidCompare::getNavaidCompareFromMap(NavCompares, NavaidInformation::toUniqueKey(End));
+    auto realStartNode = getNavaidFromCacheByKey(Start);
+    auto realEndNode = getNavaidFromCacheByKey(End);
 
     if (!realStartNode) {
         return {realEndNode};
@@ -105,11 +103,11 @@ RouteFinder::calculateShortestRoute(const NavaidInformation &Start, const Navaid
     while (!q.empty()) {
         auto currentNode = q.top();
         q.pop();
-
-        if (NavaidInformation::toUniqueKey(*static_cast<NavaidInformation *>(currentNode)) ==
-            NavaidInformation::toUniqueKey(*static_cast<NavaidInformation *>(realEndNode))) {
+        if (NavaidInformation::toUniqueKey(currentNode) ==
+            NavaidInformation::toUniqueKey(realEndNode)) {
             break;
         }
+
         if (currentNode->ShortestDiscovered) {
             continue;
         }
@@ -120,9 +118,8 @@ RouteFinder::calculateShortestRoute(const NavaidInformation &Start, const Navaid
             if (Edge.AirwayType != AirwayType && Edge.AirwayType != AIRWAY_DONTCARE) {
                 continue;
             }
-            auto nextNode = NavaidCompare::getNavaidCompareFromMap(NavCompares, Edge.NextNavaidKey);
-            auto newDistance = *static_cast<NavaidInformation *>(currentNode) *
-                               *static_cast<NavaidInformation *>(nextNode);
+            auto nextNode = &NavCompareCache[Edge.NextNavaidCacheIndex];
+            auto newDistance = (*currentNode) * (*nextNode);
             if (currentNode->DistanceToStart + newDistance < nextNode->DistanceToStart) {
                 historyAppend(LocalHistory, &nextNode->DistanceToStart);
                 nextNode->DistanceToStart = currentNode->DistanceToStart + newDistance;
@@ -135,6 +132,7 @@ RouteFinder::calculateShortestRoute(const NavaidInformation &Start, const Navaid
         }
     }
 
+
     auto ResultObject = RouteResult(realEndNode);
 
     for (long i = LocalHistory.size() - 1; i >= 0; i--) {
@@ -143,3 +141,35 @@ RouteFinder::calculateShortestRoute(const NavaidInformation &Start, const Navaid
 
     return std::move(ResultObject);
 }
+
+RouteFinder::RouteFinder(const NavDataReader &Reader) : DataReader(Reader) {
+    int ID = 0;
+
+    std::cout << "RouteFinder: caching data for fast airway indexing ..." << std::endl;
+
+    for (const auto &Element: Reader.getNavaids()) {
+        auto NavCompareObject = NavaidCompare(Element.second);
+        NavCompareObject.ID = ID++;
+        NavCompareSourceData[Element.first] = NavCompareObject;
+        NavCompareCache.push_back(NavCompareObject);
+    }
+    for (auto &Element: NavCompareCache) {
+        for (auto &Edge: Element.getEdges()) {
+            auto nextNode = NavaidCompare::getNavaidCompareFromMap(NavCompareSourceData, Edge.NextNavaidKey);
+            Edge.NextNavaidCacheIndex = nextNode->ID;
+        }
+    }
+
+    std::cout << "RouteFinder: cache fulfilled ..." << std::endl;
+}
+
+NavaidCompare *RouteFinder::getNavaidFromCacheByKey(const std::string &Key) {
+    if (NavCompareSourceData.count(Key)) {
+        return &NavCompareCache[NavCompareSourceData[Key].ID];
+    }
+    return nullptr;
+}
+
+NavaidCompare *RouteFinder::getNavaidFromCacheByKey(const NavaidInformation &Node) {
+    return getNavaidFromCacheByKey(NavaidInformation::toUniqueKey(Node));
+};
