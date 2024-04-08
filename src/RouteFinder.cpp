@@ -52,5 +52,5 @@ RouteFinder::calculateShortestRoute(const NavaidInformation &Start, const Navaid
         }
     }
 
-    return {};
+    return {realEndNode};
 }
