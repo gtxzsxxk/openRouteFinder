@@ -103,8 +103,7 @@ RouteFinder::calculateShortestRoute(const NavaidInformation &Start, const Navaid
     while (!q.empty()) {
         auto currentNode = q.top();
         q.pop();
-        if (NavaidInformation::toUniqueKey(currentNode) ==
-            NavaidInformation::toUniqueKey(realEndNode)) {
+        if (currentNode->isEqualTo(realEndNode)) {
             break;
         }
 

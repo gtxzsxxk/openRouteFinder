@@ -75,6 +75,8 @@ public:
 
     static std::string toUniqueKey(const std::string &Identifier, const std::string &RegionCode);
 
+    bool isEqualTo(const NavaidInformation *navaidInformation) const;
+
     NavaidInformation(const std::string &Line, int &Failed, bool FromFixes = false);
 
     NavaidInformation(std::string Identifier, std::string RegionCode) : Identifier(std::move(Identifier)),

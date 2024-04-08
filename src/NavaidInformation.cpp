@@ -102,3 +102,7 @@ double NavaidInformation::operator*(const NavaidInformation &node) const {
 std::vector<Airway> &NavaidInformation::getEdges() {
     return Edges;
 }
+
+bool NavaidInformation::isEqualTo(const NavaidInformation *navaidInformation) const {
+    return Identifier == navaidInformation->Identifier && RegionCode == navaidInformation->RegionCode;
+}
