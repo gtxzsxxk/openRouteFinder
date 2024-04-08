@@ -3,6 +3,7 @@
 //
 
 #include "RouteResult.h"
+#include <algorithm>
 
 RouteResult::RouteResult(NavaidCompare *RouteEnd) {
     while (RouteEnd) {

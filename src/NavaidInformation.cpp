@@ -5,6 +5,7 @@
 #include "NavaidInformation.h"
 #include <cstdio>
 #include <cmath>
+#include <cstring>
 
 NavaidInformation::NavaidInformation(const std::string &Line, int &Failed, bool FromFixes) {
     /* 12  48.364333333   17.198027778     2357    11600    25      0.000  MLC ENRT LZ CMELE (MALACKY) TACAN DME */
