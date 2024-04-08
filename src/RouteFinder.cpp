@@ -4,17 +4,13 @@
 
 #include "RouteFinder.h"
 #include <queue>
-#include <map>
 #include <vector>
 
 RouteResult
 RouteFinder::calculateShortestRoute(const NavaidInformation &Start, const NavaidInformation &End,
                                     AIRWAY_TYPE AirwayType) {
-    /* 对于每一次计算，都需要拷贝Reader读取的点集 */
-    std::map<std::string, NavaidCompare> NavCompares;
-    for (const auto &Element: Nodes) {
-        NavCompares[Element.first] = NavaidCompare(Element.second);
-    }
+    /* 由于状态与点的数据都绑定在一起，因此每次计算前都需要拷贝一份 */
+    auto NavCompares = NavCompareSourceData;
 
     auto realStartNode = NavaidCompare::getNavaidCompareFromMap(NavCompares, NavaidInformation::toUniqueKey(Start));
     auto realEndNode = NavaidCompare::getNavaidCompareFromMap(NavCompares, NavaidInformation::toUniqueKey(End));

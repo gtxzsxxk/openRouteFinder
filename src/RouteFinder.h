@@ -16,14 +16,18 @@
 #include <algorithm>
 
 class RouteFinder {
-    const std::map<std::string, NavaidInformation> &Nodes;
+    std::map<std::string, NavaidCompare> NavCompareSourceData;
     const NavDataReader &DataReader;
 
 public:
 
     RouteFinder() = delete;
 
-    explicit RouteFinder(const NavDataReader &Reader) : Nodes(Reader.getNavaids()), DataReader(Reader) {};
+    explicit RouteFinder(const NavDataReader &Reader) : DataReader(Reader) {
+        for (const auto &Element: Reader.getNavaids()) {
+            NavCompareSourceData[Element.first] = NavaidCompare(Element.second);
+        }
+    };
 
     RouteResult calculateShortestRoute(const NavaidInformation &Start,
                                        const NavaidInformation &End,
