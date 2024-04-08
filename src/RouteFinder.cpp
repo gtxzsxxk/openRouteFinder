@@ -7,38 +7,7 @@
 #include <map>
 #include <vector>
 
-class NavaidCompare : public NavaidInformation {
-public:
-    double DistanceToStart;
-    bool Visited;
-    NavaidCompare *from = nullptr;
-    std::string Path;
-
-    NavaidCompare() = default;
-
-    explicit NavaidCompare(const NavaidInformation &NavInfo) : NavaidInformation(NavInfo) {
-        DistanceToStart = 0xffffffff;
-        Visited = false;
-    }
-
-    bool operator<(const NavaidCompare &NavCmp) const {
-        return DistanceToStart > NavCmp.DistanceToStart;
-    }
-
-    bool operator()(NavaidCompare * &lhs, NavaidCompare * &rhs) {
-        return lhs->DistanceToStart > rhs->DistanceToStart;
-    }
-
-    static NavaidCompare *getNavaidCompareFromMap(std::map<std::string, NavaidCompare> &Map, const std::string &Key) {
-        if (Map.count(Key)) {
-            return &Map[Key];
-        }
-        return nullptr;
-    }
-};
-
-std::vector<NavaidInformation>
-RouteFinder::calculateShortestRoute(const NavaidInformation &Start, const NavaidInformation &End) {
+RouteResult
 RouteFinder::calculateShortestRoute(const NavaidInformation &Start, const NavaidInformation &End,
                                     AIRWAY_TYPE AirwayType) {
     /* 对于每一次计算，都需要拷贝Reader读取的点集 */

@@ -10,6 +10,40 @@
 #include <string>
 #include <vector>
 
+class NavaidCompare : public NavaidInformation {
+public:
+    double DistanceToStart;
+    bool ShortestDiscovered;
+    NavaidCompare *ComeFrom = nullptr;
+    std::string ViaEdge = "DCT";
+
+    /* Debug Only */
+    std::string Path;
+
+    NavaidCompare() = default;
+
+    explicit NavaidCompare(const NavaidInformation &NavInfo) : NavaidInformation(NavInfo) {
+        DistanceToStart = 0xffffffff;
+        ShortestDiscovered = false;
+    }
+
+    bool operator<(const NavaidCompare &NavCmp) const {
+        return DistanceToStart > NavCmp.DistanceToStart;
+    }
+
+    bool operator()(NavaidCompare *&lhs, NavaidCompare *&rhs) {
+        return lhs->DistanceToStart > rhs->DistanceToStart;
+    }
+
+    static NavaidCompare *getNavaidCompareFromMap(std::map<std::string, NavaidCompare> &Map, const std::string &Key) {
+        if (Map.count(Key)) {
+            return &Map[Key];
+        }
+        return nullptr;
+    }
+};
+
+
 class RouteFinder {
     const std::map<std::string, NavaidInformation> &Nodes;
     const NavDataReader &DataReader;
