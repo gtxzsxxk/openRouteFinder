@@ -21,7 +21,10 @@ int main() {
     dr_us = std::chrono::duration<double, std::micro>(t2 - t1).count();
 
     auto routeFinder = RouteFinder(reader);
-    routeFinder.calculateShortestRoute(NavaidInformation("YIN","ZG"), NavaidInformation("DUGEB","ZB"));
-
+    t1 = std::chrono::steady_clock::now();
+    auto results = routeFinder.calculateShortestRoute(NavaidInformation("VIBOS","ZG"), NavaidInformation("WL","ZJ"));
+    std::cout<< "Results: " << results;
+    t2 = std::chrono::steady_clock::now();
+    dr_us = std::chrono::duration<double, std::micro>(t2 - t1).count();
     return 0;
 }

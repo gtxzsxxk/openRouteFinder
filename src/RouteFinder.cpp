@@ -28,14 +28,14 @@ RouteFinder::calculateShortestRoute(const NavaidInformation &Start, const Navaid
         auto currentNode = q.top();
         q.pop();
 
-        if (currentNode->Visited) {
         if (NavaidInformation::toUniqueKey(*static_cast<NavaidInformation *>(currentNode)) ==
             NavaidInformation::toUniqueKey(*static_cast<NavaidInformation *>(realEndNode))) {
             break;
         }
+        if (currentNode->ShortestDiscovered) {
             continue;
         }
-        currentNode->Visited = true;
+        currentNode->ShortestDiscovered = true;
 
         for (const auto &Edge: currentNode->getEdges()) {
             if (Edge.AirwayType != AirwayType && Edge.AirwayType != AIRWAY_DONTCARE) {
@@ -46,7 +46,8 @@ RouteFinder::calculateShortestRoute(const NavaidInformation &Start, const Navaid
                                *static_cast<NavaidInformation *>(nextNode);
             if (currentNode->DistanceToStart + newDistance < nextNode->DistanceToStart) {
                 nextNode->DistanceToStart = currentNode->DistanceToStart + newDistance;
-                nextNode->from = currentNode;
+                nextNode->ComeFrom = currentNode;
+                nextNode->ViaEdge = Edge.Name;
                 nextNode->Path = currentNode->Path + Edge.Name + " " + nextNode->getIdentifier() + "\n";
                 q.push(nextNode);
             }
