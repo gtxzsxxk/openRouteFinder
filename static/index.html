@@ -411,6 +411,16 @@
                     zoom: 8
                 });
             }
+
+            var borderId = 0;
+            borderId = setInterval(() => {
+                let mapObject = document.getElementById("Microsoft.Maps.Imagery.RoadSceneWithoutLabels");
+                if (mapObject == null) {
+                    return;
+                }
+                mapObject.style.cssText += "border-radius: 15px";
+                clearInterval(borderId);
+            }, 1000);
         }
 
         var app = new Vue({
@@ -476,6 +486,7 @@
                         url: requestUrl,
                         type: "get",
                         success: function (result) {
+                            app.validcode = "";
                             if (result.indexOf("{") == -1) {
                                 INT = window.clearInterval(INT);
                                 app.btn_available = true;
