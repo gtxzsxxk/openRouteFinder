@@ -25,6 +25,10 @@ public:
         return DistanceToStart > NavCmp.DistanceToStart;
     }
 
+    bool operator()(NavaidCompare * &lhs, NavaidCompare * &rhs) {
+        return lhs->DistanceToStart > rhs->DistanceToStart;
+    }
+
     static NavaidCompare *getNavaidCompareFromMap(std::map<std::string, NavaidCompare> &Map, const std::string &Key) {
         if (Map.count(Key)) {
             return &Map[Key];
@@ -50,30 +54,28 @@ RouteFinder::calculateShortestRoute(const NavaidInformation &Start, const Navaid
 //        nextNode->from = realStartNode;
 //    }
 
-    std::priority_queue<NavaidCompare *> q;
+    std::priority_queue<NavaidCompare *, std::vector<NavaidCompare *>, NavaidCompare> q;
     q.push(realStartNode);
 
     while (!q.empty()) {
         auto currentNode = q.top();
         q.pop();
 
-        if (NavaidInformation::toUniqueKey(static_cast<NavaidInformation>(*currentNode)) ==
-            NavaidInformation::toUniqueKey(End)) {
-            break;
+        if (currentNode->Visited) {
+            continue;
         }
-
         currentNode->Visited = true;
 
         for (const auto &Edge: currentNode->getEdges()) {
+//            if (Edge.AirwayType != AIRWAY_HIGH) {
+//                continue;
+//            }
             auto nextNode = NavaidCompare::getNavaidCompareFromMap(NavCompares, Edge.NextNavaidKey);
-            if (nextNode->Visited) {
-                continue;
-            }
             auto newDistance = static_cast<NavaidInformation>(*currentNode) * static_cast<NavaidInformation>(*nextNode);
             if (currentNode->DistanceToStart + newDistance < nextNode->DistanceToStart) {
                 nextNode->DistanceToStart = currentNode->DistanceToStart + newDistance;
                 nextNode->from = currentNode;
-                nextNode->Path = currentNode->Path + Edge.Name + " " + currentNode->getIdentifier() + "\n";
+                nextNode->Path = currentNode->Path + Edge.Name + " " + nextNode->getIdentifier() + "\n";
                 q.push(nextNode);
             }
         }
