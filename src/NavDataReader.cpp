@@ -5,6 +5,7 @@
 #include "NavDataReader.h"
 #include <iostream>
 #include <chrono>
+#include <sstream>
 
 std::string NavDataReader::getFileFullPath(const std::string &RelaPath) {
     return DataPath + RelaPath;
@@ -102,48 +103,52 @@ void NavDataReader::readAirways() {
         }
 
         airway.AirwayType = (AIRWAY_TYPE) airwayType;
-        airway.Name = std::string(airwayNameBuffer);
+        auto airwayStream = std::stringstream(airwayNameBuffer);
+        std::string airwayName;
+        while(std::getline(airwayStream, airwayName, '-')) {
+            airway.Name = airwayName;
 
-        auto *fromNavaid = getNodeFromNavaidsOrFixesCache(fromNavaidBuffer, fromRegionBuffer, fromType);
-        auto *toNavaid = getNodeFromNavaidsOrFixesCache(toNavaidBuffer, toRegionBuffer, toType);
-        if (!fromNavaid || !toNavaid) {
-            std::cerr << "Failed to read airways" << std::endl;
-            return;
-        }
+            auto *fromNavaid = getNodeFromNavaidsOrFixesCache(fromNavaidBuffer, fromRegionBuffer, fromType);
+            auto *toNavaid = getNodeFromNavaidsOrFixesCache(toNavaidBuffer, toRegionBuffer, toType);
+            if (!fromNavaid || !toNavaid) {
+                std::cerr << "Failed to read airways" << std::endl;
+                return;
+            }
 
-        if (fromType == NAVAID_CODE_FIX) {
-            Navaids[NavaidInformation::toUniqueKey(*fromNavaid)] = *fromNavaid;
-        }
+            if (fromType == NAVAID_CODE_FIX) {
+                Navaids[NavaidInformation::toUniqueKey(*fromNavaid)] = *fromNavaid;
+            }
 
-        if (toType == NAVAID_CODE_FIX) {
-            Navaids[NavaidInformation::toUniqueKey(*toNavaid)] = *toNavaid;
-        }
+            if (toType == NAVAID_CODE_FIX) {
+                Navaids[NavaidInformation::toUniqueKey(*toNavaid)] = *toNavaid;
+            }
 
-        if (direction == 'N') {
-            /* 添加顺向的航路 */
-            airway.NextNavaidName = std::string(toNavaidBuffer);
-            airway.NextNavaidKey = NavaidInformation::toUniqueKey(toNavaidBuffer, toRegionBuffer);
-            fromNavaid->addAirway(airway);
+            if (direction == 'N') {
+                /* 添加顺向的航路 */
+                airway.NextNavaidName = std::string(toNavaidBuffer);
+                airway.NextNavaidKey = NavaidInformation::toUniqueKey(toNavaidBuffer, toRegionBuffer);
+                fromNavaid->addAirway(airway);
 
-            /* 添加反向的航路 */
-            auto airwayReversed = airway;
-            airwayReversed.NextNavaidName = std::string(fromNavaidBuffer);
-            airwayReversed.NextNavaidKey = NavaidInformation::toUniqueKey(fromNavaidBuffer, fromRegionBuffer);
-            toNavaid->addAirway(airwayReversed);
-        } else if (direction == 'F') {
-            /* 添加顺向的航路 */
-            airway.NextNavaidName = std::string(toNavaidBuffer);
-            airway.NextNavaidKey = NavaidInformation::toUniqueKey(toNavaidBuffer, toRegionBuffer);
-            fromNavaid->addAirway(airway);
-        } else if (direction == 'B') {
-            /* 添加反向的航路 */
-            auto airwayReversed = airway;
-            airwayReversed.NextNavaidName = std::string(fromNavaidBuffer);
-            airwayReversed.NextNavaidKey = NavaidInformation::toUniqueKey(fromNavaidBuffer, fromRegionBuffer);
-            toNavaid->addAirway(airwayReversed);
-        } else {
-            std::cerr << "Airway rule mismatched" << std::endl;
-            return;
+                /* 添加反向的航路 */
+                auto airwayReversed = airway;
+                airwayReversed.NextNavaidName = std::string(fromNavaidBuffer);
+                airwayReversed.NextNavaidKey = NavaidInformation::toUniqueKey(fromNavaidBuffer, fromRegionBuffer);
+                toNavaid->addAirway(airwayReversed);
+            } else if (direction == 'F') {
+                /* 添加顺向的航路 */
+                airway.NextNavaidName = std::string(toNavaidBuffer);
+                airway.NextNavaidKey = NavaidInformation::toUniqueKey(toNavaidBuffer, toRegionBuffer);
+                fromNavaid->addAirway(airway);
+            } else if (direction == 'B') {
+                /* 添加反向的航路 */
+                auto airwayReversed = airway;
+                airwayReversed.NextNavaidName = std::string(fromNavaidBuffer);
+                airwayReversed.NextNavaidKey = NavaidInformation::toUniqueKey(fromNavaidBuffer, fromRegionBuffer);
+                toNavaid->addAirway(airwayReversed);
+            } else {
+                std::cerr << "Airway rule mismatched" << std::endl;
+                return;
+            }
         }
     }
 }
