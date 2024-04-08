@@ -18,12 +18,8 @@ RouteFinder::calculateShortestRoute(const NavaidInformation &Start, const Navaid
 
     auto realStartNode = NavaidCompare::getNavaidCompareFromMap(NavCompares, NavaidInformation::toUniqueKey(Start));
     auto realEndNode = NavaidCompare::getNavaidCompareFromMap(NavCompares, NavaidInformation::toUniqueKey(End));
+
     realStartNode->DistanceToStart = 0;
-//    for(const auto& Edge : realStartNode->getEdges()) {
-//        auto nextNode = NavaidCompare::getNavaidCompareFromMap(NavCompares, Edge.NextNavaidKey);
-//        nextNode->DistanceToStart = static_cast<NavaidInformation>(*realStartNode) * static_cast<NavaidInformation>(*nextNode);
-//        nextNode->from = realStartNode;
-//    }
 
     std::priority_queue<NavaidCompare *, std::vector<NavaidCompare *>, NavaidCompare> q;
     q.push(realStartNode);
@@ -33,6 +29,10 @@ RouteFinder::calculateShortestRoute(const NavaidInformation &Start, const Navaid
         q.pop();
 
         if (currentNode->Visited) {
+        if (NavaidInformation::toUniqueKey(*static_cast<NavaidInformation *>(currentNode)) ==
+            NavaidInformation::toUniqueKey(*static_cast<NavaidInformation *>(realEndNode))) {
+            break;
+        }
             continue;
         }
         currentNode->Visited = true;
@@ -42,7 +42,8 @@ RouteFinder::calculateShortestRoute(const NavaidInformation &Start, const Navaid
                 continue;
             }
             auto nextNode = NavaidCompare::getNavaidCompareFromMap(NavCompares, Edge.NextNavaidKey);
-            auto newDistance = static_cast<NavaidInformation>(*currentNode) * static_cast<NavaidInformation>(*nextNode);
+            auto newDistance = *static_cast<NavaidInformation *>(currentNode) *
+                               *static_cast<NavaidInformation *>(nextNode);
             if (currentNode->DistanceToStart + newDistance < nextNode->DistanceToStart) {
                 nextNode->DistanceToStart = currentNode->DistanceToStart + newDistance;
                 nextNode->from = currentNode;
