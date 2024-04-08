@@ -6,26 +6,38 @@
 
 RouteResult::RouteResult(NavaidCompare *RouteEnd) {
     while (RouteEnd) {
-        RouteNodes.push_back(*RouteEnd);
+        FullRouteNodes.push_back(*RouteEnd);
         RouteEnd = RouteEnd->ComeFrom;
     }
-    std::reverse(RouteNodes.begin(), RouteNodes.end());
-    setPrefix("DCT", "");
+    std::reverse(FullRouteNodes.begin(), FullRouteNodes.end());
+    setPrefixAndEncode("DCT", "");
 }
 
-void RouteResult::setPrefix(const std::string &StartPrefix, const std::string &EndPrefix) {
+void RouteResult::setPrefixAndEncode(const std::string &StartPrefix, const std::string &EndPrefix) {
+    EncodeRouteNodes.clear();
+
     if (!StartPrefix.empty()) {
-        (*RouteNodes.begin()).ViaEdge = StartPrefix;
+        (*FullRouteNodes.begin()).ViaEdge = StartPrefix;
     }
 
     if (!EndPrefix.empty()) {
-        (*(RouteNodes.end() - 1)).ViaEdge = EndPrefix;
+        (*(FullRouteNodes.end() - 1)).ViaEdge = EndPrefix;
     }
+
+    std::string LastViaAirway;
+    for (long i = FullRouteNodes.size() - 1; i >= 0; i--) {
+        if (LastViaAirway != FullRouteNodes[i].ViaEdge) {
+            EncodeRouteNodes.push_back(FullRouteNodes[i]);
+        }
+        LastViaAirway = FullRouteNodes[i].ViaEdge;
+    }
+
+    std::reverse(EncodeRouteNodes.begin(), EncodeRouteNodes.end());
 }
 
 std::string RouteResult::toString() const {
     std::string Route;
-    for (const auto &WayPoint: RouteNodes) {
+    for (const auto &WayPoint: EncodeRouteNodes) {
         Route += WayPoint.ViaEdge + " " + WayPoint.getIdentifier() + " ";
     }
 

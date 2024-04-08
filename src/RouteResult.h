@@ -9,11 +9,14 @@
 #include <iostream>
 
 class RouteResult {
-    std::vector<NavaidCompare> RouteNodes;
+    std::vector<NavaidCompare> FullRouteNodes;
+    std::vector<NavaidCompare> EncodeRouteNodes;
 public:
+    RouteResult() = default;
+
     RouteResult(NavaidCompare *RouteEnd);
 
-    void setPrefix(const std::string &StartPrefix, const std::string &EndPrefix);
+    void setPrefixAndEncode(const std::string &StartPrefix, const std::string &EndPrefix);
 
     [[nodiscard]] std::string toString() const;
 
