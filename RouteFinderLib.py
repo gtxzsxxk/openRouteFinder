@@ -6,6 +6,7 @@ import os
 
 # IID is the index of the node in nodeList
 
+
 class Edge:
     nfrom = 0  # IID
     nend = 0  # IID
@@ -42,7 +43,7 @@ class Node:
 
 
 def CalcNodeHash(x, y):
-    return int(abs(int(x)*int(y)))
+    return int(abs(int(x) * int(y)))
 
 
 class searchingNode:
@@ -75,23 +76,37 @@ def GetDistance_KM(lat1, lon1, lat2, lon2):
     radLat2 = rad(lat2)
     a = radLat1 - radLat2
     b = rad(lon1) - rad(lon2)
-    s = 2 * math.asin(math.sqrt(math.pow(math.sin(a / 2), 2)
-                                + math.cos(radLat1) * math.cos(radLat2) * math.pow(math.sin(b / 2), 2)))
-    s = s*EARTH_RADIUS
+    s = 2 * math.asin(
+        math.sqrt(
+            math.pow(math.sin(a / 2), 2)
+            + math.cos(radLat1) * math.cos(radLat2) * math.pow(math.sin(b / 2), 2)
+        )
+    )
+    s = s * EARTH_RADIUS
     return s
 
 
-def RouteInformation(data_version: str, sttime: str, route: str, dist: str, listobj: list, SID: dict, STAR: dict, airportName: list):
+def RouteInformation(
+    data_version: str,
+    sttime: str,
+    route: str,
+    dist: str,
+    listobj: list,
+    SID: dict,
+    STAR: dict,
+    airportName: list,
+):
     dict_temp = {}
-    dict_temp['data_version'] = data_version
-    dict_temp['total_time'] = sttime
-    dict_temp['route'] = route
-    dict_temp['distance'] = dist
-    dict_temp['nodeinformation'] = listobj
-    dict_temp['SID'] = SID 
-    dict_temp['STAR'] = STAR 
-    dict_temp['airportName'] = airportName
+    dict_temp["data_version"] = data_version
+    dict_temp["total_time"] = sttime
+    dict_temp["route"] = route
+    dict_temp["distance"] = dist
+    dict_temp["nodeinformation"] = listobj
+    dict_temp["SID"] = SID
+    dict_temp["STAR"] = STAR
+    dict_temp["airportName"] = airportName
     return json.dumps(dict_temp)
+
 
 class RTFCALC:
 
@@ -113,12 +128,12 @@ class RTFCALC:
     edgecnt = 0
     datlen = 0
     """ End Of Data Read """
-    
+
     def __init__(self, airport_maps, nodeList, version):
         self.airport_maps = airport_maps
         self.nodeList = nodeList
         self.data_version = version
-        
+
     # 计算两个点之间的距离，传入的是两个点在nodeList中的下标值
     def CalcDist(self, iid1, iid2):
         nodeinstant1 = self.nodeList[iid1]
@@ -165,42 +180,58 @@ class RTFCALC:
                 # 获得搜索点数据结构对象
                 nextNode = searchingNode(self.nodeList[n.nend], self)
                 # 添加起点到当前点的航路字符串
-                nextNode.route = currentNode.route + \
-                    " "+n.name+" "+self.nodeList[n.nend].name
+                nextNode.route = (
+                    currentNode.route + " " + n.name + " " + self.nodeList[n.nend].name
+                )
                 #       边名                 航点名
                 # 复制当前点的路径到这个新点的路径list中
                 nextNode.routelist = list(currentNode.routelist)
                 # 并添加新点
-                nextNode.routelist.append(
-                    (n.name, self.nodeList[n.nend].name, n.nend))
+                nextNode.routelist.append((n.name, self.nodeList[n.nend].name, n.nend))
                 # 计算距离
-                nextNode.dist = currentNode.dist + \
-                    self.CalcDist(currentNode.iid, self.nodeList[n.nend].iid)
+                nextNode.dist = currentNode.dist + self.CalcDist(
+                    currentNode.iid, self.nodeList[n.nend].iid
+                )
                 # 松弛点
                 if allNodeDist[nextNode.iid] > nextNode.dist:
                     allNodeDist[nextNode.iid] = nextNode.dist
-                    heapq.heappush(
-                        queue, (nextNode.dist, id(nextNode), nextNode))
+                    heapq.heappush(queue, (nextNode.dist, id(nextNode), nextNode))
         time_end = time.time()
         # 获取航路计算时间
-        time_total = (time_end-timestart)
+        time_total = time_end - timestart
         sttime = "%.2f" % (time_total)
         print("Dijkstra Function: %s s" % (sttime))
         # 航路计算结果对象
         routeObj = None
         if targetNode is None:
             print("No result.")
-            routeObj = RouteInformation(self.data_version, sttime, "No result.", "0.00 nm / 0.00 km", None, None, None)
+            routeObj = RouteInformation(
+                self.data_version,
+                sttime,
+                "No result.",
+                "0.00 nm / 0.00 km",
+                None,
+                None,
+                None,
+            )
         else:
             # 航路距离
-            distStr = "%.2f nm / %.2f km" % (targetNode.dist/1.852,targetNode.dist)
+            distStr = "%.2f nm / %.2f km" % (targetNode.dist / 1.852, targetNode.dist)
             # 合并同一条航线上的航点
             routeTotal = self.SortRoute(targetNode.routelist)
             print(routeTotal, targetNode.dist)
             nodesinfor = self.getEveryNodeInforList(targetNode.routelist)
             # 创建查询结果对象
             routeObj = RouteInformation(
-                self.data_version, sttime, routeTotal, distStr, nodesinfor, self.SID, self.STAR, self.airportName)
+                self.data_version,
+                sttime,
+                routeTotal,
+                distStr,
+                nodesinfor,
+                self.SID,
+                self.STAR,
+                self.airportName,
+            )
 
         # 输出JSON数据
         return routeObj
@@ -221,21 +252,26 @@ class RTFCALC:
     def getEveryNodeInforList(self, routelist):
         li = [[self.startNode.name, self.startNode.px, self.startNode.py]]
         for i in routelist:
-            li.append([self.nodeList[i[2]].name,
-                       self.nodeList[i[2]].px, self.nodeList[i[2]].py])
+            li.append(
+                [
+                    self.nodeList[i[2]].name,
+                    self.nodeList[i[2]].px,
+                    self.nodeList[i[2]].py,
+                ]
+            )
         return li
 
     def SortRoute(self, routelist):
         stack = []
         for i in routelist:
             if stack.__len__() > 0:
-                if stack[stack.__len__()-1][0] == i[0]:
-                    stack[stack.__len__()-1] = i
+                if stack[stack.__len__() - 1][0] == i[0]:
+                    stack[stack.__len__() - 1] = i
                     continue
             stack.append(i)
-        answer = self.startNode.name+" "
+        answer = self.startNode.name + " "
         for i in stack:
-            answer = answer+i[0]+" "+i[1]+" "
+            answer = answer + i[0] + " " + i[1] + " "
         return answer
 
     def ReadSIDAirport(self, ICAO):
@@ -244,45 +280,59 @@ class RTFCALC:
         apdat = self.airport_maps["GLOBAL"]
         apLat = 0.0
         apLon = 0.0
-        self.airportName=[]
+        self.airportName = []
         for i in apdat:
             if i.__contains__(ICAO):
-                self.airportName.append(i.split(',')[2])
-                apLat = float(i.split(',')[3])
-                apLon = float(i.split(',')[4])
+                self.airportName.append(i.split(",")[2])
+                apLat = float(i.split(",")[3])
+                apLon = float(i.split(",")[4])
                 break
 
         airport_node = Node(ICAO, apLat, apLon, self)
-        dat_per_para = datasource.split('\n\n')
+        dat_per_para = datasource.split("\n\n")
         # print(dat_per_para)
         added_nodes = []
         for i in dat_per_para:
-            perline = i.split('\n')
+            perline = i.split("\n")
             # print(perline)
             if perline[0].__contains__("SID,"):
-                nextName = perline[perline.__len__()-1].split(',')[1]
-                lat = float(perline[perline.__len__()-1].split(',')[2])
-                lon = float(perline[perline.__len__()-1].split(',')[3])
+                nextName = perline[perline.__len__() - 1].split(",")[1]
+                lat = float(perline[perline.__len__() - 1].split(",")[2])
+                lon = float(perline[perline.__len__() - 1].split(",")[3])
                 # print(nextName)
                 tfNode = self.FindNodeByNAME(nextName, lat, lon)
                 if not nextName in added_nodes:
                     if tfNode is None:
-                        print("机场"+ICAO+"无法添加航点:"+nextName, lat, lon)
+                        print("机场" + ICAO + "无法添加航点:" + nextName, lat, lon)
                         continue
-                    print("机场"+ICAO+"添加航点:"+tfNode.name, lat, lon)
+                    print("机场" + ICAO + "添加航点:" + tfNode.name, lat, lon)
                     airport_node.nextList.append(
-                        Edge(airport_node, tfNode, "SID", 0, 0, 0))
+                        Edge(airport_node, tfNode, "SID", 0, 0, 0)
+                    )
                     added_nodes.append(nextName)
                 if tfNode is None:
-                    print("机场"+ICAO+"无法添加航点,无法读取进离场程序:"+nextName, lat, lon)
+                    print(
+                        "机场" + ICAO + "无法添加航点,无法读取进离场程序:" + nextName,
+                        lat,
+                        lon,
+                    )
                     continue
                 tempnodeinfor = []
-                for tt in i.split('\n'):
+                for tt in i.split("\n"):
                     if tt.__contains__("CF,") or tt.__contains__("TF,"):
                         tempnodeinfor.append(
-                            [tt.split(',')[1], float(tt.split(',')[2]), float(tt.split(',')[3])])
-                proc=[perline[0].split(',')[1], perline[0].split(',')[2], tempnodeinfor]
-                print("机场"+ICAO+"添加进离场程序:",proc[0])
+                            [
+                                tt.split(",")[1],
+                                float(tt.split(",")[2]),
+                                float(tt.split(",")[3]),
+                            ]
+                        )
+                proc = [
+                    perline[0].split(",")[1],
+                    perline[0].split(",")[2],
+                    tempnodeinfor,
+                ]
+                print("机场" + ICAO + "添加进离场程序:", proc[0])
                 if not self.SID.__contains__(tfNode.name):
                     self.SID[tfNode.name] = [proc]
                 else:
@@ -299,40 +349,52 @@ class RTFCALC:
         apLon = 0.0
         for i in apdat:
             if i.__contains__(ICAO):
-                self.airportName.append(i.split(',')[2])
-                apLat = float(i.split(',')[3])
-                apLon = float(i.split(',')[4])
+                self.airportName.append(i.split(",")[2])
+                apLat = float(i.split(",")[3])
+                apLon = float(i.split(",")[4])
                 break
 
         airport_node = Node(ICAO, apLat, apLon, self)
-        dat_per_para = datasource.split('\n\n')
+        dat_per_para = datasource.split("\n\n")
         added_nodes = []
         for i in dat_per_para:
-            perline = i.split('\n')
+            perline = i.split("\n")
             # print(perline)
             if perline[0].__contains__("STAR,"):
-                nextName = perline[1].split(',')[1]
-                lat = float(perline[1].split(',')[2])
-                lon = float(perline[1].split(',')[3])
+                nextName = perline[1].split(",")[1]
+                lat = float(perline[1].split(",")[2])
+                lon = float(perline[1].split(",")[3])
                 tfNode = self.FindNodeByNAME(nextName, lat, lon)
                 if not nextName in added_nodes:
                     if tfNode is None:
-                        print("机场"+ICAO+"无法添加航点:"+nextName, lat, lon)
+                        print("机场" + ICAO + "无法添加航点:" + nextName, lat, lon)
                         continue
-                    print("机场"+ICAO+"添加航点:"+tfNode.name, lat, lon)
-                    tfNode.nextList.append(
-                        Edge(tfNode,airport_node, "STAR", 0, 0, 0))
+                    print("机场" + ICAO + "添加航点:" + tfNode.name, lat, lon)
+                    tfNode.nextList.append(Edge(tfNode, airport_node, "STAR", 0, 0, 0))
                     added_nodes.append(nextName)
                 if tfNode is None:
-                    print("机场"+ICAO+"无法添加航点,无法读取进离场程序:"+nextName, lat, lon)
+                    print(
+                        "机场" + ICAO + "无法添加航点,无法读取进离场程序:" + nextName,
+                        lat,
+                        lon,
+                    )
                     continue
                 tempnodeinfor = []
-                for tt in i.split('\n'):
+                for tt in i.split("\n"):
                     if tt.__contains__("CF,") or tt.__contains__("TF,"):
                         tempnodeinfor.append(
-                            [tt.split(',')[1], float(tt.split(',')[2]), float(tt.split(',')[3])])
-                proc=[perline[0].split(',')[1], perline[0].split(',')[2], tempnodeinfor]
-                print("机场"+ICAO+"添加进离场程序:",proc[0])
+                            [
+                                tt.split(",")[1],
+                                float(tt.split(",")[2]),
+                                float(tt.split(",")[3]),
+                            ]
+                        )
+                proc = [
+                    perline[0].split(",")[1],
+                    perline[0].split(",")[2],
+                    tempnodeinfor,
+                ]
+                print("机场" + ICAO + "添加进离场程序:", proc[0])
                 if not self.STAR.__contains__(tfNode.name):
                     self.STAR[tfNode.name] = [proc]
                 else:
@@ -351,11 +413,19 @@ class RTFCALC:
         nodenamelist = []  # (nodename,hash)
         print("开始读点")
         for i in datlines:
-            if i.split(',')[0] == 'S':
-                nod1 = Node(i.split(',')[1], float(
-                    i.split(',')[2]), float(i.split(',')[3]), self)
-                nod2 = Node(i.split(',')[4], float(
-                    i.split(',')[5]), float(i.split(',')[6]), self)
+            if i.split(",")[0] == "S":
+                nod1 = Node(
+                    i.split(",")[1],
+                    float(i.split(",")[2]),
+                    float(i.split(",")[3]),
+                    self,
+                )
+                nod2 = Node(
+                    i.split(",")[4],
+                    float(i.split(",")[5]),
+                    float(i.split(",")[6]),
+                    self,
+                )
 
                 set1 = (nod1.name, CalcNodeHash(nod1.px, nod1.py))
                 set2 = (nod2.name, CalcNodeHash(nod2.px, nod2.py))
@@ -365,31 +435,39 @@ class RTFCALC:
                 if set2 not in nodenamelist:
                     self.nodeList.append(nod2)
                     nodenamelist.append(set2)
-            self.nodeReadCnt = self.nodeReadCnt+1
-            self.process_bar("输入点集", self.nodeReadCnt/datlen)
+            self.nodeReadCnt = self.nodeReadCnt + 1
+            self.process_bar("输入点集", self.nodeReadCnt / datlen)
         edgename = ""
         print()
         print("开始读边")
         for i in datlines:
-            if i.split(',')[0] == 'A':
-                edgename = i.split(',')[1]
-            elif i.split(',')[0] == 'S':
-                previousNode = self.FindNodeByNAME(i.split(',')[1], float(
-                    i.split(',')[2]), float(i.split(',')[3]))
-                nextNode = self.FindNodeByNAME(i.split(',')[4], float(
-                    i.split(',')[5]), float(i.split(',')[6]))
+            if i.split(",")[0] == "A":
+                edgename = i.split(",")[1]
+            elif i.split(",")[0] == "S":
+                previousNode = self.FindNodeByNAME(
+                    i.split(",")[1], float(i.split(",")[2]), float(i.split(",")[3])
+                )
+                nextNode = self.FindNodeByNAME(
+                    i.split(",")[4], float(i.split(",")[5]), float(i.split(",")[6])
+                )
                 previousNode.nextList.append(
-                    Edge(previousNode, nextNode, edgename, 0,
-                         0, 0))
-            self.edgecnt = self.edgecnt+1
-            self.process_bar("计算航路链接", self.edgecnt/datlen)
+                    Edge(previousNode, nextNode, edgename, 0, 0, 0)
+                )
+            self.edgecnt = self.edgecnt + 1
+            self.process_bar("计算航路链接", self.edgecnt / datlen)
         file.close()
         print()
-        print("读入："+str(self.edgecnt)+"条边")
+        print("读入：" + str(self.edgecnt) + "条边")
 
     def process_bar(self, name, percent, total_length=25):
-        bar = ''.join(["▮"] * int(round(percent) * total_length)) + ''
-        bar = '\r' + '[' + \
-            bar.ljust(total_length) + \
-            ' {:0>4.1f}%|'.format(percent*100) + '100%,'+name+']'
-        print(bar, end='', flush=True)
+        bar = "".join(["▮"] * int(round(percent) * total_length)) + ""
+        bar = (
+            "\r"
+            + "["
+            + bar.ljust(total_length)
+            + " {:0>4.1f}%|".format(percent * 100)
+            + "100%,"
+            + name
+            + "]"
+        )
+        print(bar, end="", flush=True)

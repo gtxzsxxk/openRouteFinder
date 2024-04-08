@@ -20,7 +20,7 @@ if mode == "y":
     airport_data["GLOBAL"] = apfile.readlines()
     apfile.close()
 
-    packedFile = open("airport_"+cycle+".air", "wb")
+    packedFile = open("airport_" + cycle + ".air", "wb")
     pickle.dump(airport_data, packedFile)
     print("数据生成完毕")
     packedFile.close()
@@ -28,25 +28,25 @@ if mode == "y":
 else:
     obj = RouteFinderLib.RTFCALC({}, [], None)
     obj.ReadASData(config.LOCAL_ASDATA_PATH)
-    print("nodeList占用内存大小："+str(int(obj.nodeList.__sizeof__()/1024))+" KB")
+    print("nodeList占用内存大小：" + str(int(obj.nodeList.__sizeof__() / 1024)) + " KB")
     print("数据读取完毕，开始生成序列化航路文件")
-    packedFile = open("navidata_"+cycle+".map", "wb")
+    packedFile = open("navidata_" + cycle + ".map", "wb")
     pickle.dump(obj.nodeList, packedFile)
     print("数据生成完毕")
     packedFile.close()
 
-#Automatically update config.py
-print('正在更新config.py配置文件')
+# Automatically update config.py
+print("正在更新config.py配置文件")
 
-if mode == 'y':
+if mode == "y":
     config.SET_APDAT_PATH = "airport_" + cycle + ".air"
 else:
-    config.SET_NAVDAT_PATH = "navidata_"+ cycle + ".map"
+    config.SET_NAVDAT_PATH = "navidata_" + cycle + ".map"
 
-with open(os.path.join(config.LOCAL_ASDATA_PATH ,'Cycle.txt'),'r+') as f:
+with open(os.path.join(config.LOCAL_ASDATA_PATH, "Cycle.txt"), "r+") as f:
     config.NAVDAT_CYCLE = f.read()
 
-content = '''# Global Settings.If finished deployments,just reset the items below.
+content = """# Global Settings.If finished deployments,just reset the items below.
 # LOCAL_ASDATA_PATH should be a Navigraph data of Aerosoft.
 LOCAL_ASDATA_PATH = "{}"
 
@@ -61,19 +61,20 @@ BackstageKey = "{}"
 SET_NAVDAT_PATH = "{}"
 SET_APDAT_PATH = "{}"
 NAVDAT_CYCLE = "{}"
-'''.format(config.LOCAL_ASDATA_PATH,
-           config.LISTEN_PORT,
-           config.METAR_UPDATE_MINUTE,
-           config.YourBingMapsKey,
-           config.BackstageKey,
-           config.SET_NAVDAT_PATH,
-           config.SET_APDAT_PATH,
-           config.NAVDAT_CYCLE)
+""".format(
+    config.LOCAL_ASDATA_PATH,
+    config.LISTEN_PORT,
+    config.METAR_UPDATE_MINUTE,
+    config.YourBingMapsKey,
+    config.BackstageKey,
+    config.SET_NAVDAT_PATH,
+    config.SET_APDAT_PATH,
+    config.NAVDAT_CYCLE,
+)
 
-confFile = open("./config.py","w+")
+confFile = open("./config.py", "w+")
 confFile.write(content)
 confFile.close()
 
 print(content)
-print('更新成功')
-
+print("更新成功")
