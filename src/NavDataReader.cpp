@@ -115,11 +115,11 @@ void NavDataReader::readAirways() {
                 return;
             }
 
-            if (fromType == NAVAID_CODE_FIX) {
+            if (fromType == NAVAID_CODE_FIX && !Navaids.count(NavaidInformation::toUniqueKey(*fromNavaid))) {
                 Navaids[NavaidInformation::toUniqueKey(*fromNavaid)] = *fromNavaid;
             }
 
-            if (toType == NAVAID_CODE_FIX) {
+            if (toType == NAVAID_CODE_FIX && !Navaids.count(NavaidInformation::toUniqueKey(*toNavaid))) {
                 Navaids[NavaidInformation::toUniqueKey(*toNavaid)] = *toNavaid;
             }
 
@@ -179,10 +179,11 @@ void NavDataReader::cacheFixes() {
 const NavaidInformation *
 NavDataReader::getNodeFromNavaidsOrFixesCache(const std::string &Identifier, const std::string &RegionCode,
                                               int FromType) {
+    /* 在Navaids找，没有就从缓存里取 */
     const NavaidInformation *desiredNavaid = nullptr;
+    auto key = NavaidInformation::toUniqueKey(Identifier, RegionCode);
+    if (FromType != NAVAID_CODE_FIX || Navaids.count(key)) {
 
-    if (FromType != NAVAID_CODE_FIX) {
-        auto key = NavaidInformation::toUniqueKey(Identifier, RegionCode);
         if (Navaids.count(key)) {
             desiredNavaid = &Navaids[key];
         } else {
@@ -190,7 +191,6 @@ NavDataReader::getNodeFromNavaidsOrFixesCache(const std::string &Identifier, con
         }
     } else {
         /* 从FIXES缓存里读。不能把FIXES直接全部加入总点集，这只会大大的降低效率。 */
-        auto key = NavaidInformation::toUniqueKey(Identifier, RegionCode);
         if (FixesCache.count(key)) {
             desiredNavaid = &FixesCache[key];
         } else {
