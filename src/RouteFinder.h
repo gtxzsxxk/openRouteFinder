@@ -18,6 +18,8 @@ public:
     RouteFinder(const NavDataReader &Reader) : Nodes(Reader.getNavaids()), DataReader(Reader) {};
 
     std::vector<NavaidInformation> calculateShortestRoute(const NavaidInformation & Start, const NavaidInformation & End);
+                                       const NavaidInformation &End,
+                                       AIRWAY_TYPE AirwayType = AIRWAY_HIGH);
 };
 
 

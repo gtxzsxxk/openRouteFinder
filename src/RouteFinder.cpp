@@ -39,6 +39,8 @@ public:
 
 std::vector<NavaidInformation>
 RouteFinder::calculateShortestRoute(const NavaidInformation &Start, const NavaidInformation &End) {
+RouteFinder::calculateShortestRoute(const NavaidInformation &Start, const NavaidInformation &End,
+                                    AIRWAY_TYPE AirwayType) {
     /* 对于每一次计算，都需要拷贝Reader读取的点集 */
     std::map<std::string, NavaidCompare> NavCompares;
     for (const auto &Element: Nodes) {
@@ -67,9 +69,9 @@ RouteFinder::calculateShortestRoute(const NavaidInformation &Start, const Navaid
         currentNode->Visited = true;
 
         for (const auto &Edge: currentNode->getEdges()) {
-//            if (Edge.AirwayType != AIRWAY_HIGH) {
-//                continue;
-//            }
+            if (Edge.AirwayType != AirwayType && Edge.AirwayType != AIRWAY_DONTCARE) {
+                continue;
+            }
             auto nextNode = NavaidCompare::getNavaidCompareFromMap(NavCompares, Edge.NextNavaidKey);
             auto newDistance = static_cast<NavaidInformation>(*currentNode) * static_cast<NavaidInformation>(*nextNode);
             if (currentNode->DistanceToStart + newDistance < nextNode->DistanceToStart) {
