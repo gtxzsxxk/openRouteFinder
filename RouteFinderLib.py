@@ -167,13 +167,8 @@ class RTFCALC:
 
             # 如果当前出队列的点是目标点
             if tempcurrnode.iid == end:
-                # 添加结果
-                if targetNode is None:
-                    targetNode = currentNode
-                # 判断当前点是否为最优解
-                else:
-                    if targetNode.dist > currentNode.dist:
-                        targetNode = currentNode
+                targetNode = currentNode
+                break
 
             # 访问与这个点连接的其他点，进行遍历操作
             for n in tempcurrnode.nextList:
