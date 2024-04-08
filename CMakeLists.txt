@@ -6,8 +6,6 @@ set(CMAKE_CXX_STANDARD 20)
 add_executable(openRouteFinder src/main.cpp
         src/NavDataReader.cpp
         src/NavDataReader.h
-        src/AirportInformation.cpp
-        src/AirportInformation.h
         src/NavaidInformation.cpp
         src/NavaidInformation.h
         src/RouteFinder.cpp

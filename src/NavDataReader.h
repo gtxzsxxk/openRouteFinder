@@ -16,10 +16,10 @@
 
 class NavDataReader {
     const std::string DataPath;
-    static constexpr std::string DATA_PATH_CYCLE_INFO = "cycle_info.txt";
-    static constexpr std::string DATA_PATH_AIRWAY = "earth_awy.dat";
-    static constexpr std::string DATA_PATH_NAVAIDS = "earth_nav.dat";
-    static constexpr std::string DATA_PATH_FIXES = "earth_fix.dat";
+    static constexpr char DATA_PATH_CYCLE_INFO[] = "cycle_info.txt";
+    static constexpr char DATA_PATH_AIRWAY[] = "earth_awy.dat";
+    static constexpr char DATA_PATH_NAVAIDS[] = "earth_nav.dat";
+    static constexpr char DATA_PATH_FIXES[] = "earth_fix.dat";
     std::string DataProvider;
     std::string DataCycle;
     std::string DataRevision;

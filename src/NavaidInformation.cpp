@@ -14,6 +14,11 @@ NavaidInformation::NavaidInformation(const std::string &Line, int &Failed, bool 
     char RegionCodeBuffer[16];
     char FullNameBuffer[32];
 
+    memset(ICAOBuffer, 0 ,16);
+    memset(IdentifierBuffer, 0, 16);
+    memset(RegionCodeBuffer, 0, 16);
+    memset(FullNameBuffer, 0, 32);
+
     if (!FromFixes) {
         int typeCode;
         [[gnu::unused]] char unusedData[16];
