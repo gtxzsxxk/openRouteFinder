@@ -5,6 +5,7 @@
 
 int main() {
     auto reader = NavDataReader("../tests/navdata/");
+
     auto t1 = std::chrono::steady_clock::now();
     reader.readNavaids();
     auto t2 = std::chrono::steady_clock::now();
@@ -14,6 +15,8 @@ int main() {
     reader.cacheFixes();
     t2 = std::chrono::steady_clock::now();
     dr_us = std::chrono::duration<double, std::micro>(t2 - t1).count();
+
+    reader.readAirportProcedure("ZGHA");
 
     t1 = std::chrono::steady_clock::now();
     reader.readAirways();

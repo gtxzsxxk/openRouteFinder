@@ -13,4 +13,6 @@ add_executable(openRouteFinder src/main.cpp
         src/NavaidCompare.cpp
         src/NavaidCompare.h
         src/RouteResult.cpp
-        src/RouteResult.h)
+        src/RouteResult.h
+        src/AirportProcedure.cpp
+        src/AirportProcedure.h)

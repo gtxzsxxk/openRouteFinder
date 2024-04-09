@@ -10,6 +10,7 @@
 #include <vector>
 
 enum NAVAID_CODE {
+    NAVAID_DONTCARE = 0,
     NAVAID_CODE_NDB = 2,
     NAVAID_CODE_VOR_VORTAC_VORDME,
     NAVAID_CODE_LLZ,

@@ -35,7 +35,7 @@ class NavDataReader {
     mutable std::map<std::string, NavaidInformation> FixesCache;
 
     const NavaidInformation *
-    getNodeFromNavaidsOrFixesCache(const std::string &Identifier, const std::string &RegionCode, int FromType);
+    getNodeFromNavaidsOrFixesCache(const std::string &Identifier, const std::string &RegionCode, int NavType);
 
 public:
     NavDataReader(std::string DataPath);
@@ -45,6 +45,9 @@ public:
     void cacheFixes();
 
     void readAirways();
+
+    /* later should be private */
+    void readAirportProcedure(const std::string &ICAO);
 
     const NavaidInformation *getNodeFromNavaids(const std::string &Identifier, const std::string &RegionCode) const;
 
