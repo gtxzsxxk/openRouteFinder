@@ -90,6 +90,8 @@ public:
 
     std::vector<Airway> &getEdges();
 
+    NAVAID_CODE getNavaidType() const;
+
     double operator*(const NavaidInformation &node) const;
 };
 

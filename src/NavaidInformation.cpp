@@ -106,3 +106,7 @@ std::vector<Airway> &NavaidInformation::getEdges() {
 bool NavaidInformation::isEqualTo(const NavaidInformation *navaidInformation) const {
     return Identifier == navaidInformation->Identifier && RegionCode == navaidInformation->RegionCode;
 }
+
+NAVAID_CODE NavaidInformation::getNavaidType() const {
+    return Type;
+}

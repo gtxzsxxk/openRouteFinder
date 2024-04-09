@@ -58,16 +58,18 @@ void NavDataReader::readNavaids() {
     while (!input.eof()) {
         std::string buffer;
         std::getline(input, buffer);
-        double dr_us;
-        auto t1 = std::chrono::steady_clock::now();
-        auto t2 = std::chrono::steady_clock::now();
         int failed = 0;
         auto node = NavaidInformation(buffer, failed);
+        auto key = NavaidInformation::toUniqueKey(node);
         if (!failed) {
-            Navaids[NavaidInformation::toUniqueKey(node)] = node;
+            if (Navaids.count(key)) {
+                if (node.getNavaidType() == NAVAID_CODE_LLZ) {
+                    Navaids[key] = node;
+                }
+            } else {
+                Navaids[key] = node;
+            }
         }
-
-        dr_us = std::chrono::duration<double, std::micro>(t2 - t1).count();
     }
 }
 
@@ -105,7 +107,7 @@ void NavDataReader::readAirways() {
         airway.AirwayType = (AIRWAY_TYPE) airwayType;
         auto airwayStream = std::stringstream(airwayNameBuffer);
         std::string airwayName;
-        while(std::getline(airwayStream, airwayName, '-')) {
+        while (std::getline(airwayStream, airwayName, '-')) {
             airway.Name = airwayName;
 
             auto *fromNavaid = getNodeFromNavaidsOrFixesCache(fromNavaidBuffer, fromRegionBuffer, fromType);
