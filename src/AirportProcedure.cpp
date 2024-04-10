@@ -167,8 +167,13 @@ void AirportProcedureReadRunways(const std::string &Line,
 
     auto runwayObject = Runway();
     runwayObject.RunwayName = runway;
-    runwayObject.FreqILS = ilsPointer->getFreq();
-    runwayObject.Information = ilsPointer->getFullName();
+    if (ilsPointer) {
+        runwayObject.FreqILS = ilsPointer->getFreq();
+        runwayObject.Information = ilsPointer->getFullName();
+    } else {
+        runwayObject.FreqILS = 0;
+        runwayObject.Information = "N/A";
+    }
 
     std::string lat, lon;
     auto latlonIndex = 0;
