@@ -32,6 +32,8 @@ public:
     RouteResult calculateShortestRoute(const NavaidInformation &Start,
                                        const NavaidInformation &End,
                                        AIRWAY_TYPE AirwayType = AIRWAY_HIGH);
+
+    std::string calculateBetweenAirports(const std::string &Departure, const std::string &Arrival);
 };
 
 

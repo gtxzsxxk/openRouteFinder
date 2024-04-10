@@ -5,6 +5,8 @@
 #include "RouteFinder.h"
 #include <queue>
 #include <vector>
+#include <set>
+#include <sstream>
 
 enum HISTORY_DATA_TYPE {
     HISTORY_TYPE_DOUBLE,
@@ -171,4 +173,55 @@ NavaidCompare *RouteFinder::getNavaidFromCacheByKey(const std::string &Key) {
 
 NavaidCompare *RouteFinder::getNavaidFromCacheByKey(const NavaidInformation &Node) {
     return getNavaidFromCacheByKey(NavaidInformation::toUniqueKey(Node));
+}
+
+std::string RouteFinder::calculateBetweenAirports(const std::string &Departure, const std::string &Arrival) {
+    auto sidData = DataReader.readAirportProcedure(Departure);
+    auto starData = DataReader.readAirportProcedure(Arrival);
+
+    std::set<const NavaidInformation *> sidNodes;
+    std::set<const NavaidInformation *> starNodes;
+    for (const auto &procedure: sidData) {
+        if (procedure.ProcedureType != AIRPORT_PROCEDURE_SID) {
+            continue;
+        }
+
+        auto node = procedure.ProcedureNodes[procedure.ProcedureNodes.size() - 1];
+        if (!sidNodes.count(node)) {
+            sidNodes.insert(node);
+        }
+    }
+    for (const auto &procedure: starData) {
+        if (procedure.ProcedureType != AIRPORT_PROCEDURE_STAR) {
+            continue;
+        }
+
+        auto node = procedure.ProcedureNodes[0];
+        if (!starNodes.count(node)) {
+            starNodes.insert(node);
+        }
+    }
+
+    double minDist = 0xffffffff;
+    const NavaidInformation *selectedSidNode;
+    const NavaidInformation *selectedStarNode;
+    for (const auto &i: sidNodes) {
+        for (const auto &j: starNodes) {
+            auto dist = *i * *j;
+            if (dist < minDist) {
+                minDist = dist;
+                selectedSidNode = i;
+                selectedStarNode = j;
+            }
+        }
+    }
+
+    auto result = calculateShortestRoute(*selectedSidNode, *selectedStarNode);
+    result.setPrefixAndEncode("SID", "");
+
+    std::stringstream stringStream;
+    stringStream << result;
+    std::string resultString = stringStream.str();
+    resultString = Departure + " " + resultString + "STAR " +Arrival;
+    return resultString;
 };
