@@ -17,6 +17,8 @@ void AirportProcedureReadSIDSTAR(const std::string &ICAO, const std::string &Lin
     static std::string nodeRegion;
 
     static std::string LastProcedure;
+    static std::string LastLine;
+    static size_t LastIndex;
     static decltype(AirportProcedure::ProcedureType) LastProcedureType;
     static decltype(AirportProcedure::ProcedureNodes) nodesEachProcedure;
     static decltype(AirportProcedure::RunwayNames) runways;
@@ -48,9 +50,16 @@ void AirportProcedureReadSIDSTAR(const std::string &ICAO, const std::string &Lin
         runways.erase(unique(runways.begin(), runways.end()), runways.end());
         procedureObject.RunwayNames = runways;
         procedureObject.ProcedureNodes = nodesEachProcedure;
-        ProcedureVector.push_back(procedureObject);
+
+        /* Only append if the procedure is RNAV */
+        /* TODO: 改为没有点采用非RNAV的策略 */
+        if(LastLine[LastIndex - 2] != '2') {
+            ProcedureVector.push_back(procedureObject);
+        }
+
         nodesEachProcedure.clear();
         LastProcedure.clear();
+        LastLine.clear();
         runways.clear();
     }
 
@@ -89,6 +98,8 @@ void AirportProcedureReadSIDSTAR(const std::string &ICAO, const std::string &Lin
     }
 
     LastProcedure = procedure;
+    LastIndex = startIndex;
+    LastLine = Line;
     if (Line[0] == 'S' && Line[1] == 'I') {
         LastProcedureType = AIRPORT_PROCEDURE_SID;
     } else if (Line[0] == 'S' && Line[1] == 'T') {
