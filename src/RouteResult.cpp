@@ -46,6 +46,6 @@ std::string RouteResult::toString() const {
 }
 
 std::ostream &operator<<(std::ostream &Out, const RouteResult &Result) {
-    Out << Result.toString() << std::endl;
+    Out << Result.toString();
     return Out;
 }
