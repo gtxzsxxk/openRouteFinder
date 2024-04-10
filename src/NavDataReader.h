@@ -5,6 +5,7 @@
 #ifndef OPENROUTEFINDER_NAVDATAREADER_H
 #define OPENROUTEFINDER_NAVDATAREADER_H
 
+#include "AirportProcedure.h"
 #include "NavaidInformation.h"
 
 #include <iostream>
@@ -13,6 +14,8 @@
 #include <fstream>
 #include <regex>
 #include <map>
+
+class AirportProcedure;
 
 class NavDataReader {
     const std::string DataPath;
@@ -25,7 +28,7 @@ class NavDataReader {
     std::string DataRevision;
     std::string DataValidRange;
 
-    std::string getFileFullPath(const std::string &RelaPath);
+    std::string getFileFullPath(const std::string &RelaPath) const;
 
     void printCycleInformation();
 
@@ -33,9 +36,6 @@ class NavDataReader {
 
     mutable std::map<std::string, NavaidInformation> Navaids;
     mutable std::map<std::string, NavaidInformation> FixesCache;
-
-    const NavaidInformation *
-    getNodeFromNavaidsOrFixesCache(const std::string &Identifier, const std::string &RegionCode, int NavType);
 
 public:
     NavDataReader(std::string DataPath);
@@ -46,14 +46,18 @@ public:
 
     void readAirways();
 
-    /* later should be private */
-    void readAirportProcedure(const std::string &ICAO);
+    std::vector<AirportProcedure> readAirportProcedure(const std::string &ICAO) const;
 
     const NavaidInformation *getNodeFromNavaids(const std::string &Identifier, const std::string &RegionCode) const;
 
     const NavaidInformation *getNodeFromNavaids(const NavaidInformation &Node) const;
 
     [[nodiscard]] const std::map<std::string, NavaidInformation> &getNavaids() const;
+
+    const NavaidInformation *
+    getNodeFromNavaidsOrFixesCache(const std::string &Identifier, const std::string &RegionCode, int NavType) const;
+
+    friend AirportProcedure;
 };
 
 
