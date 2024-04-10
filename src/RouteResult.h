@@ -19,6 +19,7 @@ public:
     void setPrefixAndEncode(const std::string &StartPrefix, const std::string &EndPrefix);
 
     [[nodiscard]] std::string toString() const;
+    [[nodiscard]] std::string toString(const std::string &Departure, const std::string &Arrival) const;
 
     friend std::ostream &operator<<(std::ostream &Out, const RouteResult &Result);
 };

@@ -5,7 +5,6 @@
 #include "RouteFinder.h"
 #include <queue>
 #include <vector>
-#include <set>
 #include <sstream>
 
 enum HISTORY_DATA_TYPE {
@@ -175,7 +174,9 @@ NavaidCompare *RouteFinder::getNavaidFromCacheByKey(const NavaidInformation &Nod
     return getNavaidFromCacheByKey(NavaidInformation::toUniqueKey(Node));
 }
 
-std::string RouteFinder::calculateBetweenAirports(const std::string &Departure, const std::string &Arrival) {
+std::tuple<std::string, std::set<const NavaidInformation *>, std::set<const NavaidInformation *>>
+RouteFinder::calculateBetweenAirports(const std::string &Departure, const std::string &Arrival,
+                                      std::string SpecifySID, std::string SpecifySTAR) {
     auto sidData = DataReader.readAirportProcedure(Departure);
     auto starData = DataReader.readAirportProcedure(Arrival);
 
@@ -216,12 +217,23 @@ std::string RouteFinder::calculateBetweenAirports(const std::string &Departure, 
         }
     }
 
-    auto result = calculateShortestRoute(*selectedSidNode, *selectedStarNode);
-    result.setPrefixAndEncode("SID", "");
+    if (!SpecifySID.empty()) {
+        for (const auto &i: sidNodes) {
+            if (i->getIdentifier() == SpecifySID) {
+                selectedSidNode = i;
+            }
+        }
+    }
 
-    std::stringstream stringStream;
-    stringStream << result;
-    std::string resultString = stringStream.str();
-    resultString = Departure + " " + resultString + "STAR " +Arrival;
-    return resultString;
+    if (!SpecifySTAR.empty()) {
+        for (const auto &i: starNodes) {
+            if (i->getIdentifier() == SpecifySTAR) {
+                selectedStarNode = i;
+            }
+        }
+    }
+
+    auto result = calculateShortestRoute(*selectedSidNode, *selectedStarNode);
+
+    return std::make_tuple(result.toString(Departure, Arrival), sidNodes, starNodes);
 };

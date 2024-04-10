@@ -45,6 +45,18 @@ std::string RouteResult::toString() const {
     return Route;
 }
 
+std::string RouteResult::toString(const std::string &Departure, const std::string &Arrival) const {
+    std::string Route;
+    bool started = false;
+    for (const auto &WayPoint: EncodeRouteNodes) {
+        Route += (started ? WayPoint.ViaEdge: "SID") + " " + WayPoint.getIdentifier() + " ";
+        started = true;
+    }
+    Route = Departure + " " + Route;
+    Route += "STAR " + Arrival;
+    return Route;
+}
+
 std::ostream &operator<<(std::ostream &Out, const RouteResult &Result) {
     Out << Result.toString();
     return Out;

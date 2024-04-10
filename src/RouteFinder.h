@@ -11,6 +11,7 @@
 #include "RouteResult.h"
 #include <iostream>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 #include <algorithm>
@@ -20,8 +21,9 @@ class RouteFinder {
     std::vector<NavaidCompare> NavCompareCache;
     const NavDataReader &DataReader;
 
-    NavaidCompare * getNavaidFromCacheByKey(const std::string &Key);
-    NavaidCompare * getNavaidFromCacheByKey(const NavaidInformation &Node);
+    NavaidCompare *getNavaidFromCacheByKey(const std::string &Key);
+
+    NavaidCompare *getNavaidFromCacheByKey(const NavaidInformation &Node);
 
 public:
 
@@ -33,7 +35,9 @@ public:
                                        const NavaidInformation &End,
                                        AIRWAY_TYPE AirwayType = AIRWAY_HIGH);
 
-    std::string calculateBetweenAirports(const std::string &Departure, const std::string &Arrival);
+    std::tuple<std::string, std::set<const NavaidInformation *>, std::set<const NavaidInformation *>>
+    calculateBetweenAirports(const std::string &Departure, const std::string &Arrival,
+                             std::string SpecifySID = "", std::string SpecifySTAR = "");
 };
 
 
