@@ -17,11 +17,11 @@ void AirportProcedureReadSIDSTAR(const std::string &ICAO, const std::string &Lin
     static std::string nodeRegion;
 
     static std::string LastProcedure;
+    static decltype(AirportProcedure::ProcedureType) LastProcedureType;
     static decltype(AirportProcedure::ProcedureNodes) nodesEachProcedure;
     static decltype(AirportProcedure::RunwayNames) runways;
 
     size_t startIndex;
-    decltype(AirportProcedure::ProcedureType) procedureType;
 
     if (ICAO == "CLEAR") {
         nodesEachProcedure.clear();
@@ -32,10 +32,8 @@ void AirportProcedureReadSIDSTAR(const std::string &ICAO, const std::string &Lin
 
     if (Line[0] == 'S' && Line[1] == 'I') {
         startIndex = startIndexSID;
-        procedureType = AIRPORT_PROCEDURE_SID;
     } else if (Line[0] == 'S' && Line[1] == 'T') {
         startIndex = startIndexSTAR;
-        procedureType = AIRPORT_PROCEDURE_STAR;
     } else {
         return;
     }
@@ -45,7 +43,7 @@ void AirportProcedureReadSIDSTAR(const std::string &ICAO, const std::string &Lin
     if (procedure != LastProcedure && !LastProcedure.empty()) {
         auto procedureObject = AirportProcedure(ICAO);
         procedureObject.ProcedureIdentifier = LastProcedure;
-        procedureObject.ProcedureType = procedureType;
+        procedureObject.ProcedureType = LastProcedureType;
         std::sort(runways.begin(), runways.end());
         runways.erase(unique(runways.begin(), runways.end()), runways.end());
         procedureObject.RunwayNames = runways;
@@ -91,6 +89,11 @@ void AirportProcedureReadSIDSTAR(const std::string &ICAO, const std::string &Lin
     }
 
     LastProcedure = procedure;
+    if (Line[0] == 'S' && Line[1] == 'I') {
+        LastProcedureType = AIRPORT_PROCEDURE_SID;
+    } else if (Line[0] == 'S' && Line[1] == 'T') {
+        LastProcedureType = AIRPORT_PROCEDURE_STAR;
+    }
 }
 
 void AirportProcedureReadRunways(const std::string &Line,
