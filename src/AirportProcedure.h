@@ -4,7 +4,10 @@
 
 #ifndef OPENROUTEFINDER_AIRPORTPROCEDURE_H
 #define OPENROUTEFINDER_AIRPORTPROCEDURE_H
+
 #include "NavaidInformation.h"
+#include "NavaidCompare.h"
+#include "NavDataReader.h"
 
 #include <string>
 #include <vector>
@@ -15,20 +18,34 @@ enum AIRPORT_PROCEDURE_TYPE {
 };
 
 class Runway {
-    double Latitude;
-    double Longitude;
+public:
+    std::string RunwayName;
+    std::string Latitude;
+    std::string Longitude;
     int FreqILS;
-    int Heading;
     std::string Information;
 };
 
-class AirportProcedure {
+class NavDataReader;
+
+class AirportProcedure: public NavaidCompare {
 public:
+    AirportProcedure() = delete;
+    AirportProcedure(const std::string &ICAO);
+
     std::string ProcedureIdentifier;
     AIRPORT_PROCEDURE_TYPE ProcedureType;
-    std::string Runway;
-    std::vector<const NavaidInformation*> ProcedureNodes;
+    std::vector<std::string> RunwayNames;
+    std::vector<Runway> RunwayVector;
+    std::vector<const NavaidInformation *> ProcedureNodes;
 };
 
+void AirportProcedureReadSIDSTAR(const std::string &ICAO, const std::string &Line,
+                                 std::vector<AirportProcedure> &ProcedureVector,
+                                 const NavDataReader &Reader);
+
+void AirportProcedureReadRunways(const std::string &Line,
+                                 std::vector<AirportProcedure> &ProcedureVector,
+                                 const NavDataReader &Reader);
 
 #endif //OPENROUTEFINDER_AIRPORTPROCEDURE_H
