@@ -222,3 +222,19 @@ AirportProcedure::AirportProcedure(const std::string &ICAO) {
     /* TODO: read airport name here */
     FullName = ICAO;
 }
+
+std::ostream &operator<<(std::ostream &oStream, const AirportProcedure &Procedure) {
+    oStream << Procedure.ICAO << (Procedure.ProcedureType == AIRPORT_PROCEDURE_SID ? " SID " : " STAR ")
+            << "Information" << std::endl;
+    oStream << "Name: " << Procedure.ProcedureIdentifier << std::endl;
+    oStream << "Runways: " << std::endl;
+    for (const auto &runway: Procedure.RunwayVector) {
+        oStream << runway.RunwayName << std::endl;
+        oStream << "\t" << runway.Latitude << " " << runway.Longitude << std::endl;
+        if (Procedure.ProcedureType == AIRPORT_PROCEDURE_STAR) {
+            oStream << "\tILS Frequency: " << runway.FreqILS / 100 << "." << runway.FreqILS % 100 << std::endl;
+            oStream << "\tInformation: " << runway.Information << std::endl;
+        }
+    }
+    return oStream;
+}

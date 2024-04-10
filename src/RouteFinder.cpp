@@ -174,22 +174,32 @@ NavaidCompare *RouteFinder::getNavaidFromCacheByKey(const NavaidInformation &Nod
     return getNavaidFromCacheByKey(NavaidInformation::toUniqueKey(Node));
 }
 
-std::tuple<std::string, std::set<const NavaidInformation *>, std::set<const NavaidInformation *>>
+std::tuple<std::string,
+        AirportProcedure, AirportProcedure,
+        std::vector<const NavaidInformation *>,
+        std::vector<const NavaidInformation *>>
 RouteFinder::calculateBetweenAirports(const std::string &Departure, const std::string &Arrival,
                                       std::string SpecifySID, std::string SpecifySTAR) {
     auto sidData = DataReader.readAirportProcedure(Departure);
     auto starData = DataReader.readAirportProcedure(Arrival);
 
-    std::set<const NavaidInformation *> sidNodes;
-    std::set<const NavaidInformation *> starNodes;
+    auto nodeCmp = [](const std::pair<const NavaidInformation *, const AirportProcedure *> &a,
+                      const std::pair<const NavaidInformation *, const AirportProcedure *> &b) {
+        return a.first < b.first;
+    };
+
+    std::set<std::pair<const NavaidInformation *, const AirportProcedure *>, decltype(nodeCmp)> sidNodes(nodeCmp);
+    std::set<std::pair<const NavaidInformation *, const AirportProcedure *>, decltype(nodeCmp)> starNodes(nodeCmp);
+
     for (const auto &procedure: sidData) {
         if (procedure.ProcedureType != AIRPORT_PROCEDURE_SID) {
             continue;
         }
 
         auto node = procedure.ProcedureNodes[procedure.ProcedureNodes.size() - 1];
-        if (!sidNodes.count(node)) {
-            sidNodes.insert(node);
+        auto pair = std::make_pair(node, &procedure);
+        if (!sidNodes.count(pair)) {
+            sidNodes.insert(pair);
         }
     }
     for (const auto &procedure: starData) {
@@ -198,42 +208,64 @@ RouteFinder::calculateBetweenAirports(const std::string &Departure, const std::s
         }
 
         auto node = procedure.ProcedureNodes[0];
-        if (!starNodes.count(node)) {
-            starNodes.insert(node);
+        auto pair = std::make_pair(node, &procedure);
+        if (!starNodes.count(pair)) {
+            starNodes.insert(pair);
         }
     }
 
     double minDist = 0xffffffff;
     const NavaidInformation *selectedSidNode;
+    const AirportProcedure *selectedSidProcedure;
     const NavaidInformation *selectedStarNode;
+    const AirportProcedure *selectedStarProcedure;
     for (const auto &i: sidNodes) {
         for (const auto &j: starNodes) {
-            auto dist = *i * *j;
+            auto dist = *(i.first) * *(j.first);
             if (dist < minDist) {
                 minDist = dist;
-                selectedSidNode = i;
-                selectedStarNode = j;
+                selectedSidNode = i.first;
+                selectedSidProcedure = i.second;
+                selectedStarNode = j.first;
+                selectedStarProcedure = j.second;
             }
         }
     }
 
     if (!SpecifySID.empty()) {
         for (const auto &i: sidNodes) {
-            if (i->getIdentifier() == SpecifySID) {
-                selectedSidNode = i;
+            if (i.first->getIdentifier() == SpecifySID) {
+                selectedSidNode = i.first;
+                selectedSidProcedure = i.second;
             }
         }
     }
 
     if (!SpecifySTAR.empty()) {
         for (const auto &i: starNodes) {
-            if (i->getIdentifier() == SpecifySTAR) {
-                selectedStarNode = i;
+            if (i.first->getIdentifier() == SpecifySTAR) {
+                selectedStarNode = i.first;
+                selectedStarProcedure = i.second;
             }
         }
     }
 
+    /* TODO: support return procedure information and runways if specified */
+    /* TODO: make it a session */
+
     auto result = calculateShortestRoute(*selectedSidNode, *selectedStarNode);
 
-    return std::make_tuple(result.toString(Departure, Arrival), sidNodes, starNodes);
+    std::vector<const NavaidInformation *> sidNodesVector;
+    std::vector<const NavaidInformation *> starNodesVector;
+    sidNodesVector.reserve(sidNodes.size());
+    starNodesVector.reserve(starNodes.size());
+    for (const auto &i: sidNodes) {
+        sidNodesVector.push_back(i.first);
+    }
+    for (const auto &i: starNodes) {
+        starNodesVector.push_back(i.first);
+    }
+
+    return std::make_tuple(result.toString(Departure, Arrival),
+                           *selectedSidProcedure, *selectedStarProcedure, sidNodesVector, starNodesVector);
 };

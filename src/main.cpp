@@ -41,13 +41,17 @@ int main() {
         std::cout << "Results: " << std::get<0>(results) << std::endl;
         dr_us = std::chrono::duration<double, std::milli>(t2 - t1).count();
         std::cout << "Time: " << dr_us << " (ms)" << std::endl;
-        std::cout << "Possible SID: ";
-        for (auto const &sid: std::get<1>(results)) {
+
+        std::cout << std::get<1>(results);
+        std::cout << "Alternative SID: ";
+        for (auto const &sid: std::get<3>(results)) {
             std::cout << sid->getIdentifier() << " ";
         }
         std::cout << std::endl;
-        std::cout << "Possible STAR: ";
-        for (auto const &star: std::get<2>(results)) {
+
+        std::cout << std::get<2>(results);
+        std::cout << "Alternative STAR: ";
+        for (auto const &star: std::get<4>(results)) {
             std::cout << star->getIdentifier() << " ";
         }
         std::cout << std::endl;

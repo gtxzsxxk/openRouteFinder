@@ -9,6 +9,7 @@
 #include "NavaidCompare.h"
 #include "NavDataReader.h"
 
+#include <iostream>
 #include <string>
 #include <vector>
 
@@ -38,6 +39,8 @@ public:
     std::vector<std::string> RunwayNames;
     std::vector<Runway> RunwayVector;
     std::vector<const NavaidInformation *> ProcedureNodes;
+
+    friend std::ostream &operator<<(std::ostream &oStream, const AirportProcedure &Procedure);
 };
 
 void AirportProcedureReadSIDSTAR(const std::string &ICAO, const std::string &Line,

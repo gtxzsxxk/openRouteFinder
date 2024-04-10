@@ -35,7 +35,10 @@ public:
                                        const NavaidInformation &End,
                                        AIRWAY_TYPE AirwayType = AIRWAY_HIGH);
 
-    std::tuple<std::string, std::set<const NavaidInformation *>, std::set<const NavaidInformation *>>
+    std::tuple<std::string,
+            AirportProcedure, AirportProcedure,
+            std::vector<const NavaidInformation *>,
+            std::vector<const NavaidInformation *>>
     calculateBetweenAirports(const std::string &Departure, const std::string &Arrival,
                              std::string SpecifySID = "", std::string SpecifySTAR = "");
 };
