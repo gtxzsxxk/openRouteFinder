@@ -162,11 +162,11 @@ void AirportProcedureReadRunways(const std::string &Line,
         runwayILSNode += Line[ilsNodeIndex++];
     }
 
-    auto ilsPointer = Reader.getNodeFromNavaidsOrFixesCache(runwayILSNode, ilsNodeAndRegion[runwayILSNode],
-                                                            NAVAID_DONTCARE);
-
     auto runwayObject = Runway();
     runwayObject.RunwayName = runway;
+
+    auto ilsPointer = Reader.getNodeFromNavaidsOrFixesCache(runwayILSNode, ilsNodeAndRegion[runwayILSNode],
+                                                            NAVAID_DONTCARE);
     if (ilsPointer) {
         runwayObject.FreqILS = ilsPointer->getFreq();
         runwayObject.Information = ilsPointer->getFullName();
