@@ -42,11 +42,14 @@ class NavaidInformation;
 
 class Airway {
 public:
+
+    AIRWAY_TYPE AirwayType;
     std::string Name;
+
     std::string NextNavaidName;
     std::string NextNavaidKey;
     int NextNavaidCacheIndex;
-    AIRWAY_TYPE AirwayType;
+
     int AirwayBaseHeight;
     int AirwayTopHeight;
 
@@ -54,6 +57,7 @@ public:
 };
 
 class NavaidInformation {
+protected:
     NAVAID_CODE Type;
     double Latitude{};
     double Longitude{};
@@ -94,6 +98,10 @@ public:
     NAVAID_CODE getNavaidType() const;
 
     double operator*(const NavaidInformation &node) const;
+
+    int getFreq() const;
+
+    const std::string &getFullName() const;
 };
 
 

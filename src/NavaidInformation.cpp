@@ -110,3 +110,11 @@ bool NavaidInformation::isEqualTo(const NavaidInformation *navaidInformation) co
 NAVAID_CODE NavaidInformation::getNavaidType() const {
     return Type;
 }
+
+int NavaidInformation::getFreq() const {
+    return Freq;
+}
+
+const std::string &NavaidInformation::getFullName() const {
+    return FullName;
+}
