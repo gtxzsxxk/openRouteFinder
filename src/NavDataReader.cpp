@@ -8,7 +8,7 @@
 #include <chrono>
 #include <sstream>
 
-std::string NavDataReader::getFileFullPath(const std::string &RelaPath) {
+std::string NavDataReader::getFileFullPath(const std::string &RelaPath) const {
     return DataPath + RelaPath;
 }
 
@@ -181,11 +181,11 @@ void NavDataReader::cacheFixes() {
 
 const NavaidInformation *
 NavDataReader::getNodeFromNavaidsOrFixesCache(const std::string &Identifier, const std::string &RegionCode,
-                                              int NavType) {
+                                              int NavType) const {
     /* 在Navaids找，没有就从缓存里取 */
     const NavaidInformation *desiredNavaid = nullptr;
     auto key = NavaidInformation::toUniqueKey(Identifier, RegionCode);
-    if(NavType == NAVAID_DONTCARE) {
+    if (NavType == NAVAID_DONTCARE) {
         if (Navaids.count(key)) {
             return &Navaids[key];
         }
@@ -241,64 +241,22 @@ const NavaidInformation *NavDataReader::getNodeFromNavaids(const NavaidInformati
     return nullptr;
 }
 
-void NavDataReader::readAirportProcedure(const std::string &ICAO) {
-    const size_t startIndexSID = 10;
-    const size_t startIndexSTAR = 11;
-    std::string lastProcedure;
-    std::vector<const NavaidInformation*> NodesEachProcedure;
+std::vector<AirportProcedure> NavDataReader::readAirportProcedure(const std::string &ICAO) const {
     std::vector<AirportProcedure> procedureVector;
-
-    std::string runway,nodeIdentifier,nodeRegion;
 
     std::ifstream input(getFileFullPath("CIFP/" + ICAO + ".dat"), std::ios_base::in);
     if (!input.is_open()) {
         std::cerr << "Failed to open Airport Procedure file." << std::endl;
-        return;
+        return {};
     }
     std::cout << "Reading airport procedure of " << ICAO << " ..." << std::endl;
     while (!input.eof()) {
         std::string buffer;
         std::getline(input, buffer);
-        if (buffer[0] == 'S') {
-            if (buffer[1] == 'I') {
-                /* SID */
-                auto procedure = buffer.substr(startIndexSID, buffer.find(',', startIndexSID) - startIndexSID);
-
-                if(procedure != lastProcedure && !lastProcedure.empty()) {
-                    auto procedureObject = AirportProcedure();
-                    procedureObject.ProcedureIdentifier = lastProcedure;
-                    procedureObject.ProcedureType = AIRPORT_PROCEDURE_SID;
-                    procedureObject.Runway = runway;
-                    procedureObject.ProcedureNodes = NodesEachProcedure;
-                    procedureVector.push_back(procedureObject);
-                    NodesEachProcedure.clear();
-                    lastProcedure.clear();
-                }
-
-                auto runwayMatchPos = startIndexSID + procedure.size() + 1;
-                runway = buffer.substr(runwayMatchPos, buffer.find(',', runwayMatchPos) - runwayMatchPos);
-                auto nodeMatchPos = runwayMatchPos + runway.size() + 1;
-                nodeIdentifier = buffer.substr(nodeMatchPos, buffer.find(',', nodeMatchPos) - nodeMatchPos);
-                auto nodeRegionMatchPos = nodeMatchPos + nodeIdentifier.size() + 1;
-                nodeRegion = buffer.substr(nodeRegionMatchPos, buffer.find(',', nodeRegionMatchPos) - nodeRegionMatchPos);
-
-                if(nodeIdentifier == " ") {
-                    continue;
-                }
-
-                auto nodePointer = getNodeFromNavaidsOrFixesCache(nodeIdentifier, nodeRegion, NAVAID_DONTCARE);
-
-                if(procedure == lastProcedure || lastProcedure.empty()) {
-                    NodesEachProcedure.push_back(nodePointer);
-                }
-
-                lastProcedure = procedure;
-            } else if (buffer[1] == 'T') {
-                /* STAR */
-
-            }
-        } else if (buffer[0] == 'R') {
-            /* RWY */
-        }
+        AirportProcedureReadSIDSTAR(ICAO, buffer, procedureVector, *this);
+        AirportProcedureReadRunways(buffer, procedureVector, *this);
     }
+    AirportProcedureReadSIDSTAR("CLEAR", "", procedureVector, *this);
+    AirportProcedureReadRunways("CLEAR", procedureVector, *this);
+    return procedureVector;
 }
