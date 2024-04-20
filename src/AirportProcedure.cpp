@@ -52,7 +52,7 @@ void AirportProcedureReadSIDSTAR(const std::string &ICAO, const std::string &Lin
         procedureObject.ProcedureNodes = nodesEachProcedure;
 
         /* Only append if the procedure is RNAV */
-        /* TODO: 改为没有点采用非RNAV的策略 */
+        /* TODO: 改为没有点采用非RNAV的策略，如TNCM */
         if(LastLine[LastIndex - 2] != '2') {
             ProcedureVector.push_back(procedureObject);
         }
