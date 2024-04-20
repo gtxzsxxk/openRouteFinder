@@ -20,39 +20,33 @@ struct WriteHistory {
     char Data[16];
 };
 
+/* double, bool 类型直接存值，pointer 类型存存导航台地址的地址，这个地址不会悬垂；但是对于字符串类型， */
+/* 由于 Data 不是一个 std::string 对象，所以没有办法赋值构造，只能存原来的 c 风格的 string */
 template<class T>
 static void historyAppend(std::vector<WriteHistory> &History, T *Address) {
     WriteHistory Record{};
     Record.Pointer = Address;
-    if (std::is_same<T, double>::value) {
+    if constexpr (std::is_same<T, double>::value) {
         Record.DataType = HISTORY_TYPE_DOUBLE;
-    } else if (std::is_same<T, bool>::value) {
+    } else if constexpr (std::is_same<T, bool>::value) {
         Record.DataType = HISTORY_TYPE_BOOL;
-    } else if (std::is_same<T, NavaidCompare *>::value) {
+    } else if constexpr (std::is_same<T, NavaidCompare *>::value) {
         Record.DataType = HISTORY_TYPE_POINTER;
+    } else if constexpr (std::is_same<T, std::string>::value) {
+        Record.DataType = HISTORY_TYPE_STRING;
+        auto StringData = *Address;
+        auto StorePointer = Record.Data;
+        auto Length = StringData.size();
+        memcpy(StorePointer, Address->c_str(), Length);
+        *(StorePointer + Length) = 0;
+        History.push_back(Record);
+        return;
     } else {
-        throw "No matched history type!";
+        throw std::bad_cast();
     }
 
     auto StorePointer = reinterpret_cast<decltype(Address)>(Record.Data);
     *StorePointer = *Address;
-    History.push_back(Record);
-}
-
-/* 其它都是传存变量地址的变量的地址，这里直接传字符串的地址 */
-static void historyAppend(std::vector<WriteHistory> &History, std::string *Address) {
-    WriteHistory Record{};
-    Record.Pointer = Address;
-    Record.DataType = HISTORY_TYPE_STRING;
-
-    auto StringData = *Address;
-
-    auto StorePointer = reinterpret_cast<char *>(Record.Data);
-    auto Length = StringData.size();
-    for (auto i = 0; i < Length; i++) {
-        *(StorePointer + i) = StringData[i];
-    }
-    *(StorePointer + Length) = 0;
     History.push_back(Record);
 }
 
@@ -74,7 +68,7 @@ static void historyRestore(WriteHistory &Record) {
         auto RestorePointer = reinterpret_cast<std::string *>(Record.Pointer);
         *RestorePointer = std::string(ReadPointer);
     } else {
-        throw "No matched history type!";
+        throw std::bad_cast();
     }
 }
 
@@ -268,4 +262,4 @@ RouteFinder::calculateBetweenAirports(const std::string &Departure, const std::s
 
     return std::make_tuple(result.toString(Departure, Arrival),
                            *selectedSidProcedure, *selectedStarProcedure, sidNodesVector, starNodesVector);
-};
+}
