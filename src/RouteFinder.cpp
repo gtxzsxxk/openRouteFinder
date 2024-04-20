@@ -5,6 +5,7 @@
 #include "RouteFinder.h"
 #include <queue>
 #include <vector>
+#include <ranges>
 #include <sstream>
 
 enum HISTORY_DATA_TYPE {
@@ -129,8 +130,8 @@ RouteFinder::calculateShortestRoute(const NavaidInformation &Start, const Navaid
 
     auto ResultObject = RouteResult(realEndNode);
 
-    for (long i = LocalHistory.size() - 1; i >= 0; i--) {
-        historyRestore(LocalHistory[i]);
+    for (auto toRevert: LocalHistory | std::views::reverse) {
+        historyRestore(toRevert);
     }
 
     return std::move(ResultObject);
