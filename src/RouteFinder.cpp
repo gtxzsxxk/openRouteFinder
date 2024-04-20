@@ -174,7 +174,7 @@ std::tuple<std::string,
         std::vector<const NavaidInformation *>,
         std::vector<const NavaidInformation *>>
 RouteFinder::calculateBetweenAirports(const std::string &Departure, const std::string &Arrival,
-                                      std::string SpecifySID, std::string SpecifySTAR) {
+                                      const std::string &SpecifySID, const std::string &SpecifySTAR) {
     auto sidData = DataReader.readAirportProcedure(Departure);
     auto starData = DataReader.readAirportProcedure(Arrival);
 

@@ -40,7 +40,7 @@ public:
             std::vector<const NavaidInformation *>,
             std::vector<const NavaidInformation *>>
     calculateBetweenAirports(const std::string &Departure, const std::string &Arrival,
-                             std::string SpecifySID = "", std::string SpecifySTAR = "");
+                             const std::string &SpecifySID, const std::string &SpecifySTAR);
 };
 
 
