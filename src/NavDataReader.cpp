@@ -166,16 +166,11 @@ void NavDataReader::cacheFixes() {
     while (!input.eof()) {
         std::string buffer;
         std::getline(input, buffer);
-        double dr_us;
-        auto t1 = std::chrono::steady_clock::now();
-        auto t2 = std::chrono::steady_clock::now();
         int failed = 0;
         auto node = NavaidInformation(buffer, failed, true);
         if (!failed) {
             FixesCache[NavaidInformation::toUniqueKey(node)] = node;
         }
-
-        dr_us = std::chrono::duration<double, std::micro>(t2 - t1).count();
     }
 }
 

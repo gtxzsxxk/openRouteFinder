@@ -134,7 +134,7 @@ RouteFinder::calculateShortestRoute(const NavaidInformation &Start, const Navaid
         historyRestore(toRevert);
     }
 
-    return std::move(ResultObject);
+    return ResultObject;
 }
 
 RouteFinder::RouteFinder(const NavDataReader &Reader) : DataReader(Reader) {
@@ -210,19 +210,19 @@ RouteFinder::calculateBetweenAirports(const std::string &Departure, const std::s
     }
 
     double minDist = 0xffffffff;
-    const NavaidInformation *selectedSidNode;
-    const AirportProcedure *selectedSidProcedure;
-    const NavaidInformation *selectedStarNode;
-    const AirportProcedure *selectedStarProcedure;
+    NavaidInformation *selectedSidNode = nullptr;
+    AirportProcedure *selectedSidProcedure = nullptr;
+    NavaidInformation *selectedStarNode = nullptr;
+    AirportProcedure *selectedStarProcedure = nullptr;
     for (const auto &i: sidNodes) {
         for (const auto &j: starNodes) {
             auto dist = *(i.first) * *(j.first);
             if (dist < minDist) {
                 minDist = dist;
-                selectedSidNode = i.first;
-                selectedSidProcedure = i.second;
-                selectedStarNode = j.first;
-                selectedStarProcedure = j.second;
+                selectedSidNode = const_cast<NavaidInformation *>(i.first);
+                selectedSidProcedure = const_cast<AirportProcedure *>(i.second);
+                selectedStarNode = const_cast<NavaidInformation *>(j.first);
+                selectedStarProcedure = const_cast<AirportProcedure *>(j.second);
             }
         }
     }
@@ -230,8 +230,8 @@ RouteFinder::calculateBetweenAirports(const std::string &Departure, const std::s
     if (!SpecifySID.empty()) {
         for (const auto &i: sidNodes) {
             if (i.first->getIdentifier() == SpecifySID) {
-                selectedSidNode = i.first;
-                selectedSidProcedure = i.second;
+                selectedSidNode = const_cast<NavaidInformation *>(i.first);
+                selectedSidProcedure = const_cast<AirportProcedure *>(i.second);
             }
         }
     }
@@ -239,8 +239,8 @@ RouteFinder::calculateBetweenAirports(const std::string &Departure, const std::s
     if (!SpecifySTAR.empty()) {
         for (const auto &i: starNodes) {
             if (i.first->getIdentifier() == SpecifySTAR) {
-                selectedStarNode = i.first;
-                selectedStarProcedure = i.second;
+                selectedStarNode = const_cast<NavaidInformation *>(i.first);
+                selectedStarProcedure = const_cast<AirportProcedure *>(i.second);
             }
         }
     }
