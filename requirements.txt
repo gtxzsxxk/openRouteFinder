@@ -1,2 +1,6 @@
-requests==2.25.1
-Pillow==8.2.0
+fastapi>=0.115.0
+uvicorn[standard]>=0.34.0
+python-multipart>=0.0.20
+pydantic>=2.10.0
+requests>=2.25.1
+Pillow>=8.2.0

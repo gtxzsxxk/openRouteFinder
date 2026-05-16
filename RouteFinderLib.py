@@ -277,10 +277,11 @@ class RTFCALC:
         apLon = 0.0
         self.airportName = []
         for i in apdat:
-            if i.__contains__(ICAO):
-                self.airportName.append(i.split(",")[2])
-                apLat = float(i.split(",")[3])
-                apLon = float(i.split(",")[4])
+            parts = i.split(",")
+            if len(parts) >= 2 and parts[1].strip() == ICAO:
+                self.airportName.append(parts[2].strip())
+                apLat = float(parts[3].strip())
+                apLon = float(parts[4].strip())
                 break
 
         airport_node = Node(ICAO, apLat, apLon, self)
@@ -343,10 +344,11 @@ class RTFCALC:
         apLat = 0.0
         apLon = 0.0
         for i in apdat:
-            if i.__contains__(ICAO):
-                self.airportName.append(i.split(",")[2])
-                apLat = float(i.split(",")[3])
-                apLon = float(i.split(",")[4])
+            parts = i.split(",")
+            if len(parts) >= 2 and parts[1].strip() == ICAO:
+                self.airportName.append(parts[2].strip())
+                apLat = float(parts[3].strip())
+                apLon = float(parts[4].strip())
                 break
 
         airport_node = Node(ICAO, apLat, apLon, self)
