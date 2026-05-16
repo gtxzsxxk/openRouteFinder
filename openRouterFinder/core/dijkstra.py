@@ -82,10 +82,9 @@ class RouteEngine:
         start_iid = sid_conn.airport_node.iid
         end_iid = star_conn.airport_node.iid
 
-        # Distances array
+        # Distances dict (supports negative temp node iids)
         INF = float('inf')
-        dists = [INF] * (self.num_nodes + 2)  # +2 for temp airport nodes
-        dists[start_iid] = 0.0
+        dists: Dict[int, float] = {start_iid: 0.0}
 
         # Priority queue: (f_score, counter, node)
         counter = 0
@@ -109,7 +108,7 @@ class RouteEngine:
                 break
 
             # Skip if already found better path
-            if current.dist > dists[current.iid]:
+            if current.dist > dists.get(current.iid, INF):
                 continue
 
             for edge in adjacency.get(current.iid, []):
@@ -123,7 +122,7 @@ class RouteEngine:
                 )
                 new_dist = current.dist + edge_dist
 
-                if new_dist < dists[edge.nend]:
+                if new_dist < dists.get(edge.nend, INF):
                     dists[edge.nend] = new_dist
                     next_search = SearchingNode(
                         iid=edge.nend,
@@ -196,18 +195,35 @@ class RouteEngine:
         star_conn: AirportConnection,
     ) -> Dict[int, List[Edge]]:
         """Build adjacency list: shared nodes + temporary airport connections."""
-        adj = {}
+        adj: Dict[int, List[Edge]] = {}
         for node in self.node_list:
             adj[node.iid] = list(node.next_list)
-        # Add SID edges (airport -> network)
+
+        # Add temp nodes
+        for node in sid_conn.temp_nodes:
+            if node.iid not in adj:
+                adj[node.iid] = []
+        for node in star_conn.temp_nodes:
+            if node.iid not in adj:
+                adj[node.iid] = []
+
+        # Add SID edges (airport -> procedure -> network)
         adj[sid_conn.airport_node.iid] = list(sid_conn.connections)
-        # Add STAR edges (network -> airport)
+        for edge in sid_conn.internal_edges:
+            if edge.nfrom not in adj:
+                adj[edge.nfrom] = []
+            adj[edge.nfrom].append(edge)
+        for edge in sid_conn.transition_edges:
+            if edge.nfrom not in adj:
+                adj[edge.nfrom] = []
+            adj[edge.nfrom].append(edge)
+
+        # Add STAR edges (network -> procedure -> airport)
         for edge in star_conn.connections:
             if edge.nfrom not in adj:
                 adj[edge.nfrom] = []
             adj[edge.nfrom].append(edge)
-        # Add transition edges (common point -> transition waypoint)
-        for edge in sid_conn.transition_edges:
+        for edge in star_conn.internal_edges:
             if edge.nfrom not in adj:
                 adj[edge.nfrom] = []
             adj[edge.nfrom].append(edge)
@@ -229,6 +245,13 @@ class RouteEngine:
             return star_conn.airport_node
         if 0 <= iid < self.num_nodes:
             return self.node_list[iid]
+        # Check temp nodes
+        for node in sid_conn.temp_nodes:
+            if node.iid == iid:
+                return node
+        for node in star_conn.temp_nodes:
+            if node.iid == iid:
+                return node
         return None
 
     def _find_transition_name(

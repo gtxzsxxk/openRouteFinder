@@ -22,6 +22,8 @@ class AirportConnection:
     connections: List[Edge]  # edges FROM airport TO network (SID) or FROM network TO airport (STAR)
     procedures: Dict[str, List[Procedure]]  # anchor_point -> [Procedure, ...]
     transition_edges: List[Edge] = field(default_factory=list)
+    temp_nodes: List[Node] = field(default_factory=list)  # temp nodes for waypoints not in nav network
+    internal_edges: List[Edge] = field(default_factory=list)  # edges within procedures
 
 
 class AirportConnector:
@@ -30,10 +32,29 @@ class AirportConnector:
     def __init__(self, airport_maps: Dict[str, str], node_index: Dict):
         self.airport_maps = airport_maps
         self.node_index = node_index
+        self._temp_nodes: Dict[str, Node] = {}
+        self._next_temp_iid = -3
 
     def _find_node(self, name: str, lat: float, lon: float) -> Optional[Node]:
         key = (name, round(lat, 6), round(lon, 6))
         return self.node_index.get(key)
+
+    def _get_or_create_temp(self, name: str, lat: float, lon: float) -> Node:
+        """Get existing temp node or create new one for off-network waypoints."""
+        if name not in self._temp_nodes:
+            self._temp_nodes[name] = Node(
+                iid=self._next_temp_iid,
+                name=name,
+                px=lat,
+                py=lon,
+            )
+            self._next_temp_iid -= 1
+        return self._temp_nodes[name]
+
+    @staticmethod
+    def _has_waypoint_data(line: str) -> bool:
+        """Check if a line contains waypoint name + lat/lon data."""
+        return line.startswith(("CF,", "TF,", "IF,", "DF,"))
 
     def build_sid(self, icao: str) -> Optional[AirportConnection]:
         """Build departure (SID) connections for an airport."""
@@ -63,10 +84,10 @@ class AirportConnector:
             field2 = parts[2] if len(parts) > 2 else ""
             stage = int(parts[3].strip()) if len(parts) > 3 and parts[3].strip().isdigit() else 0
 
-            # Parse waypoint points (CF, TF, IF lines)
+            # Parse waypoint points (CF, TF, IF, DF lines)
             points = []
             for line in lines:
-                if line.startswith("CF,") or line.startswith("TF,") or line.startswith("IF,"):
+                if self._has_waypoint_data(line):
                     pp = line.split(",")
                     if len(pp) >= 4:
                         points.append((pp[1], float(pp[2]), float(pp[3])))
@@ -83,7 +104,10 @@ class AirportConnector:
             except ValueError:
                 continue
 
+            # Find in network or create temp node
             exit_node = self._find_node(exit_name, exit_lat, exit_lon)
+            if exit_node is None:
+                exit_node = self._get_or_create_temp(exit_name, exit_lat, exit_lon)
 
             if stage in (3, 6):
                 # Transition segment: from = second line (IF point)
@@ -99,20 +123,21 @@ class AirportConnector:
                 except ValueError:
                     continue
                 from_node = self._find_node(from_name, from_lat, from_lon)
+                if from_node is None:
+                    from_node = self._get_or_create_temp(from_name, from_lat, from_lon)
                 transition_segments.append((proc_name, field2, from_node, exit_node, points))
             elif field2 == 'ALL':
-                if exit_node:
-                    common_segments[proc_name] = (exit_node, points)
+                common_segments[proc_name] = (exit_node, points)
             else:
-                if exit_node:
-                    runway_segments.append((proc_name, field2, exit_node, points))
+                runway_segments.append((proc_name, field2, exit_node, points))
 
-        # Phase 2: build connections and transition_edges
+        # Phase 2: build connections and internal edges
         connections = []
         transition_edges = []
+        internal_edges = []
         added_exit_nodes = set()
 
-        # Airport -> common exit points
+        # Airport -> runway exit points
         for proc_name, runway, exit_node, points in runway_segments:
             if exit_node.name not in added_exit_nodes:
                 connections.append(Edge(
@@ -122,9 +147,31 @@ class AirportConnector:
                 ))
                 added_exit_nodes.add(exit_node.name)
 
-        # Common exit point -> transition waypoints
+        # Runway exit -> common exit
+        for proc_name, runway, exit_node, points in runway_segments:
+            if proc_name in common_segments:
+                common_node, common_points = common_segments[proc_name]
+                if common_node is not None and exit_node is not None:
+                    internal_edges.append(Edge(
+                        nfrom=exit_node.iid,
+                        nend=common_node.iid,
+                        name="SID",
+                    ))
+
+        # Common exit -> transition start
         for proc_name, trans_name, from_node, to_node, points in transition_segments:
-            if from_node and to_node:
+            if proc_name in common_segments:
+                common_node, common_points = common_segments[proc_name]
+                if common_node is not None and from_node is not None:
+                    internal_edges.append(Edge(
+                        nfrom=common_node.iid,
+                        nend=from_node.iid,
+                        name="SID",
+                    ))
+
+        # Transition edges (start -> end)
+        for proc_name, trans_name, from_node, to_node, points in transition_segments:
+            if from_node is not None and to_node is not None:
                 transition_edges.append(Edge(
                     nfrom=from_node.iid,
                     nend=to_node.iid,
@@ -160,6 +207,8 @@ class AirportConnector:
             connections=connections,
             procedures=procedures,
             transition_edges=transition_edges,
+            temp_nodes=list(self._temp_nodes.values()),
+            internal_edges=internal_edges,
         )
 
     def build_star(self, icao: str) -> Optional[AirportConnection]:
@@ -193,7 +242,7 @@ class AirportConnector:
             # Parse waypoint points
             points = []
             for line in lines:
-                if line.startswith("CF,") or line.startswith("TF,") or line.startswith("IF,"):
+                if self._has_waypoint_data(line):
                     pp = line.split(",")
                     if len(pp) >= 4:
                         points.append((pp[1], float(pp[2]), float(pp[3])))
@@ -212,6 +261,8 @@ class AirportConnector:
                 continue
 
             entry_node = self._find_node(entry_name, entry_lat, entry_lon)
+            if entry_node is None:
+                entry_node = self._get_or_create_temp(entry_name, entry_lat, entry_lon)
 
             if stage in (1, 4):
                 # Transition segment: to = last line exit point, from = entry point
@@ -226,17 +277,18 @@ class AirportConnector:
                 except ValueError:
                     continue
                 to_node = self._find_node(to_name, to_lat, to_lon)
+                if to_node is None:
+                    to_node = self._get_or_create_temp(to_name, to_lat, to_lon)
                 transition_segments.append((proc_name, field2, entry_node, to_node, points))
             elif field2 == 'ALL':
-                if entry_node:
-                    common_segments[proc_name] = (entry_node, points)
+                common_segments[proc_name] = (entry_node, points)
             else:
-                if entry_node:
-                    runway_segments.append((proc_name, field2, entry_node, points))
+                runway_segments.append((proc_name, field2, entry_node, points))
 
-        # Phase 2: build connections and transition_edges
+        # Phase 2: build connections and internal edges
         connections = []
         transition_edges = []
+        internal_edges = []
         added_entry_nodes = set()
 
         # Network -> airport (from runway entry points)
@@ -249,9 +301,31 @@ class AirportConnector:
                 ))
                 added_entry_nodes.add(entry_node.name)
 
-        # Transition waypoint -> common entry point
+        # Transition end -> common entry
         for proc_name, trans_name, from_node, to_node, points in transition_segments:
-            if from_node and to_node:
+            if proc_name in common_segments:
+                common_node, common_points = common_segments[proc_name]
+                if to_node is not None and common_node is not None:
+                    internal_edges.append(Edge(
+                        nfrom=to_node.iid,
+                        nend=common_node.iid,
+                        name="STAR",
+                    ))
+
+        # Common entry -> runway entry
+        for proc_name, runway, entry_node, points in runway_segments:
+            if proc_name in common_segments:
+                common_node, common_points = common_segments[proc_name]
+                if common_node is not None and entry_node is not None:
+                    internal_edges.append(Edge(
+                        nfrom=common_node.iid,
+                        nend=entry_node.iid,
+                        name="STAR",
+                    ))
+
+        # Transition edges
+        for proc_name, trans_name, from_node, to_node, points in transition_segments:
+            if from_node is not None and to_node is not None:
                 transition_edges.append(Edge(
                     nfrom=from_node.iid,
                     nend=to_node.iid,
@@ -292,6 +366,8 @@ class AirportConnector:
             connections=connections,
             procedures=procedures,
             transition_edges=transition_edges,
+            temp_nodes=list(self._temp_nodes.values()),
+            internal_edges=internal_edges,
         )
 
     def _get_runway_names(self, icao: str) -> List[str]:
