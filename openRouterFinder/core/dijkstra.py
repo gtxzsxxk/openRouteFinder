@@ -16,11 +16,11 @@ from openRouterFinder.core.airport import AirportConnection
 
 
 def _procs_to_dict(procs: dict) -> dict:
-    """Convert Procedure objects to JSON-serializable tuples [name, runway, points]."""
+    """Convert Procedure objects to JSON-serializable tuples [name, runway, points, transitions]."""
     result = {}
     for key, proc_list in procs.items():
         result[key] = [
-            [p.name, p.runway, p.points]
+            [p.name, p.runway, p.points, [[t[0], t[1]] for t in p.transitions]]
             for p in proc_list
         ]
     return result
@@ -176,6 +176,15 @@ class RouteEngine:
         adj[sid_conn.airport_node.iid] = list(sid_conn.connections)
         # Add STAR edges (network -> airport)
         for edge in star_conn.connections:
+            if edge.nfrom not in adj:
+                adj[edge.nfrom] = []
+            adj[edge.nfrom].append(edge)
+        # Add transition edges (common point -> transition waypoint)
+        for edge in sid_conn.transition_edges:
+            if edge.nfrom not in adj:
+                adj[edge.nfrom] = []
+            adj[edge.nfrom].append(edge)
+        for edge in star_conn.transition_edges:
             if edge.nfrom not in adj:
                 adj[edge.nfrom] = []
             adj[edge.nfrom].append(edge)

@@ -2,16 +2,24 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { RouteResult, ProcedureTuple } from '@/types'
 
+export interface TransitionData {
+  name: string
+  points: { name: string; lat: number; lon: number }[]
+}
+
 export interface ProcedureData {
   name: string
   runway: string
   points: { name: string; lat: number; lon: number }[]
+  transitions: TransitionData[]
 }
 
 export const useRouteStore = defineStore('route', () => {
   const routeResult = ref<RouteResult | null>(null)
   const selectedSIDIndex = ref(0)
   const selectedSTARIndex = ref(0)
+  const selectedSIDTransitionIndex = ref(-1)  // -1 = no transition
+  const selectedSTARTransitionIndex = ref(-1)  // -1 = no transition
   const isLoading = ref(false)
   const error = ref<string | null>(null)
 
@@ -55,6 +63,10 @@ export const useRouteStore = defineStore('route', () => {
       name: proc[0],
       runway: proc[1],
       points: proc[2].map(p => ({ name: p[0], lat: p[1], lon: p[2] })),
+      transitions: (proc[3] || []).map(t => ({
+        name: t[0],
+        points: t[1].map(p => ({ name: p[0], lat: p[1], lon: p[2] }))
+      })),
     }
   }
 
@@ -70,10 +82,24 @@ export const useRouteStore = defineStore('route', () => {
     return toProcedureData(procs[selectedSTARIndex.value])
   })
 
+  const selectedSIDTransition = computed(() => {
+    const sid = selectedSID.value
+    if (!sid || selectedSIDTransitionIndex.value < 0) return null
+    return sid.transitions[selectedSIDTransitionIndex.value] || null
+  })
+
+  const selectedSTARTransition = computed(() => {
+    const star = selectedSTAR.value
+    if (!star || selectedSTARTransitionIndex.value < 0) return null
+    return star.transitions[selectedSTARTransitionIndex.value] || null
+  })
+
   function setRouteResult(result: RouteResult | null) {
     routeResult.value = result
     selectedSIDIndex.value = 0
     selectedSTARIndex.value = 0
+    selectedSIDTransitionIndex.value = -1
+    selectedSTARTransitionIndex.value = -1
     error.value = null
   }
 
@@ -87,16 +113,28 @@ export const useRouteStore = defineStore('route', () => {
 
   function setSelectedSID(index: number) {
     selectedSIDIndex.value = index
+    selectedSIDTransitionIndex.value = -1
   }
 
   function setSelectedSTAR(index: number) {
     selectedSTARIndex.value = index
+    selectedSTARTransitionIndex.value = -1
+  }
+
+  function setSelectedSIDTransition(index: number) {
+    selectedSIDTransitionIndex.value = index
+  }
+
+  function setSelectedSTARTransition(index: number) {
+    selectedSTARTransitionIndex.value = index
   }
 
   return {
     routeResult,
     selectedSIDIndex,
     selectedSTARIndex,
+    selectedSIDTransitionIndex,
+    selectedSTARTransitionIndex,
     isLoading,
     error,
     hasResult,
@@ -108,10 +146,14 @@ export const useRouteStore = defineStore('route', () => {
     selectedSTARProcedures,
     selectedSID,
     selectedSTAR,
+    selectedSIDTransition,
+    selectedSTARTransition,
     setRouteResult,
     setLoading,
     setError,
     setSelectedSID,
     setSelectedSTAR,
+    setSelectedSIDTransition,
+    setSelectedSTARTransition,
   }
 })

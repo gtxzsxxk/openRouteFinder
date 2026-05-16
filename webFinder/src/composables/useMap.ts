@@ -5,10 +5,16 @@ import type { RouteResult, Runway, RunwayThreshold } from '@/types'
 
 const STYLE_URL = 'https://demotiles.maplibre.org/style.json'
 
+interface TransitionData {
+  name: string
+  points: { name: string; lat: number; lon: number }[]
+}
+
 interface ProcedureData {
   name: string
   runway: string
   points: { name: string; lat: number; lon: number }[]
+  transitions: TransitionData[]
 }
 
 export function useMap(
@@ -16,6 +22,8 @@ export function useMap(
   routeResult: Ref<RouteResult | null>,
   selectedSID: Ref<ProcedureData | null>,
   selectedSTAR: Ref<ProcedureData | null>,
+  selectedSIDTransition: Ref<TransitionData | null>,
+  selectedSTARTransition: Ref<TransitionData | null>,
 ) {
   const map = ref<any>(null)
   const isMapReady = ref(false)
@@ -104,115 +112,6 @@ export function useMap(
     if (angle < 10) return 500      // nearly aligned, short extension
     if (angle < 60) return 3000     // moderate turn
     return 8000                     // sharp turn needs more room
-  }
-
-  // Fly-by turn with circular arcs: straight to near waypoint, then arc, then straight.
-  function flyByTurns(coords: number[][], baseRadius = 0.003): number[][] {
-    if (coords.length < 3) return coords
-
-    const result: number[][] = [coords[0]]
-
-    function dist(a: number[], b: number[]): number {
-      const dx = b[0] - a[0]
-      const dy = b[1] - a[1]
-      return Math.sqrt(dx * dx + dy * dy)
-    }
-
-    for (let i = 1; i < coords.length - 1; i++) {
-      const prev = coords[i - 1]
-      const curr = coords[i]
-      const next = coords[i + 1]
-
-      const v1x = curr[0] - prev[0]
-      const v1y = curr[1] - prev[1]
-      const v1len = dist(prev, curr)
-
-      const v2x = next[0] - curr[0]
-      const v2y = next[1] - curr[1]
-      const v2len = dist(curr, next)
-
-      if (v1len < 0.00001 || v2len < 0.00001) {
-        result.push(curr)
-        continue
-      }
-
-      const u1x = v1x / v1len
-      const u1y = v1y / v1len
-      const u2x = v2x / v2len
-      const u2y = v2y / v2len
-
-      const dot = (-u1x) * u2x + (-u1y) * u2y
-      const cross = (-u1x) * u2y - (-u1y) * u2x
-      const angle = Math.atan2(Math.abs(cross), dot)
-
-      if (angle < 0.05) {
-        result.push(curr)
-        continue
-      }
-
-      const R = Math.min(baseRadius, v1len * 0.4, v2len * 0.4)
-      if (R < 0.00001) {
-        result.push(curr)
-        continue
-      }
-
-      const halfAngle = angle / 2
-      const tanHalf = Math.tan(halfAngle)
-      if (tanHalf < 0.001) {
-        result.push(curr)
-        continue
-      }
-      const turnDist = R / tanHalf
-      const d = Math.min(turnDist, v1len * 0.4, v2len * 0.4)
-      if (d < 0.00001) {
-        result.push(curr)
-        continue
-      }
-
-      const A: [number, number] = [curr[0] - u1x * d, curr[1] - u1y * d]
-      const B: [number, number] = [curr[0] + u2x * d, curr[1] + u2y * d]
-
-      const bisectorX = -u1x + u2x
-      const bisectorY = -u1y + u2y
-      const bisectorLen = Math.sqrt(bisectorX * bisectorX + bisectorY * bisectorY)
-      if (bisectorLen < 0.00001) {
-        result.push(curr)
-        continue
-      }
-      const bx = bisectorX / bisectorLen
-      const by = bisectorY / bisectorLen
-
-      const centerDist = R / Math.sin(halfAngle)
-      const cx = curr[0] + bx * centerDist
-      const cy = curr[1] + by * centerDist
-
-      let finalCx = cx
-      let finalCy = cy
-      const distCA = Math.sqrt((A[0] - cx) ** 2 + (A[1] - cy) ** 2)
-      if (Math.abs(distCA - R) > 0.01 * R) {
-        finalCx = curr[0] - bx * centerDist
-        finalCy = curr[1] - by * centerDist
-      }
-
-      const startAngle = Math.atan2(A[1] - finalCy, A[0] - finalCx)
-      const endAngle = Math.atan2(B[1] - finalCy, B[0] - finalCx)
-      let arcDiff = endAngle - startAngle
-
-      if (cross < 0 && arcDiff < 0) arcDiff += 2 * Math.PI
-      if (cross > 0 && arcDiff > 0) arcDiff -= 2 * Math.PI
-
-      const segments = Math.max(8, Math.ceil(Math.abs(arcDiff) * 15))
-      for (let j = 1; j < segments; j++) {
-        const t = j / segments
-        const a = startAngle + arcDiff * t
-        result.push([finalCx + R * Math.cos(a), finalCy + R * Math.sin(a)])
-      }
-
-      result.push(B)
-    }
-
-    result.push(coords[coords.length - 1])
-    return result
   }
 
   // Find a runway end by its designation (e.g., "36L")
@@ -414,7 +313,20 @@ export function useMap(
           sidRawCoords.push(pointAlongRunway(sidEnd, origRunways, extDist, false))
         }
 
+        // Main SID points
         sidRawCoords.push(...sidPoints.map(p => [p.lon, p.lat]))
+
+        // Transition segment points (append after main points, skipping duplicates)
+        if (selectedSIDTransition.value) {
+          const transPoints = selectedSIDTransition.value.points
+          const mainNames = new Set(sidPoints.map(p => p.name))
+          for (const tp of transPoints) {
+            if (!mainNames.has(tp.name)) {
+              sidRawCoords.push([tp.lon, tp.lat])
+            }
+          }
+        }
+
         sidRawCoords.push([nodes[1].lon, nodes[1].lat])
         const sidCoords = sidRawCoords
 
@@ -443,6 +355,21 @@ export function useMap(
           geometry: { type: 'Point' as const, coordinates: [p.lon, p.lat] },
           properties: { name: p.name, isEndpoint: false, isSidStar: true, kind: 'SID' },
         }))
+
+        // Add transition points as features
+        if (selectedSIDTransition.value) {
+          const transPoints = selectedSIDTransition.value.points
+          const mainNames = new Set(sidPoints.map(p => p.name))
+          for (const tp of transPoints) {
+            if (!mainNames.has(tp.name)) {
+              sidFeatures.push({
+                type: 'Feature' as const,
+                geometry: { type: 'Point' as const, coordinates: [tp.lon, tp.lat] },
+                properties: { name: tp.name, isEndpoint: false, isSidStar: true, kind: 'SID' },
+              })
+            }
+          }
+        }
 
         if (sidFeatures.length > 0) {
           m.addSource('sid-points', {
@@ -503,11 +430,25 @@ export function useMap(
           : [nodes[nodes.length - 1].lon, nodes[nodes.length - 1].lat]
 
         const starRawCoords: number[][] = [[nodes[nodes.length - 2].lon, nodes[nodes.length - 2].lat]]
-        starRawCoords.push(...starPoints.map(p => [p.lon, p.lat]))
+
+        // Transition segment points (prepend before main points)
+        if (selectedSTARTransition.value) {
+          const transPoints = selectedSTARTransition.value.points
+          starRawCoords.push(...transPoints.map(p => [p.lon, p.lat]))
+        }
+
+        // Main STAR points (skip duplicates already in transition)
+        const transNames = new Set(selectedSTARTransition.value?.points.map(p => p.name) || [])
+        for (const p of starPoints) {
+          if (!transNames.has(p.name)) {
+            starRawCoords.push([p.lon, p.lat])
+          }
+        }
 
         // Extension line aligned with runway heading before runway end
         if (starEnd) {
-          const lastWp = starPoints.length > 0 ? starPoints[starPoints.length - 1] : null
+          const allPoints = starPoints.length > 0 ? starPoints : []
+          const lastWp = allPoints.length > 0 ? allPoints[allPoints.length - 1] : null
           const extDist = lastWp ? computeExtensionDistance(starEnd, lastWp) : 3000
           starRawCoords.push(pointAlongRunway(starEnd, destRunways, extDist, true))
         }
@@ -562,6 +503,21 @@ export function useMap(
           geometry: { type: 'Point' as const, coordinates: [p.lon, p.lat] },
           properties: { name: p.name, isEndpoint: false, isSidStar: true, kind: 'STAR' },
         }))
+
+        // Add transition points as features
+        if (selectedSTARTransition.value) {
+          const transPoints = selectedSTARTransition.value.points
+          const mainNames = new Set(starPoints.map(p => p.name))
+          for (const tp of transPoints) {
+            if (!mainNames.has(tp.name)) {
+              starFeatures.push({
+                type: 'Feature' as const,
+                geometry: { type: 'Point' as const, coordinates: [tp.lon, tp.lat] },
+                properties: { name: tp.name, isEndpoint: false, isSidStar: true, kind: 'STAR' },
+              })
+            }
+          }
+        }
 
         if (starFeatures.length > 0) {
           m.addSource('star-points', {
@@ -651,11 +607,13 @@ export function useMap(
       nodes.forEach(n => bounds.extend([n.lon, n.lat]))
       if (selectedSID.value) {
         selectedSID.value.points.forEach(p => bounds.extend([p.lon, p.lat]))
+        selectedSID.value.transitions.forEach(t => t.points.forEach(p => bounds.extend([p.lon, p.lat])))
         const sidBoundEnd = findRunwayEnd(origRunways, selectedSID.value.runway)
         if (sidBoundEnd) bounds.extend([sidBoundEnd.lon, sidBoundEnd.lat])
       }
       if (selectedSTAR.value) {
         selectedSTAR.value.points.forEach(p => bounds.extend([p.lon, p.lat]))
+        selectedSTAR.value.transitions.forEach(t => t.points.forEach(p => bounds.extend([p.lon, p.lat])))
         const starBoundEnd = findRunwayEnd(destRunways, selectedSTAR.value.runway)
         if (starBoundEnd) bounds.extend([starBoundEnd.lon, starBoundEnd.lat])
       }
@@ -668,7 +626,7 @@ export function useMap(
     }
   }
 
-  watch([routeResult, selectedSID, selectedSTAR], () => {
+  watch([routeResult, selectedSID, selectedSTAR, selectedSIDTransition, selectedSTARTransition], () => {
     updateMap()
   }, { deep: true })
 

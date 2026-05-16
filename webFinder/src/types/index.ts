@@ -26,8 +26,9 @@ export interface Runway {
   width: number
 }
 
-// SID/STAR procedure from backend: [name, runway, [[pointName, lat, lon], ...]]
-export type ProcedureTuple = [string, string, [string, number, number][]]
+// SID/STAR procedure from backend: [name, runway, points, transitions]
+// transitions: [[transName, transPoints], ...]
+export type ProcedureTuple = [string, string, [string, number, number][], [string, [string, number, number][]][]]
 
 export type SID = Record<string, ProcedureTuple[]>
 export type STAR = Record<string, ProcedureTuple[]>

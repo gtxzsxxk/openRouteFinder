@@ -28,10 +28,10 @@ import { useRouteStore } from '@/stores/routeStore'
 import { useMap } from '@/composables/useMap'
 
 const store = useRouteStore()
-const { routeResult, selectedSID, selectedSTAR } = storeToRefs(store)
+const { routeResult, selectedSID, selectedSTAR, selectedSIDTransition, selectedSTARTransition } = storeToRefs(store)
 const mapContainer = ref<HTMLElement | null>(null)
 
-const { initMap } = useMap(mapContainer, routeResult, selectedSID, selectedSTAR)
+const { initMap } = useMap(mapContainer, routeResult, selectedSID, selectedSTAR, selectedSIDTransition, selectedSTARTransition)
 
 onMounted(() => {
   initMap()
