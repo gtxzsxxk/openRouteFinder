@@ -1,5 +1,6 @@
 __pycache__
-metar.txt
 image.png
 docs/
 .claude/
+data/*
+!data/.gitkeep
