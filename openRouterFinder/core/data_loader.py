@@ -205,6 +205,8 @@ def search_route(orig: str, dest: str) -> Optional[dict]:
 
     if sid_conn is None or star_conn is None:
         return None
+    if not sid_conn.connections or not star_conn.connections:
+        return None
 
     engine = RouteEngine(graph.node_list, graph.data_version)
     result_json = engine.search(

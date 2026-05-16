@@ -147,7 +147,7 @@ class RouteEngine:
             return build_route_info(
                 self.data_version, sttime,
                 "No result.", "0.00 nm / 0.00 km",
-                None, None, None, None,
+                None, {}, {}, [],
             )
 
         dist_km = target.dist
