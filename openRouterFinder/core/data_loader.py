@@ -37,6 +37,23 @@ class NavGraph:
     """Read-only navigation graph. Singleton, thread-safe."""
 
     def __init__(self, node_list: List[NewNode], airport_maps: dict, data_version: str):
+        # Fix duplicate iids in raw nav data: assign list index to duplicates
+        # so node_list[iid] is always the correct node.
+        iid_remap: Dict[int, int] = {}
+        seen_iids: set[int] = set()
+        for i, node in enumerate(node_list):
+            if node.iid in seen_iids:
+                iid_remap[node.iid] = i
+                node.iid = i
+            else:
+                seen_iids.add(node.iid)
+
+        # Update edge references to new iids
+        for node in node_list:
+            for edge in node.next_list:
+                edge.nfrom = iid_remap.get(edge.nfrom, edge.nfrom)
+                edge.nend = iid_remap.get(edge.nend, edge.nend)
+
         # Convert to tuple for immutability
         self.node_list: Tuple[NewNode, ...] = tuple(node_list)
         self.airport_maps = airport_maps
@@ -99,6 +116,76 @@ def get_airport_maps() -> dict:
     return get_nav_graph().airport_maps
 
 
+def _opposite_runway(name: str) -> str:
+    """Get the opposite runway designator (e.g., 18L -> 36R)."""
+    digits = []
+    suffix = []
+    for c in name:
+        if c.isdigit():
+            digits.append(c)
+        else:
+            suffix.append(c)
+    num = int(''.join(digits)) if digits else 0
+    opp_num = num + 18 if num <= 18 else num - 18
+    suffix_map = {'L': 'R', 'R': 'L', 'C': 'C'}
+    opp_suffix = suffix_map.get(''.join(suffix), '')
+    return f"{opp_num:02d}{opp_suffix}"
+
+
+def _parse_runways(airport_str: str) -> list:
+    """Parse runway data from raw airport string."""
+    runways = {}
+    lines = airport_str.strip().split('\n')
+    for line in lines:
+        parts = line.strip().split(',')
+        if len(parts) < 10 or parts[0] != 'R':
+            continue
+        name = parts[1].strip()
+        try:
+            heading = float(parts[2].strip())
+            length = float(parts[3].strip())
+            width = float(parts[4].strip())
+            lat = float(parts[8].strip())
+            lon = float(parts[9].strip())
+        except (ValueError, IndexError):
+            continue
+        runways[name] = {
+            'name': name,
+            'heading': heading,
+            'length': length,
+            'width': width,
+            'lat': lat,
+            'lon': lon,
+        }
+
+    result = []
+    paired = set()
+    for name, rwy in runways.items():
+        if name in paired:
+            continue
+        opp_name = _opposite_runway(name)
+        if opp_name in runways and opp_name not in paired:
+            paired.add(name)
+            paired.add(opp_name)
+            result.append({
+                'name': f"{name}/{opp_name}",
+                'thresholds': [
+                    {'name': name, 'lat': rwy['lat'], 'lon': rwy['lon'], 'heading': rwy['heading']},
+                    {'name': opp_name, 'lat': runways[opp_name]['lat'], 'lon': runways[opp_name]['lon'], 'heading': runways[opp_name]['heading']},
+                ],
+                'length': rwy['length'],
+                'width': rwy['width'],
+            })
+        else:
+            result.append({
+                'name': name,
+                'thresholds': [{'name': name, 'lat': rwy['lat'], 'lon': rwy['lon'], 'heading': rwy['heading']}],
+                'length': rwy['length'],
+                'width': rwy['width'],
+            })
+    return result
+
+
 def search_route(orig: str, dest: str) -> Optional[dict]:
     """Thread-safe route search. Each call gets isolated state."""
     from openRouterFinder.core.airport import AirportConnector
@@ -129,4 +216,11 @@ def search_route(orig: str, dest: str) -> Optional[dict]:
         return None
 
     import json
-    return json.loads(result_json)
+    result = json.loads(result_json)
+
+    # Enrich with runway data
+    if isinstance(result, dict):
+        result['origRunways'] = _parse_runways(graph.airport_maps[orig])
+        result['destRunways'] = _parse_runways(graph.airport_maps[dest])
+
+    return result

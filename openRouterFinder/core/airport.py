@@ -88,11 +88,20 @@ class AirportConnector:
                     if len(pp) >= 4:
                         points.append((pp[1], float(pp[2]), float(pp[3])))
 
-            proc = Procedure(name=proc_name, runway=runway, points=points)
-            if exit_node.name not in procedures:
-                procedures[exit_node.name] = [proc]
+            # Expand ALL-runway procedures to actual runway ends
+            if runway == 'ALL':
+                for rwy_name in self._get_runway_names(icao):
+                    proc = Procedure(name=proc_name, runway=rwy_name, points=points)
+                    if exit_node.name not in procedures:
+                        procedures[exit_node.name] = [proc]
+                    else:
+                        procedures[exit_node.name].append(proc)
             else:
-                procedures[exit_node.name].append(proc)
+                proc = Procedure(name=proc_name, runway=runway, points=points)
+                if exit_node.name not in procedures:
+                    procedures[exit_node.name] = [proc]
+                else:
+                    procedures[exit_node.name].append(proc)
 
         return AirportConnection(
             airport_node=airport_node,
@@ -154,17 +163,37 @@ class AirportConnector:
                     if len(pp) >= 4:
                         points.append((pp[1], float(pp[2]), float(pp[3])))
 
-            proc = Procedure(name=proc_name, runway=runway, points=points)
-            if entry_node.name not in procedures:
-                procedures[entry_node.name] = [proc]
+            # Expand ALL-runway procedures to actual runway ends
+            if runway == 'ALL':
+                for rwy_name in self._get_runway_names(icao):
+                    proc = Procedure(name=proc_name, runway=rwy_name, points=points)
+                    if entry_node.name not in procedures:
+                        procedures[entry_node.name] = [proc]
+                    else:
+                        procedures[entry_node.name].append(proc)
             else:
-                procedures[entry_node.name].append(proc)
+                proc = Procedure(name=proc_name, runway=runway, points=points)
+                if entry_node.name not in procedures:
+                    procedures[entry_node.name] = [proc]
+                else:
+                    procedures[entry_node.name].append(proc)
 
         return AirportConnection(
             airport_node=airport_node,
             connections=connections,
             procedures=procedures,
         )
+
+    def _get_runway_names(self, icao: str) -> List[str]:
+        """Extract runway end names from airport raw data."""
+        if icao not in self.airport_maps:
+            return []
+        names = []
+        for line in self.airport_maps[icao].strip().split("\n"):
+            parts = line.strip().split(",")
+            if len(parts) >= 2 and parts[0].strip() == "R":
+                names.append(parts[1].strip())
+        return names
 
     def _get_airport_coords(self, icao: str) -> Tuple[Optional[float], Optional[float]]:
         global_dat = self.airport_maps.get("GLOBAL", [])

@@ -16,11 +16,11 @@ from openRouterFinder.core.airport import AirportConnection
 
 
 def _procs_to_dict(procs: dict) -> dict:
-    """Convert Procedure objects to JSON-serializable dicts."""
+    """Convert Procedure objects to JSON-serializable tuples [name, runway, points]."""
     result = {}
     for key, proc_list in procs.items():
         result[key] = [
-            {"name": p.name, "runway": p.runway, "points": p.points}
+            [p.name, p.runway, p.points]
             for p in proc_list
         ]
     return result
