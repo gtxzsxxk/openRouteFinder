@@ -59,6 +59,11 @@ class AirportConnector:
             proc_name = parts[1] if len(parts) > 1 else ""
             runway = parts[2] if len(parts) > 2 else ""
 
+            # Skip SID transition segments (stage 3 or 6)
+            stage = int(parts[3].strip()) if len(parts) > 3 and parts[3].strip().isdigit() else 0
+            if stage in (3, 6):
+                continue
+
             # Last line has exit point
             last_line = lines[-1]
             last_parts = last_line.split(",")
@@ -133,6 +138,11 @@ class AirportConnector:
             parts = lines[0].split(",")
             proc_name = parts[1] if len(parts) > 1 else ""
             runway = parts[2] if len(parts) > 2 else ""
+
+            # Skip STAR transition segments (stage 1 or 4)
+            stage = int(parts[3].strip()) if len(parts) > 3 and parts[3].strip().isdigit() else 0
+            if stage in (1, 4):
+                continue
 
             # First data line has entry point
             if len(lines) < 2:
