@@ -1,0 +1,40 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #1a1a2e;
+  --color-secondary: #16213e;
+  --color-accent: #0f3460;
+  --color-highlight: #e94560;
+  --color-surface: #1f2937;
+  --color-surface-light: #374151;
+  --color-text: #e5e7eb;
+  --color-text-muted: #9ca3af;
+  --color-border: #374151;
+}
+
+body {
+  background-color: var(--color-primary);
+  color: var(--color-text);
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  margin: 0;
+  min-height: 100vh;
+}
+
+.maplibregl-map {
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.maplibregl-ctrl-group {
+  background-color: var(--color-surface) !important;
+  border: 1px solid var(--color-surface-light) !important;
+}
+
+.maplibregl-ctrl-group button {
+  background-color: var(--color-surface) !important;
+  color: var(--color-text) !important;
+}
+
+.maplibregl-ctrl-group button:hover {
+  background-color: var(--color-surface-light) !important;
+}
