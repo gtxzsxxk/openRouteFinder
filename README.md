@@ -52,7 +52,7 @@ Not Available
 pip install -r requirements.txt
 
 # 安装 Node 依赖 / Install Node dependencies
-cd frontend && npm install
+cd webFinder && npm install
 
 # 同时启动前后端 / Start both frontend and backend
 npm run dev
@@ -65,10 +65,10 @@ npm run dev:backend   # FastAPI on :9807
 
 ```bash
 # 构建前端 / Build frontend
-cd frontend && npm run build
+cd webFinder && npm run build
 
 # 启动后端（同时提供 API + 静态文件）/ Start backend (serves API + static files)
-cd backend && uvicorn main:app --host 0.0.0.0 --port 9807
+cd openRouterFinder && uvicorn api:app --host 0.0.0.0 --port 9807
 ```
 
 访问 / Visit: `http://localhost:9807/`
@@ -97,19 +97,19 @@ This project requires preprocessing of `aerosoft` navigation data.
 `aerosoft` 提供的导航数据存储在磁盘上，如果直接使用 Dijkstra 算法查询，由于涉及 IO 读写，效率会非常低。
 The raw data is stored on disk; direct I/O would be too slow for Dijkstra queries.
 
-因此我们需要将航路全部加载进内存并组织结构。预处理由 `packData.py` 完成。
-We load all airways into memory and organize them. Preprocessing is done by `packData.py`.
+因此我们需要将航路全部加载进内存并组织结构。预处理由 `openRouterFinder/scripts/pack_data.py` 完成。
+We load all airways into memory and organize them. Preprocessing is done by `openRouterFinder/scripts/pack_data.py`.
 
-在使用 `packData.py` 前，请先配置好 `config.py`：
-Before using `packData.py`, configure `config.py`:
+在使用前，请先配置好 `.env` 或环境变量：
+Before using, configure `.env` or environment variables:
 
-```python
-LOCAL_ASDATA_PATH = "USING YOUR OWN"
+```bash
+LOCAL_ASDATA_PATH="/path/to/aerosoft/data"
 ```
 
 接着执行 / Then run:
 ```bash
-$ python3 packData.py
+$ python3 openRouterFinder/scripts/pack_data.py
 Read Airports' data?(y/n strictly):
 ```
 
@@ -125,13 +125,22 @@ Note: Preprocessing may take several minutes.
 
 ```
 openRouteFinder/
-├── backend/           # FastAPI + 核心算法 / FastAPI + core algorithm
-│   ├── main.py
+├── openRouterFinder/  # FastAPI + 核心算法 / FastAPI + core algorithm
+│   ├── api.py         # FastAPI 应用 / FastAPI application
+│   ├── app.py         # Uvicorn 入口 / Uvicorn entry point
+│   ├── config.py      # 配置 / Configuration
 │   ├── core/
-│   │   ├── data_loader.py    # Pickle 数据加载 / Pickle data loading
-│   │   └── RouteFinderLib.py # Dijkstra 算法（原版）/ Dijkstra algorithm (original)
-│   └── api/
-├── frontend/          # Vue 3 SPA
+│   │   ├── graph.py          # 图数据结构 / Graph data structures
+│   │   ├── airport.py        # 机场/SID/STAR 解析 / Airport parser
+│   │   ├── dijkstra.py       # A* 路由引擎 / A* route engine
+│   │   └── data_loader.py    # 数据加载 / Data loading
+│   ├── utils/
+│   │   ├── validcode.py      # 验证码 / Captcha
+│   │   └── metar.py          # METAR 天气 / METAR weather
+│   └── scripts/
+│       ├── pack_data.py      # 数据预处理 / Data preprocessing
+│       └── demo.py           # CLI 演示 / CLI demo
+├── webFinder/         # Vue 3 SPA
 │   ├── src/
 │   │   ├── components/       # SearchForm, RouteMap, etc.
 │   │   ├── composables/      # useMap, useRouteQuery

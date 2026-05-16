@@ -4,10 +4,10 @@
   "private": true,
   "scripts": {
     "dev": "concurrently \"npm run dev:frontend\" \"npm run dev:backend\"",
-    "dev:frontend": "cd frontend && npm run dev",
-    "dev:backend": "cd backend && uvicorn main:app --reload --port 9807",
-    "build": "cd frontend && npm run build",
-    "start": "cd backend && uvicorn main:app --host 0.0.0.0 --port 9807",
-    "lint": "cd frontend && npm run lint"
+    "dev:frontend": "cd webFinder && npm run dev",
+    "dev:backend": "cd openRouterFinder && uvicorn api:app --reload --port 9807",
+    "build": "cd webFinder && npm run build",
+    "start": "cd openRouterFinder && uvicorn api:app --host 0.0.0.0 --port 9807",
+    "lint": "cd webFinder && npm run lint"
   }
 }
