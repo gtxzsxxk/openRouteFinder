@@ -101,6 +101,33 @@ export const useRouteStore = defineStore('route', () => {
     selectedSIDTransitionIndex.value = -1
     selectedSTARTransitionIndex.value = -1
     error.value = null
+
+    if (!result) return
+
+    // Auto-select active transitions returned by A*
+    const sidKey = result.nodes[1]?.name
+    if (sidKey) {
+      const sidProcs = result.SID[sidKey] || []
+      if (sidProcs.length > 0 && result.activeSIDTransition) {
+        const transitions = sidProcs[0][3] || []
+        const idx = transitions.findIndex(t => t[0] === result.activeSIDTransition)
+        if (idx >= 0) {
+          selectedSIDTransitionIndex.value = idx
+        }
+      }
+    }
+
+    const starKey = result.nodes[result.nodes.length - 2]?.name
+    if (starKey) {
+      const starProcs = result.STAR[starKey] || []
+      if (starProcs.length > 0 && result.activeSTARTransition) {
+        const transitions = starProcs[0][3] || []
+        const idx = transitions.findIndex(t => t[0] === result.activeSTARTransition)
+        if (idx >= 0) {
+          selectedSTARTransitionIndex.value = idx
+        }
+      }
+    }
   }
 
   function setLoading(loading: boolean) {

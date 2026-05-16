@@ -47,6 +47,8 @@ export interface RouteResult {
   weather: [string, string]
   origRunways?: Runway[]
   destRunways?: Runway[]
+  activeSIDTransition?: string
+  activeSTARTransition?: string
 }
 
 export interface ValidCode {

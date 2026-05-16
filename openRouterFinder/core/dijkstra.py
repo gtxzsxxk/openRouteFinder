@@ -35,6 +35,8 @@ def build_route_info(
     sid: dict,
     star: dict,
     airport_name: list,
+    active_sid_transition: str = None,
+    active_star_transition: str = None,
 ) -> str:
     return json.dumps({
         "data_version": data_version,
@@ -45,6 +47,8 @@ def build_route_info(
         "SID": _procs_to_dict(sid),
         "STAR": _procs_to_dict(star),
         "airportName": airport_name,
+        "activeSIDTransition": active_sid_transition,
+        "activeSTARTransition": active_star_transition,
     })
 
 
@@ -152,6 +156,27 @@ class RouteEngine:
         route_total = self._sort_route(orig, target.route_list)
         node_info = self._build_node_info(sid_conn, star_conn, target.route_list)
 
+        # Detect active transitions from route_list
+        active_sid_transition = None
+        active_star_transition = None
+        route_iids = set(iid for _, _, iid in target.route_list)
+
+        for edge in sid_conn.transition_edges:
+            if edge.nend in route_iids:
+                active_sid_transition = self._find_transition_name(
+                    edge, sid_conn, star_conn, is_sid=True
+                )
+                if active_sid_transition:
+                    break
+
+        for edge in star_conn.transition_edges:
+            if edge.nfrom in route_iids:
+                active_star_transition = self._find_transition_name(
+                    edge, sid_conn, star_conn, is_sid=False
+                )
+                if active_star_transition:
+                    break
+
         return build_route_info(
             self.data_version,
             sttime,
@@ -161,6 +186,8 @@ class RouteEngine:
             sid_conn.procedures,
             star_conn.procedures,
             airport_names,
+            active_sid_transition,
+            active_star_transition,
         )
 
     def _build_adjacency(
@@ -202,6 +229,38 @@ class RouteEngine:
             return star_conn.airport_node
         if 0 <= iid < self.num_nodes:
             return self.node_list[iid]
+        return None
+
+    def _find_transition_name(
+        self,
+        edge: Edge,
+        sid_conn: AirportConnection,
+        star_conn: AirportConnection,
+        is_sid: bool = True,
+    ) -> Optional[str]:
+        """Find transition name from a transition edge by matching endpoint names."""
+        if is_sid:
+            # SID transition edge: common_exit -> transition_end
+            # transition_end is the last point in transition points
+            end_node = self._get_node(edge.nend, sid_conn, star_conn)
+            if not end_node:
+                return None
+            for proc_list in sid_conn.procedures.values():
+                for proc in proc_list:
+                    for t_name, t_points in proc.transitions:
+                        if t_points and t_points[-1][0] == end_node.name:
+                            return t_name
+        else:
+            # STAR transition edge: transition_start -> common_entry
+            # transition_start is the first point in transition points
+            start_node = self._get_node(edge.nfrom, sid_conn, star_conn)
+            if not start_node:
+                return None
+            for proc_list in star_conn.procedures.values():
+                for proc in proc_list:
+                    for t_name, t_points in proc.transitions:
+                        if t_points and t_points[0][0] == start_node.name:
+                            return t_name
         return None
 
     def _sort_route(self, orig: str, route_list: List[Tuple[str, str, int]]) -> str:

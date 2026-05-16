@@ -429,12 +429,15 @@ export function useMap(
           ? [starEnd.lon, starEnd.lat]
           : [nodes[nodes.length - 1].lon, nodes[nodes.length - 1].lat]
 
-        const starRawCoords: number[][] = [[nodes[nodes.length - 2].lon, nodes[nodes.length - 2].lat]]
+        const starRawCoords: number[][] = []
 
-        // Transition segment points (prepend before main points)
+        // Transition segment points (already in flight order: transition_start -> ... -> common_entry)
         if (selectedSTARTransition.value) {
           const transPoints = selectedSTARTransition.value.points
           starRawCoords.push(...transPoints.map(p => [p.lon, p.lat]))
+        } else {
+          // No transition, start from the network entry point (common_entry)
+          starRawCoords.push([nodes[nodes.length - 2].lon, nodes[nodes.length - 2].lat])
         }
 
         // Main STAR points (skip duplicates already in transition)
