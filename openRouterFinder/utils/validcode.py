@@ -10,10 +10,9 @@ from PIL import Image, ImageFont, ImageDraw
 
 def _get_font(size: int = 26):
     """Load font with fallback to default."""
-    # Try several possible paths
+    # Try webFinder public directory
     paths = [
         Path(__file__).parent.parent.parent / "webFinder" / "public" / "NotoSansHans-Regular.ttf",
-        Path(__file__).parent.parent.parent / "static" / "NotoSansHans-Regular.ttf",
     ]
     for p in paths:
         if p.exists():
@@ -52,7 +51,6 @@ def generate_captcha_b64(num: int) -> str:
 def rotate_runway_image(angle: int) -> str:
     """Rotate runway icon and return base64 PNG."""
     paths = [
-        Path(__file__).parent.parent.parent / "static" / "runway.png",
         Path(__file__).parent.parent.parent / "webFinder" / "public" / "runway.png",
     ]
     img_path = None

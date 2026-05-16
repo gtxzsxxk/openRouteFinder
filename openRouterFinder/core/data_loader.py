@@ -1,10 +1,16 @@
 """Data loading and NavGraph singleton."""
 
 import pickle
+import sys
 from typing import Tuple, Dict, Optional, List
 
 from openRouterFinder.config import settings
 from openRouterFinder.core.graph import Node as NewNode, Edge as NewEdge
+
+# Register pickle compatibility module so old .map files load correctly
+if "RouteFinderLib" not in sys.modules:
+    from openRouterFinder.core import _compat
+    sys.modules["RouteFinderLib"] = _compat
 
 
 _nav_graph = None

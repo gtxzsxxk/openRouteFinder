@@ -1,17 +1,14 @@
-"""Backward-compatibility stub for pickle deserialization.
+"""Pickle backward-compatibility module.
 
-Pickled node lists reference RouteFinderLib.Node and RouteFinderLib.Edge.
-This module preserves the original class structure so old pickle files load correctly.
+Pickled nav data files reference RouteFinderLib.Node and RouteFinderLib.Edge.
+This module provides compatible class definitions so old pickle files deserialize
+correctly. The module is registered as ``sys.modules['RouteFinderLib']`` by
+:data_loader: before loading pickle data.
 """
 
 
 class Edge:
-    nfrom = 0
-    nend = 0
-    dist = 0
-    name = ""
-    toinstantnode = None
-    color = (0, 0, 0)
+    """Original Edge class for pickle compatibility."""
 
     def __init__(self, nodefrom, node_end, name, r, g, b):
         self.nfrom = nodefrom.iid
@@ -21,11 +18,7 @@ class Edge:
 
 
 class Node:
-    iid = 0
-    name = ""
-    px = 0.0
-    py = 0.0
-    nextList = None
+    """Original Node class for pickle compatibility."""
 
     def __init__(self, name, x, y, objself):
         self.iid = objself.nodeList.__len__()
