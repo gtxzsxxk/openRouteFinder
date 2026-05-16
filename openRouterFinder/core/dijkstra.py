@@ -15,6 +15,17 @@ from openRouterFinder.core.graph import (
 from openRouterFinder.core.airport import AirportConnection
 
 
+def _procs_to_dict(procs: dict) -> dict:
+    """Convert Procedure objects to JSON-serializable dicts."""
+    result = {}
+    for key, proc_list in procs.items():
+        result[key] = [
+            {"name": p.name, "runway": p.runway, "points": p.points}
+            for p in proc_list
+        ]
+    return result
+
+
 def build_route_info(
     data_version: str,
     total_time: str,
@@ -31,8 +42,8 @@ def build_route_info(
         "route": route,
         "distance": dist,
         "nodeinformation": node_info,
-        "SID": sid,
-        "STAR": star,
+        "SID": _procs_to_dict(sid),
+        "STAR": _procs_to_dict(star),
         "airportName": airport_name,
     })
 

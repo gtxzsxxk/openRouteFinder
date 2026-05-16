@@ -4,32 +4,49 @@ import pickle
 from typing import Tuple, Dict, Optional, List
 
 from openRouterFinder.config import settings
-from openRouterFinder.core.graph import Node
+from openRouterFinder.core.graph import Node as NewNode, Edge as NewEdge
 
 
 _nav_graph = None
 
 
+def _convert_old_nodes(old_nodes):
+    """Convert RouteFinderLib pickle objects to new graph objects."""
+    new_nodes = []
+    for old in old_nodes:
+        n = NewNode(iid=old.iid, name=old.name, px=old.px, py=old.py)
+        for old_edge in old.nextList:
+            e = NewEdge(
+                nfrom=old_edge.nfrom,
+                nend=old_edge.nend,
+                name=old_edge.name,
+                color=old_edge.color if hasattr(old_edge, 'color') else (0, 0, 0),
+            )
+            n.next_list.append(e)
+        new_nodes.append(n)
+    return new_nodes
+
+
 class NavGraph:
     """Read-only navigation graph. Singleton, thread-safe."""
 
-    def __init__(self, node_list: List[Node], airport_maps: dict, data_version: str):
+    def __init__(self, node_list: List[NewNode], airport_maps: dict, data_version: str):
         # Convert to tuple for immutability
-        self.node_list: Tuple[Node, ...] = tuple(node_list)
+        self.node_list: Tuple[NewNode, ...] = tuple(node_list)
         self.airport_maps = airport_maps
         self.data_version = data_version
         self.num_nodes = len(node_list)
 
         # Build O(1) node index
-        self._node_index: Dict[tuple, Node] = {}
+        self._node_index: Dict[tuple, NewNode] = {}
         for node in node_list:
             self._node_index[node.node_key()] = node
 
-    def find_node(self, name: str, lat: float, lon: float) -> Optional[Node]:
+    def find_node(self, name: str, lat: float, lon: float) -> Optional[NewNode]:
         key = (name, round(lat, 6), round(lon, 6))
         return self._node_index.get(key)
 
-    def find_nodes_by_name(self, name: str) -> List[Node]:
+    def find_nodes_by_name(self, name: str) -> List[NewNode]:
         return [n for n in self.node_list if n.name == name]
 
 
@@ -40,7 +57,9 @@ def load_nav_data() -> NavGraph:
         return _nav_graph
 
     with open(settings.navdat_full_path, "rb") as f:
-        node_list = pickle.load(f)
+        old_nodes = pickle.load(f)
+
+    node_list = _convert_old_nodes(old_nodes)
 
     with open(settings.apdat_full_path, "rb") as f:
         airport_maps = pickle.load(f)
