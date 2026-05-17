@@ -176,6 +176,25 @@ class AirportConnector:
                 ))
                 added_exit_nodes.add(exit_node.name)
 
+        # Fallback: if no runway segments, connect airport to common/transition exit points
+        if not runway_segments:
+            for proc_name, (exit_node, points) in common_segments.items():
+                if exit_node.name not in added_exit_nodes:
+                    connections.append(Edge(
+                        nfrom=airport_node.iid,
+                        nend=exit_node.iid,
+                        name="SID",
+                    ))
+                    added_exit_nodes.add(exit_node.name)
+            for proc_name, trans_name, from_node, to_node, points in transition_segments:
+                if to_node.name not in added_exit_nodes:
+                    connections.append(Edge(
+                        nfrom=airport_node.iid,
+                        nend=to_node.iid,
+                        name="SID",
+                    ))
+                    added_exit_nodes.add(to_node.name)
+
         # Runway exit -> common exit
         for proc_name, runway, exit_node, points in runway_segments:
             if proc_name in common_segments:
@@ -230,6 +249,36 @@ class AirportConnector:
                 procedures[exit_node.name] = [proc]
             else:
                 procedures[exit_node.name].append(proc)
+
+        # Fallback: build procedures from common/transition when no runway segments
+        if not runway_segments:
+            for proc_name, (exit_node, points) in common_segments.items():
+                merged_points = list(points)
+                seen = {p[0] for p in merged_points}
+                transitions = []
+                for tp in transition_segments:
+                    if tp[0] == proc_name:
+                        transitions.append((tp[1], tp[4]))
+                        for p in tp[4]:
+                            if p[0] not in seen:
+                                merged_points.append(p)
+                                seen.add(p[0])
+                proc = Procedure(name=proc_name, runway='ALL', points=merged_points, transitions=transitions)
+                if exit_node.name not in procedures:
+                    procedures[exit_node.name] = [proc]
+                else:
+                    procedures[exit_node.name].append(proc)
+
+            handled_procs = set(common_segments.keys())
+            for proc_name, trans_name, from_node, to_node, points in transition_segments:
+                if proc_name not in handled_procs:
+                    transitions = [(trans_name, points)]
+                    proc = Procedure(name=proc_name, runway='ALL', points=points, transitions=transitions)
+                    if to_node.name not in procedures:
+                        procedures[to_node.name] = [proc]
+                    else:
+                        procedures[to_node.name].append(proc)
+                    handled_procs.add(proc_name)
 
         return AirportConnection(
             airport_node=airport_node,
@@ -359,6 +408,25 @@ class AirportConnector:
                 ))
                 added_entry_nodes.add(entry_node.name)
 
+        # Fallback: if no runway segments, connect common/transition entry points to airport
+        if not runway_segments:
+            for proc_name, (entry_node, points) in common_segments.items():
+                if entry_node.name not in added_entry_nodes:
+                    connections.append(Edge(
+                        nfrom=entry_node.iid,
+                        nend=airport_node.iid,
+                        name="STAR",
+                    ))
+                    added_entry_nodes.add(entry_node.name)
+            for proc_name, trans_name, from_node, to_node, points in transition_segments:
+                if from_node.name not in added_entry_nodes:
+                    connections.append(Edge(
+                        nfrom=from_node.iid,
+                        nend=airport_node.iid,
+                        name="STAR",
+                    ))
+                    added_entry_nodes.add(from_node.name)
+
         # Transition end -> common entry
         for proc_name, trans_name, from_node, to_node, points in transition_segments:
             if proc_name in common_segments:
@@ -418,6 +486,40 @@ class AirportConnector:
                 procedures[entry_node.name] = [proc]
             else:
                 procedures[entry_node.name].append(proc)
+
+        # Fallback: build procedures from common/transition when no runway segments
+        if not runway_segments:
+            for proc_name, (entry_node, points) in common_segments.items():
+                merged_points = []
+                seen = set()
+                for p in points:
+                    if p[0] not in seen:
+                        merged_points.append(p)
+                        seen.add(p[0])
+                transitions = []
+                for tp in transition_segments:
+                    if tp[0] == proc_name:
+                        transitions.append((tp[1], tp[4]))
+                        for p in tp[4]:
+                            if p[0] not in seen:
+                                merged_points.append(p)
+                                seen.add(p[0])
+                proc = Procedure(name=proc_name, runway='ALL', points=merged_points, transitions=transitions)
+                if entry_node.name not in procedures:
+                    procedures[entry_node.name] = [proc]
+                else:
+                    procedures[entry_node.name].append(proc)
+
+            handled_procs = set(common_segments.keys())
+            for proc_name, trans_name, from_node, to_node, points in transition_segments:
+                if proc_name not in handled_procs:
+                    transitions = [(trans_name, points)]
+                    proc = Procedure(name=proc_name, runway='ALL', points=points, transitions=transitions)
+                    if from_node.name not in procedures:
+                        procedures[from_node.name] = [proc]
+                    else:
+                        procedures[from_node.name].append(proc)
+                    handled_procs.add(proc_name)
 
         return AirportConnection(
             airport_node=airport_node,
