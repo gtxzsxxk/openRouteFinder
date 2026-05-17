@@ -19,6 +19,9 @@ interface ProcedureData {
 }
 
 function isDarkMode() {
+  const htmlTheme = document.documentElement.getAttribute('data-theme')
+  if (htmlTheme === 'dark') return true
+  if (htmlTheme === 'light') return false
   return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
 }
 
@@ -37,15 +40,16 @@ export function useMap(
 
   function getColors() {
     const dark = isDarkMode()
+    const style = getComputedStyle(document.documentElement)
     return {
-      route: dark ? '#22d3ee' : '#06b6d4',
-      routeGlow: dark ? '#22d3ee' : '#06b6d4',
-      endpoint: '#6366f1',
-      midpoint: dark ? '#22d3ee' : '#06b6d4',
-      sid: dark ? '#34d399' : '#10b981',
-      star: dark ? '#fbbf24' : '#f59e0b',
-      stroke: dark ? '#111827' : '#ffffff',
-      textHalo: dark ? '#111827' : '#ffffff',
+      route: style.getPropertyValue('--color-route-line').trim() || (dark ? '#5eead4' : '#14b8a6'),
+      routeGlow: style.getPropertyValue('--color-route-line').trim() || (dark ? '#5eead4' : '#14b8a6'),
+      endpoint: style.getPropertyValue('--color-accent').trim() || (dark ? '#14b8a6' : '#0d9488'),
+      midpoint: style.getPropertyValue('--color-route-line').trim() || (dark ? '#5eead4' : '#14b8a6'),
+      sid: style.getPropertyValue('--color-sid-line').trim() || (dark ? '#34d399' : '#059669'),
+      star: style.getPropertyValue('--color-star-line').trim() || (dark ? '#fbbf24' : '#d97706'),
+      stroke: dark ? '#0c0a09' : '#ffffff',
+      textHalo: dark ? '#0c0a09' : '#ffffff',
     }
   }
 
@@ -68,7 +72,8 @@ export function useMap(
     })
 
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
-    const onChange = (e: MediaQueryListEvent | MediaQueryList) => {
+    const onMediaChange = (e: MediaQueryListEvent | MediaQueryList) => {
+      if (document.documentElement.getAttribute('data-theme')) return
       const newStyle = e.matches ? STYLE_DARK : STYLE_LIGHT
       if (newStyle !== currentStyle.value && map.value) {
         currentStyle.value = newStyle
@@ -79,10 +84,27 @@ export function useMap(
       }
     }
     if (mq.addEventListener) {
-      mq.addEventListener('change', onChange)
+      mq.addEventListener('change', onMediaChange)
     } else if ((mq as any).addListener) {
-      (mq as any).addListener(onChange)
+      (mq as any).addListener(onMediaChange)
     }
+
+    const observer = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        if (mutation.type === 'attributes' && mutation.attributeName === 'data-theme') {
+          const newDark = isDarkMode()
+          const newStyle = newDark ? STYLE_DARK : STYLE_LIGHT
+          if (newStyle !== currentStyle.value && map.value) {
+            currentStyle.value = newStyle
+            map.value.setStyle(newStyle)
+            map.value.once('styledata', () => {
+              updateMap()
+            })
+          }
+        }
+      }
+    })
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
   }
 
   function safeRemoveLayer(m: any, id: string) {

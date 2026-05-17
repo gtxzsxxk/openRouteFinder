@@ -8,10 +8,14 @@
         <h1 class="text-lg font-semibold tracking-tight" style="font-family: var(--font-display)">
           OpenRouteFinder
         </h1>
-        <div class="text-text-secondary">
-          <Sun v-if="isDark" class="w-5 h-5" />
-          <Moon v-else class="w-5 h-5" />
-        </div>
+        <button
+          @click="toggleTheme"
+          class="w-9 h-9 flex items-center justify-center rounded-xl bg-bg-elevated border border-border text-text-secondary hover:text-text-primary hover:bg-bg-surface transition-all duration-150 active:scale-95"
+          :title="mode === 'system' ? '跟随系统' : mode === 'dark' ? '深色模式' : '浅色模式'"
+        >
+          <Sun v-if="isDark" class="w-4 h-4" />
+          <Moon v-else class="w-4 h-4" />
+        </button>
       </div>
     </header>
     <main class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -26,7 +30,7 @@ import { Sun, Moon } from '@lucide/vue'
 import HomeView from './views/HomeView.vue'
 import { useTheme } from './composables/useTheme'
 
-const { isDark } = useTheme()
+const { isDark, mode, toggleTheme } = useTheme()
 const scrolled = ref(false)
 
 function onScroll() {

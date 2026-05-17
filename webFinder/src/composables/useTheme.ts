@@ -1,25 +1,58 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 
+type ThemeMode = 'light' | 'dark' | 'system'
+
+const THEME_STORAGE_KEY = 'orf-theme-mode'
+
 export function useTheme() {
   const isDark = ref(false)
+  const mode = ref<ThemeMode>('system')
 
-  const updateTheme = () => {
-    isDark.value = window.matchMedia('(prefers-color-scheme: dark)').matches
+  function applyTheme(newMode: ThemeMode) {
+    mode.value = newMode
+    localStorage.setItem(THEME_STORAGE_KEY, newMode)
+
+    const html = document.documentElement
+
+    if (newMode === 'system') {
+      html.removeAttribute('data-theme')
+      isDark.value = window.matchMedia('(prefers-color-scheme: dark)').matches
+    } else {
+      html.setAttribute('data-theme', newMode)
+      isDark.value = newMode === 'dark'
+    }
+  }
+
+  function toggleTheme() {
+    const cycle: ThemeMode[] = ['system', 'light', 'dark']
+    const currentIndex = cycle.indexOf(mode.value)
+    const nextMode = cycle[(currentIndex + 1) % cycle.length]
+    applyTheme(nextMode)
+  }
+
+  function syncWithSystem() {
+    if (mode.value === 'system') {
+      isDark.value = window.matchMedia('(prefers-color-scheme: dark)').matches
+    }
   }
 
   let mediaQuery: MediaQueryList | null = null
 
   onMounted(() => {
-    updateTheme()
+    const saved = localStorage.getItem(THEME_STORAGE_KEY) as ThemeMode | null
+    const initialMode: ThemeMode = saved && ['light', 'dark', 'system'].includes(saved) ? saved : 'system'
+
+    applyTheme(initialMode)
+
     mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
-    mediaQuery.addEventListener('change', updateTheme)
+    mediaQuery.addEventListener('change', syncWithSystem)
   })
 
   onUnmounted(() => {
     if (mediaQuery) {
-      mediaQuery.removeEventListener('change', updateTheme)
+      mediaQuery.removeEventListener('change', syncWithSystem)
     }
   })
 
-  return { isDark }
+  return { isDark, mode, toggleTheme }
 }

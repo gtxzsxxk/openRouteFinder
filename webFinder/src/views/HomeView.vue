@@ -52,7 +52,7 @@
             <div
               v-for="(node, i) in store.routeResult.nodes"
               :key="i"
-              class="flex items-center justify-between py-3 border-b border-border last:border-0"
+              class="flex items-center justify-between py-4 border-b border-border last:border-0"
             >
               <div class="flex items-center gap-3">
                 <div
@@ -75,22 +75,22 @@
 
         <!-- Airport Info Cell -->
         <BentoCell title="机场信息" class="animate-fade-in-up stagger-3">
-          <div class="space-y-3">
+          <div class="space-y-4">
             <div v-if="store.departureAirport">
               <div class="flex items-center justify-between">
                 <span class="font-mono text-sm font-semibold text-accent">{{ store.departureAirport.name }}</span>
                 <span v-if="store.routeResult?.airportName?.[0]" class="text-xs text-text-secondary">{{ store.routeResult.airportName[0] }}</span>
               </div>
-              <div class="text-xs text-text-secondary font-mono mt-1">
+              <div class="text-xs text-text-secondary font-mono mt-1.5">
                 {{ store.departureAirport.lat.toFixed(4) }}, {{ store.departureAirport.lon.toFixed(4) }}
               </div>
             </div>
-            <div v-if="store.arrivalAirport" class="pt-3 border-t border-border">
+            <div v-if="store.arrivalAirport" class="pt-4 border-t border-border">
               <div class="flex items-center justify-between">
                 <span class="font-mono text-sm font-semibold text-accent">{{ store.arrivalAirport.name }}</span>
                 <span v-if="store.routeResult?.airportName?.[1]" class="text-xs text-text-secondary">{{ store.routeResult.airportName[1] }}</span>
               </div>
-              <div class="text-xs text-text-secondary font-mono mt-1">
+              <div class="text-xs text-text-secondary font-mono mt-1.5">
                 {{ store.arrivalAirport.lat.toFixed(4) }}, {{ store.arrivalAirport.lon.toFixed(4) }}
               </div>
             </div>
@@ -99,26 +99,40 @@
 
         <!-- Weather Cell -->
         <BentoCell v-if="store.routeResult?.weather" title="天气" class="animate-fade-in-up stagger-4">
-          <div class="space-y-3">
+          <div class="space-y-4">
             <div>
-              <div class="text-xs text-text-secondary mb-1">出发机场</div>
-              <p class="text-sm font-mono text-text-primary break-all">{{ store.routeResult.weather[0] }}</p>
+              <div class="text-xs text-text-secondary mb-2">出发机场</div>
+              <p class="text-sm font-mono text-text-primary break-all leading-relaxed">{{ store.routeResult.weather[0] }}</p>
             </div>
-            <div class="pt-3 border-t border-border">
-              <div class="text-xs text-text-secondary mb-1">到达机场</div>
-              <p class="text-sm font-mono text-text-primary break-all">{{ store.routeResult.weather[1] }}</p>
+            <div class="pt-4 border-t border-border">
+              <div class="text-xs text-text-secondary mb-2">到达机场</div>
+              <p class="text-sm font-mono text-text-primary break-all leading-relaxed">{{ store.routeResult.weather[1] }}</p>
             </div>
           </div>
         </BentoCell>
 
-        <!-- SID Cell -->
-        <BentoCell v-if="store.selectedSIDProcedures.length > 0" title="离场程序 (SID)" class="animate-fade-in-up stagger-5">
-          <SIDSelector />
-        </BentoCell>
+        <!-- Procedures Cell (SID + STAR merged) -->
+        <BentoCell
+          v-if="store.selectedSIDProcedures.length > 0 || store.selectedSTARProcedures.length > 0"
+          title="进离场程序"
+          class="animate-fade-in-up stagger-5"
+        >
+          <div class="space-y-5">
+            <!-- SID Section -->
+            <div v-if="store.selectedSIDProcedures.length > 0">
+              <div class="text-xs font-medium text-text-secondary mb-2 uppercase tracking-wider">离场 (SID)</div>
+              <SIDSelector />
+            </div>
 
-        <!-- STAR Cell -->
-        <BentoCell v-if="store.selectedSTARProcedures.length > 0" title="进场程序 (STAR)" class="animate-fade-in-up stagger-6">
-          <STARSelector />
+            <!-- Divider between SID and STAR -->
+            <div v-if="store.selectedSIDProcedures.length > 0 && store.selectedSTARProcedures.length > 0" class="border-t border-border" />
+
+            <!-- STAR Section -->
+            <div v-if="store.selectedSTARProcedures.length > 0">
+              <div class="text-xs font-medium text-text-secondary mb-2 uppercase tracking-wider">进场 (STAR)</div>
+              <STARSelector />
+            </div>
+          </div>
         </BentoCell>
       </div>
     </div>
@@ -196,5 +210,4 @@ watch(() => store.isLoading, (loading) => {
 .stagger-3 { animation-delay: 240ms; }
 .stagger-4 { animation-delay: 320ms; }
 .stagger-5 { animation-delay: 400ms; }
-.stagger-6 { animation-delay: 480ms; }
 </style>

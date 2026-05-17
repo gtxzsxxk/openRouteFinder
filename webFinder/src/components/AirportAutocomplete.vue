@@ -1,6 +1,6 @@
 <template>
   <div class="relative">
-    <label class="block text-xs font-medium text-text-secondary mb-1.5 uppercase tracking-wider">{{ label }}</label>
+    <label v-if="label" class="block text-xs font-medium text-text-secondary mb-1.5 uppercase tracking-wider">{{ label }}</label>
     <input
       v-model="inputValue"
       type="text"
@@ -40,7 +40,7 @@ import { ref, watch } from 'vue'
 import type { Airport } from '@/types'
 
 const props = defineProps<{
-  label: string
+  label?: string
   placeholder?: string
   modelValue: string
 }>()

@@ -1,6 +1,6 @@
 <template>
-  <div class="bg-bg-elevated rounded-xl p-4">
-    <label class="block text-xs font-medium text-text-secondary mb-1.5 uppercase tracking-wider">{{ label }}</label>
+  <div>
+    <label class="block text-xs font-medium text-text-secondary mb-2 uppercase tracking-wider">{{ label }}</label>
     <div v-if="isLoading" class="text-xs text-text-secondary py-2">加载中...</div>
     <div v-else-if="error" class="text-xs text-red-500 py-2">{{ error }}</div>
     <div v-else-if="!hasLoaded" class="text-xs text-text-secondary py-2 cursor-pointer hover:text-text-primary transition-colors" @click="loadProcedures">
