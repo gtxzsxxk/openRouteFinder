@@ -29,3 +29,27 @@ def test_build_node_info():
     info = engine._build_node_info(sid, star, [("E1", "N1", -2)])
     assert info[0] == ["ORIG", 30.0, 120.0]
     assert info[1] == ["DEST", 31.0, 121.0]
+
+
+def test_route_engine_search_accepts_constraint_params():
+    """RouteEngine.search should accept sid_exit and star_entry without error."""
+    from openRouterFinder.core.data_loader import get_nav_graph
+    from openRouterFinder.core.airport import AirportConnector
+
+    graph = get_nav_graph()
+    connector = AirportConnector(graph.airport_maps, graph._node_index)
+    sid_conn = connector.build_sid("ZGHA")
+    star_conn = connector.build_star("ZJSY")
+
+    if sid_conn is None or star_conn is None:
+        import pytest
+        pytest.skip("Need both airports to have data")
+
+    engine = RouteEngine(graph.node_list, graph.data_version)
+    result = engine.search(
+        "ZGHA", "ZJSY", sid_conn, star_conn,
+        connector.get_airport_names("ZGHA") + connector.get_airport_names("ZJSY"),
+        sid_exit=None,
+        star_entry=None,
+    )
+    assert result is not None

@@ -186,7 +186,7 @@ def _parse_runways(airport_str: str) -> list:
     return result
 
 
-def search_route(orig: str, dest: str) -> Optional[dict]:
+def search_route(orig: str, dest: str, sid_exit: Optional[str] = None, star_entry: Optional[str] = None) -> Optional[dict]:
     """Thread-safe route search. Each call gets isolated state."""
     from openRouterFinder.core.airport import AirportConnector
     from openRouterFinder.core.dijkstra import RouteEngine
@@ -200,8 +200,8 @@ def search_route(orig: str, dest: str) -> Optional[dict]:
 
     connector = AirportConnector(graph.airport_maps, graph._node_index)
 
-    sid_conn = connector.build_sid(orig)
-    star_conn = connector.build_star(dest)
+    sid_conn = connector.build_sid(orig, filter_name=sid_exit)
+    star_conn = connector.build_star(dest, filter_name=star_entry)
 
     if sid_conn is None or star_conn is None:
         return None
@@ -212,6 +212,8 @@ def search_route(orig: str, dest: str) -> Optional[dict]:
     result_json = engine.search(
         orig, dest, sid_conn, star_conn,
         connector.get_airport_names(orig) + connector.get_airport_names(dest),
+        sid_exit=sid_exit,
+        star_entry=star_entry,
     )
 
     if result_json is None:

@@ -71,6 +71,8 @@ class RouteEngine:
         sid_conn: AirportConnection,
         star_conn: AirportConnection,
         airport_names: List[str],
+        sid_exit: Optional[str] = None,
+        star_entry: Optional[str] = None,
     ) -> Optional[str]:
         """Run A* search. Returns JSON string or None."""
         timestart = time.time()
