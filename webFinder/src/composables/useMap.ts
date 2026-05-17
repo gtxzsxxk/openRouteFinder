@@ -1,7 +1,7 @@
 import { ref, watch, type Ref } from 'vue'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
-import type { RouteResult, Runway, RunwayThreshold } from '@/types'
+import type { RouteResult, Runway, RunwayThreshold, RouteSegment } from '@/types'
 
 const STYLE_LIGHT = 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json'
 const STYLE_DARK = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json'
@@ -32,6 +32,7 @@ export function useMap(
   selectedSTAR: Ref<ProcedureData | null>,
   selectedSIDTransition: Ref<TransitionData | null>,
   selectedSTARTransition: Ref<TransitionData | null>,
+  routeSegments: Ref<RouteSegment[]>,
 ) {
   const map = ref<any>(null)
   const isMapReady = ref(false)
@@ -123,6 +124,25 @@ export function useMap(
     }
   }
 
+  // Compute midpoint on great-circle path between two lat/lon points
+  function midpoint(lat1: number, lon1: number, lat2: number, lon2: number): [number, number] {
+    const dLon = (lon2 - lon1) * Math.PI / 180
+    const lat1r = lat1 * Math.PI / 180
+    const lat2r = lat2 * Math.PI / 180
+    const lon1r = lon1 * Math.PI / 180
+
+    const Bx = Math.cos(lat2r) * Math.cos(dLon)
+    const By = Math.cos(lat2r) * Math.sin(dLon)
+
+    const midLat = Math.atan2(
+      Math.sin(lat1r) + Math.sin(lat2r),
+      Math.sqrt((Math.cos(lat1r) + Bx) ** 2 + By ** 2)
+    )
+    const midLon = lon1r + Math.atan2(By, Math.cos(lat1r) + Bx)
+
+    return [midLon * 180 / Math.PI, midLat * 180 / Math.PI]
+  }
+
   // Compute a point along runway heading at given distance (in meters) using ENU conversion
   function pointAlongHeading(end: RunwayThreshold, distanceMeters: number, reverse = false): [number, number] {
     const headingRad = (end.heading * Math.PI) / 180
@@ -199,14 +219,14 @@ export function useMap(
       const c = getColors()
 
       const allLayers = [
-        'route-glow', 'route-line', 'all-points', 'all-labels',
+        'route-glow', 'route-line', 'route-segment-labels', 'all-points', 'all-labels',
         'sid-line', 'sid-labels',
         'star-line', 'star-labels',
         'runways', 'runway-labels', 'runway-ends', 'runway-end-labels',
         'sid-active-runway', 'star-active-runway',
       ]
       const allSources = [
-        'route', 'all-points',
+        'route', 'route-segments', 'all-points',
         'sid', 'sid-points', 'star', 'star-points',
         'runways', 'runway-ends',
         'sid-active-runway', 'star-active-runway',
@@ -368,6 +388,42 @@ export function useMap(
           paint: {
             'line-color': c.route,
             'line-width': 3,
+          },
+        })
+      }
+
+      // Route segment labels (airway names)
+      const segmentFeatures: any[] = []
+      for (const seg of routeSegments.value) {
+        const fromNode = nodes.find(n => n.name === seg.from)
+        const toNode = nodes.find(n => n.name === seg.to)
+        if (!fromNode || !toNode) continue
+        const [midLon, midLat] = midpoint(fromNode.lat, fromNode.lon, toNode.lat, toNode.lon)
+        segmentFeatures.push({
+          type: 'Feature' as const,
+          geometry: { type: 'Point' as const, coordinates: [midLon, midLat] },
+          properties: { airway: seg.airway },
+        })
+      }
+
+      if (segmentFeatures.length > 0) {
+        m.addSource('route-segments', {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: segmentFeatures },
+        })
+        m.addLayer({
+          id: 'route-segment-labels',
+          type: 'symbol',
+          source: 'route-segments',
+          layout: {
+            'text-field': ['get', 'airway'],
+            'text-size': 10,
+            'text-font': ['Open Sans Regular'],
+          },
+          paint: {
+            'text-color': c.route,
+            'text-halo-color': c.textHalo,
+            'text-halo-width': 2,
           },
         })
       }
