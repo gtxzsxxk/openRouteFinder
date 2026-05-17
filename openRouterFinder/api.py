@@ -27,6 +27,61 @@ _route_semaphore = asyncio.Semaphore(8)
 # --- Valid code storage ---
 _valid_codes: dict[str, str] = {}
 
+# --- Airport prefix index ---
+_airport_prefix_index: dict[str, list] = {}
+_airport_list: list = []
+
+
+def _build_airport_index():
+    """Build prefix index for O(1) airport autocomplete lookups."""
+    global _airport_prefix_index, _airport_list
+    maps = get_airport_maps()
+    global_dat = maps.get("GLOBAL", [])
+    airports = []
+
+    for line in global_dat:
+        parts = line.strip().split(",")
+        if len(parts) < 5 or parts[0] != "A":
+            continue
+        try:
+            lat = float(parts[3].strip())
+            lon = float(parts[4].strip())
+        except ValueError:
+            continue
+        airports.append({"icao": parts[1].strip(), "name": parts[2].strip(), "lat": lat, "lon": lon})
+
+    _airport_list = airports
+
+    # Build prefix index for ICAO codes
+    for ap in airports:
+        icao = ap["icao"]
+        for i in range(1, len(icao) + 1):
+            prefix = icao[:i]
+            if prefix not in _airport_prefix_index:
+                _airport_prefix_index[prefix] = []
+            _airport_prefix_index[prefix].append(ap)
+
+    print(f"Airport index built: {len(airports)} airports, {len(_airport_prefix_index)} prefixes")
+
+
+def _search_airports(q: str, limit: int = 50) -> list:
+    """O(1) airport search using prefix index, fallback to name search."""
+    q_upper = q.upper()
+
+    # Fast path: ICAO prefix match via index
+    if q_upper in _airport_prefix_index:
+        return _airport_prefix_index[q_upper][:limit]
+
+    # Fallback: name substring search (for Chinese/non-ICAO queries)
+    results = []
+    for ap in _airport_list:
+        if q_upper in ap["name"].upper():
+            results.append(ap)
+            if len(results) >= limit:
+                break
+    return results
+
+
 # --- Pydantic Models ---
 
 class RouteRequest(BaseModel):
@@ -62,26 +117,10 @@ def get_version():
 
 @app.get("/api/airports")
 def get_airports(q: Optional[str] = None):
-    maps = get_airport_maps()
-    global_dat = maps.get("GLOBAL", [])
-    airports = []
-    q_upper = (q or "").upper()
-
-    for line in global_dat:
-        parts = line.strip().split(",")
-        if len(parts) < 5 or parts[0] != "A":
-            continue
-        icao = parts[1].strip()
-        name = parts[2].strip()
-        try:
-            lat = float(parts[3].strip())
-            lon = float(parts[4].strip())
-        except ValueError:
-            continue
-        if not q_upper or icao.startswith(q_upper) or q_upper in name.upper():
-            airports.append({"icao": icao, "name": name, "lat": lat, "lon": lon})
-
-    return {"airports": airports[:50]}
+    q = (q or "").strip()
+    if not q:
+        return {"airports": _airport_list[:50]}
+    return {"airports": _search_airports(q, limit=50)}
 
 
 @app.get("/api/airports/{icao}")
@@ -215,5 +254,6 @@ if frontend_dist.exists():
 def startup():
     print("OpenRouteFinder API starting...")
     print(f"Nav data version: {get_data_version()}")
+    _build_airport_index()
     start_metar_updater()
     print("METAR keeper started")

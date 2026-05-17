@@ -3,6 +3,9 @@
     <label class="block text-sm font-medium text-text-muted mb-2">{{ label }}</label>
     <div v-if="isLoading" class="text-xs text-text-muted py-2">加载中...</div>
     <div v-else-if="error" class="text-xs text-highlight py-2">{{ error }}</div>
+    <div v-else-if="!hasLoaded" class="text-xs text-text-muted py-2 cursor-pointer hover:text-white transition-colors" @click="loadProcedures">
+      🔽 点击展开{{ type === 'sid' ? '离场' : '进场' }}程序选择
+    </div>
     <div v-else-if="options.length === 0" class="text-xs text-text-muted py-2">
       该机场无可用{{ type === 'sid' ? '离场' : '进场' }}程序
     </div>
@@ -42,6 +45,7 @@ const label = computed(() => props.type === 'sid' ? '离场点 (SID)' : '进场�
 const options = ref<ProcedureOption[]>([])
 const isLoading = ref(false)
 const error = ref<string | null>(null)
+const hasLoaded = ref(false)
 
 const selectedValue = computed({
   get: () => props.modelValue,
@@ -56,6 +60,7 @@ const selectedOption = computed(() => {
 async function loadProcedures() {
   if (!props.icao) {
     options.value = []
+    hasLoaded.value = true
     return
   }
 
@@ -69,6 +74,7 @@ async function loadProcedures() {
       } else {
         error.value = '加载失败'
       }
+      hasLoaded.value = true
       return
     }
     const data = await response.json()
@@ -77,8 +83,10 @@ async function loadProcedures() {
     } else {
       options.value = data.star?.entries || []
     }
+    hasLoaded.value = true
   } catch {
     error.value = '加载失败'
+    hasLoaded.value = true
   } finally {
     isLoading.value = false
   }
@@ -87,10 +95,9 @@ async function loadProcedures() {
 watch(() => props.icao, (newIcao, oldIcao) => {
   if (newIcao !== oldIcao) {
     selectedValue.value = ''
-    loadProcedures()
+    options.value = []
+    hasLoaded.value = false
+    error.value = null
   }
 })
-
-// Initial load
-loadProcedures()
 </script>

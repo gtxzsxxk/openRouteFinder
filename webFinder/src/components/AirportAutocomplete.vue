@@ -66,7 +66,7 @@ watch(inputValue, (val) => {
 
 async function onInput() {
   const val = inputValue.value.trim().toUpperCase()
-  if (val.length < 1) {
+  if (val.length < 2) {
     suggestions.value = []
     isOpen.value = false
     return
@@ -88,7 +88,7 @@ async function onInput() {
       suggestions.value = []
       isOpen.value = false
     }
-  }, 300)
+  }, 500)
 }
 
 function moveDown() {
