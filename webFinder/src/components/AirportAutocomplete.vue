@@ -82,6 +82,18 @@ async function onInput() {
       }
       const data = await response.json()
       suggestions.value = data.airports || []
+
+      const currentVal = inputValue.value.trim().toUpperCase()
+      if (currentVal.length === 4) {
+        const exact = suggestions.value.find(a => a.icao === currentVal)
+        if (exact) {
+          selectAirport(exact)
+          return
+        }
+        isOpen.value = false
+        return
+      }
+
       isOpen.value = suggestions.value.length > 0
       highlightedIndex.value = -1
     } catch {

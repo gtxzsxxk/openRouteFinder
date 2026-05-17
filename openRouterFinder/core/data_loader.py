@@ -176,7 +176,8 @@ def _parse_runways(airport_str: str) -> list:
             lon = float(parts[9].strip())
             elevation = int(float(parts[10].strip())) if len(parts) > 10 else None
             surface = _parse_surface(parts[13].strip()) if len(parts) > 13 else ''
-            lighting = _parse_lighting(parts[14].strip()) if len(parts) > 14 else ''
+            raw_lighting = parts[12].strip() if len(parts) > 12 else ''
+            lighting = _parse_lighting(raw_lighting) if raw_lighting in _LIGHTING_MAP else ''
         except (ValueError, IndexError):
             continue
 
