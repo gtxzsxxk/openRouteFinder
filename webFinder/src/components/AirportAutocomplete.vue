@@ -1,12 +1,12 @@
 <template>
   <div class="relative">
-    <label class="block text-sm font-medium text-text-muted mb-1.5">{{ label }}</label>
+    <label class="block text-xs font-medium text-text-secondary mb-1.5 uppercase tracking-wider">{{ label }}</label>
     <input
       v-model="inputValue"
       type="text"
       maxlength="4"
       :placeholder="placeholder"
-      class="w-full px-3 py-2 bg-primary border border-border rounded-lg text-white placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-highlight focus:border-transparent transition-all uppercase"
+      class="w-full h-14 px-4 bg-bg-elevated rounded-xl text-text-primary placeholder-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent transition-all duration-150 uppercase font-mono text-lg tracking-wider"
       @input="onInput"
       @keydown.down.prevent="moveDown"
       @keydown.up.prevent="moveUp"
@@ -16,20 +16,20 @@
     />
     <div
       v-if="isOpen && suggestions.length > 0"
-      class="absolute z-50 w-full mt-1 bg-surface border border-border rounded-lg shadow-lg max-h-60 overflow-y-auto"
+      class="absolute z-50 w-full mt-2 bg-bg-elevated border border-border rounded-xl shadow-lg max-h-60 overflow-y-auto"
     >
       <div
         v-for="(airport, index) in suggestions"
         :key="airport.icao"
         :class="[
-          'px-3 py-2 cursor-pointer text-sm transition-colors',
-          index === highlightedIndex ? 'bg-highlight text-white' : 'text-text hover:bg-surface-light',
+          'px-4 py-3 cursor-pointer text-sm transition-colors',
+          index === highlightedIndex ? 'bg-accent text-white' : 'text-text-primary hover:bg-bg-surface',
         ]"
         @mousedown.prevent="selectAirport(airport)"
         @mouseenter="highlightedIndex = index"
       >
         <span class="font-mono font-medium">{{ airport.icao }}</span>
-        <span class="text-text-muted ml-2">{{ airport.name }}</span>
+        <span class="text-text-secondary ml-2">{{ airport.name }}</span>
       </div>
     </div>
   </div>

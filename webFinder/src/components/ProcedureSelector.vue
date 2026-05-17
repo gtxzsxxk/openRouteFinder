@@ -1,26 +1,26 @@
 <template>
-  <div class="bg-surface border border-border rounded-xl p-4">
-    <label class="block text-sm font-medium text-text-muted mb-2">{{ label }}</label>
-    <div v-if="isLoading" class="text-xs text-text-muted py-2">加载中...</div>
-    <div v-else-if="error" class="text-xs text-highlight py-2">{{ error }}</div>
-    <div v-else-if="!hasLoaded" class="text-xs text-text-muted py-2 cursor-pointer hover:text-white transition-colors" @click="loadProcedures">
-      🔽 点击展开{{ type === 'sid' ? '离场' : '进场' }}程序选择
+  <div class="bg-bg-elevated rounded-xl p-4">
+    <label class="block text-xs font-medium text-text-secondary mb-1.5 uppercase tracking-wider">{{ label }}</label>
+    <div v-if="isLoading" class="text-xs text-text-secondary py-2">加载中...</div>
+    <div v-else-if="error" class="text-xs text-red-500 py-2">{{ error }}</div>
+    <div v-else-if="!hasLoaded" class="text-xs text-text-secondary py-2 cursor-pointer hover:text-text-primary transition-colors" @click="loadProcedures">
+      <span class="mr-1">&#9660;</span> 点击展开{{ type === 'sid' ? '离场' : '进场' }}程序选择
     </div>
-    <div v-else-if="options.length === 0" class="text-xs text-text-muted py-2">
+    <div v-else-if="options.length === 0" class="text-xs text-text-secondary py-2">
       该机场无可用{{ type === 'sid' ? '离场' : '进场' }}程序
     </div>
     <div v-else class="space-y-2">
       <select
         v-model="selectedValue"
-        class="w-full px-3 py-2 bg-primary border border-border rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-highlight focus:border-transparent"
+        class="w-full h-10 px-3 bg-bg-page border border-border rounded-lg text-text-primary focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent text-sm"
       >
-        <option value="">🔄 自动选择（推荐）</option>
+        <option value="">&#128260; 自动选择（推荐）</option>
         <option v-for="opt in options" :key="opt.name" :value="opt.name">
           {{ opt.name }}（{{ opt.procedures.join('、') }}）
         </option>
       </select>
 
-      <div v-if="selectedOption" class="text-xs text-text-muted space-y-1 pt-1">
+      <div v-if="selectedOption" class="text-xs text-text-secondary space-y-1 pt-1">
         <p>对应程序: {{ selectedOption.procedures.join('、') }}</p>
       </div>
     </div>
