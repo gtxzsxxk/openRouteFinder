@@ -34,6 +34,8 @@ class RouteRequest(BaseModel):
     dest: str
     validCode: str
     validToken: str
+    sidExit: Optional[str] = None
+    starEntry: Optional[str] = None
 
 
 # --- FastAPI App ---
@@ -160,7 +162,7 @@ async def post_route(req: RouteRequest):
         async with _route_semaphore:
             result = await asyncio.get_event_loop().run_in_executor(
                 _dijkstra_pool,
-                lambda: search_route(req.orig, req.dest),
+                lambda: search_route(req.orig, req.dest, sid_exit=req.sidExit, star_entry=req.starEntry),
             )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Route calculation failed: {e}")
