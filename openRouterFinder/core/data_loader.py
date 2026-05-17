@@ -133,21 +133,21 @@ def _opposite_runway(name: str) -> str:
 
 
 _SURFACE_MAP = {
-    '1': '沥青',
-    '2': '混凝土',
-    '3': '草地',
-    '4': '碎石',
-    '5': '泥土',
-    '6': '冰面',
-    '7': '铺砌',
+    '1': 'asphalt',
+    '2': 'concrete',
+    '3': 'grass',
+    '4': 'gravel',
+    '5': 'dirt',
+    '6': 'ice',
+    '7': 'paved',
 }
 
 _LIGHTING_MAP = {
-    '0': '无',
-    '1': '简易',
-    '2': '中等',
-    '3': '高强度',
-    '4': '其他',
+    '0': 'none',
+    '1': 'simple',
+    '2': 'medium',
+    '3': 'high',
+    '4': 'other',
 }
 
 

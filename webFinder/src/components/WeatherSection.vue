@@ -83,7 +83,7 @@
         </div>
 
         <div v-if="data.trend" class="pt-2 border-t border-border">
-          <span class="text-xs bg-bg-page text-text-secondary px-2 py-0.5 rounded">{{ data.trend }}</span>
+          <span class="text-xs bg-bg-page text-text-secondary px-2 py-0.5 rounded">{{ translatedTrend }}</span>
         </div>
       </div>
 
@@ -128,5 +128,29 @@ const cloudBaseText = computed(() => {
   const c = props.data.clouds[0]
   if (c.base == null) return c.cover
   return `${c.cover} ${c.base}ft`
+})
+
+const translatedTrend = computed(() => {
+  if (!props.data.trend) return ''
+  const tokens = props.data.trend.split(' ')
+  return tokens.map((token) => {
+    if (t(`trend.${token}`) !== `trend.${token}`) {
+      return t(`trend.${token}`)
+    }
+    const m = token.match(/^(FM|TL|AT)(\d{4})$/)
+    if (m && t(`trend.${m[1]}`) !== `trend.${m[1]}`) {
+      return `${t(`trend.${m[1]}`)} ${m[2]}Z`
+    }
+    if (t(`weatherCode.${token}`) !== `weatherCode.${token}`) {
+      return t(`weatherCode.${token}`)
+    }
+    if (token.startsWith('-') && t(`weatherCode.${token.slice(1)}`) !== `weatherCode.${token.slice(1)}`) {
+      return `${t('weather.light') || 'Light'}${t(`weatherCode.${token.slice(1)}`)}`
+    }
+    if (token.startsWith('+') && t(`weatherCode.${token.slice(1)}`) !== `weatherCode.${token.slice(1)}`) {
+      return `${t('weather.heavy') || 'Heavy'}${t(`weatherCode.${token.slice(1)}`)}`
+    }
+    return token
+  }).join(' ')
 })
 </script>

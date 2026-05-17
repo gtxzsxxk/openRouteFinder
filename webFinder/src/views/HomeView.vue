@@ -81,8 +81,8 @@
         </BentoCell>
 
         <!-- Waypoints Cell -->
-        <BentoCell :title="$t('bento.waypoints')" class="animate-fade-in-up stagger-5 overflow-hidden">
-          <div class="h-full overflow-y-auto space-y-0">
+        <BentoCell :title="$t('bento.waypoints')" class="animate-fade-in-up stagger-5 relative">
+          <div class="absolute top-[3.75rem] bottom-6 left-6 right-6 overflow-y-auto space-y-0">
             <div
               v-for="(node, i) in store.routeResult.nodes"
               :key="i"
