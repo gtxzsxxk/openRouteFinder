@@ -132,16 +132,6 @@ def _opposite_runway(name: str) -> str:
     return f"{opp_num:02d}{opp_suffix}"
 
 
-_SURFACE_MAP = {
-    '1': 'asphalt',
-    '2': 'concrete',
-    '3': 'grass',
-    '4': 'gravel',
-    '5': 'dirt',
-    '6': 'ice',
-    '7': 'paved',
-}
-
 _LIGHTING_MAP = {
     '0': 'none',
     '1': 'simple',
@@ -149,10 +139,6 @@ _LIGHTING_MAP = {
     '3': 'high',
     '4': 'other',
 }
-
-
-def _parse_surface(code: str) -> str:
-    return _SURFACE_MAP.get(code, code)
 
 
 def _parse_lighting(code: str) -> str:
@@ -175,7 +161,6 @@ def _parse_runways(airport_str: str) -> list:
             lat = float(parts[8].strip())
             lon = float(parts[9].strip())
             elevation = int(float(parts[10].strip())) if len(parts) > 10 else None
-            surface = _parse_surface(parts[13].strip()) if len(parts) > 13 else ''
             raw_lighting = parts[12].strip() if len(parts) > 12 else ''
             lighting = _parse_lighting(raw_lighting) if raw_lighting in _LIGHTING_MAP else ''
         except (ValueError, IndexError):
@@ -202,7 +187,6 @@ def _parse_runways(airport_str: str) -> list:
             'lat': lat,
             'lon': lon,
             'elevation': elevation,
-            'surface': surface,
             'lighting': lighting,
             'ils': ils,
         }
@@ -225,7 +209,6 @@ def _parse_runways(airport_str: str) -> list:
                 ],
                 'lengthFt': rwy['length'],
                 'widthFt': rwy['width'],
-                'surface': rwy.get('surface', ''),
                 'lighting': rwy.get('lighting', ''),
                 'ils': rwy.get('ils', []) + opp.get('ils', []),
             })
@@ -235,7 +218,6 @@ def _parse_runways(airport_str: str) -> list:
                 'thresholds': [{'name': name, 'lat': rwy['lat'], 'lon': rwy['lon'], 'heading': rwy['heading'], 'elevationFt': rwy['elevation']}],
                 'lengthFt': rwy['length'],
                 'widthFt': rwy['width'],
-                'surface': rwy.get('surface', ''),
                 'lighting': rwy.get('lighting', ''),
                 'ils': rwy.get('ils', []),
             })

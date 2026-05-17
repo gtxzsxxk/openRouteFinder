@@ -30,7 +30,6 @@ export interface RunwayDetail {
   name: string
   lengthFt: number
   widthFt: number
-  surface: string
   lighting: string
   thresholds: RunwayThreshold[]
   ils?: Array<{ runwayEnd: string; frequency: string; heading: number; category: string }>
