@@ -212,11 +212,14 @@ async def post_route(req: RouteRequest):
     # Map legacy fields
     if "nodeinformation" in result:
         raw_nodes = result.pop("nodeinformation")
-        result["nodes"] = [
-            {"name": n[0], "lat": n[1], "lon": n[2]}
-            for n in raw_nodes
-            if len(n) >= 3
-        ]
+        if raw_nodes:
+            result["nodes"] = [
+                {"name": n[0], "lat": n[1], "lon": n[2]}
+                for n in raw_nodes
+                if len(n) >= 3
+            ]
+        else:
+            result["nodes"] = []
 
     result["weather"] = [read_metar(req.orig), read_metar(req.dest)]
     return result
