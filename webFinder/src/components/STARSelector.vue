@@ -37,7 +37,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { useRouteStore } from '@/stores/routeStore'
 
 const store = useRouteStore()
@@ -45,5 +45,12 @@ const store = useRouteStore()
 const selectedIndex = computed({
   get: () => store.selectedSTARIndex,
   set: (val) => store.setSelectedSTAR(val),
+})
+
+// Defensive: reset index if it goes out of bounds after route changes
+watch(() => store.selectedSTARProcedures.length, (len) => {
+  if (len > 0 && store.selectedSTARIndex >= len) {
+    store.setSelectedSTAR(0)
+  }
 })
 </script>

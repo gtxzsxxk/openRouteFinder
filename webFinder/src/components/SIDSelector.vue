@@ -37,7 +37,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { useRouteStore } from '@/stores/routeStore'
 
 const store = useRouteStore()
@@ -45,5 +45,12 @@ const store = useRouteStore()
 const selectedIndex = computed({
   get: () => store.selectedSIDIndex,
   set: (val) => store.setSelectedSID(val),
+})
+
+// Defensive: reset index if it goes out of bounds after route changes
+watch(() => store.selectedSIDProcedures.length, (len) => {
+  if (len > 0 && store.selectedSIDIndex >= len) {
+    store.setSelectedSID(0)
+  }
 })
 </script>

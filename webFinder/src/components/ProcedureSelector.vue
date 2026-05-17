@@ -87,6 +87,10 @@ async function loadProcedures() {
       options.value = data.star?.entries || []
     }
     hasLoaded.value = true
+    // Defensive: if current selection is not in new options, reset to auto
+    if (selectedValue.value && !options.value.some(o => o.name === selectedValue.value)) {
+      selectedValue.value = ''
+    }
   } catch {
     error.value = t('common.loadFailed')
     hasLoaded.value = true

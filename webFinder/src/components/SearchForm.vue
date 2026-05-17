@@ -98,10 +98,12 @@ const canSubmit = computed(() => {
 
 function onDepartureSelect(airport: Airport) {
   departure.value = airport.icao
+  sidExit.value = ''
 }
 
 function onArrivalSelect(airport: Airport) {
   arrival.value = airport.icao
+  starEntry.value = ''
 }
 
 function swapAirports() {
@@ -109,6 +111,9 @@ function swapAirports() {
   const temp = departure.value
   departure.value = arrival.value
   arrival.value = temp
+  const tempSid = sidExit.value
+  sidExit.value = starEntry.value
+  starEntry.value = tempSid
   setTimeout(() => {
     isSwapping.value = false
   }, 300)
