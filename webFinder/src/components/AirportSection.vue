@@ -77,7 +77,7 @@
                 </div>
                 <div class="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-text-secondary">
                   <span>{{ $t('airport.surface') }}: {{ $t(`surface.${rwy.surface}`) }}</span>
-                  <span>{{ $t('airport.lighting') }}: {{ $t(`lighting.${rwy.lighting}`) }}</span>
+                  <span v-if="rwy.lighting">{{ $t('airport.lighting') }}: {{ $t(`lighting.${rwy.lighting}`) }}</span>
                 </div>
                 <div v-if="rwy.ils && rwy.ils.length > 0" class="flex flex-wrap gap-2">
                   <span
