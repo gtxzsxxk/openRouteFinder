@@ -101,6 +101,52 @@ def get_airport(icao: str):
     raise HTTPException(status_code=404, detail="Airport not found")
 
 
+@app.get("/api/airports/{icao}/procedures")
+def get_airport_procedures(icao: str):
+    maps = get_airport_maps()
+    icao = icao.upper()
+    if icao not in maps:
+        raise HTTPException(status_code=404, detail="Airport not found")
+
+    from openRouterFinder.core.data_loader import get_nav_graph
+    from openRouterFinder.core.airport import AirportConnector
+    graph = get_nav_graph()
+    connector = AirportConnector(maps, graph._node_index)
+
+    sid_conn = connector.build_sid(icao)
+    star_conn = connector.build_star(icao)
+
+    sid_exits = []
+    if sid_conn and sid_conn.procedures:
+        seen = set()
+        for exit_name, proc_list in sid_conn.procedures.items():
+            if exit_name in seen:
+                continue
+            seen.add(exit_name)
+            sid_exits.append({
+                "name": exit_name,
+                "procedures": [p.name for p in proc_list],
+            })
+
+    star_entries = []
+    if star_conn and star_conn.procedures:
+        seen = set()
+        for entry_name, proc_list in star_conn.procedures.items():
+            if entry_name in seen:
+                continue
+            seen.add(entry_name)
+            star_entries.append({
+                "name": entry_name,
+                "procedures": [p.name for p in proc_list],
+            })
+
+    return {
+        "icao": icao,
+        "sid": {"exits": sid_exits},
+        "star": {"entries": star_entries},
+    }
+
+
 @app.post("/api/route")
 async def post_route(req: RouteRequest):
     # Validate captcha
