@@ -1,37 +1,125 @@
 <template>
-  <div class="space-y-6">
+  <div class="space-y-8">
+    <!-- Search Section -->
     <SearchForm @search="handleSearch" />
 
-    <div v-if="store.isLoading" class="flex items-center justify-center py-12">
-      <div class="flex items-center gap-3 text-text-muted">
-        <svg class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-        </svg>
-        <span>正在计算航路...</span>
-        <span class="font-mono text-sm">{{ queryTime.toFixed(2) }}s</span>
+    <!-- Loading State -->
+    <div v-if="store.isLoading" class="space-y-8">
+      <div class="h-16 bg-bg-surface rounded-2xl animate-pulse" />
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div class="h-80 bg-bg-surface rounded-2xl animate-pulse md:col-span-2" />
+        <div class="h-80 bg-bg-surface rounded-2xl animate-pulse" />
+        <div class="h-40 bg-bg-surface rounded-2xl animate-pulse" />
+        <div class="h-40 bg-bg-surface rounded-2xl animate-pulse" />
+        <div class="h-40 bg-bg-surface rounded-2xl animate-pulse" />
       </div>
     </div>
 
-    <div v-else-if="store.error" class="bg-surface border border-border rounded-xl p-6 text-center">
-      <p class="text-highlight">{{ store.error }}</p>
-      <button @click="store.setError(null)" class="mt-3 text-sm text-text-muted hover:text-white transition-colors">
-        清除错误
+    <!-- Error State -->
+    <div
+      v-else-if="store.error"
+      class="bg-error/10 border border-error/20 rounded-xl p-4 flex items-center justify-between"
+    >
+      <p class="text-error text-sm">{{ store.error }}</p>
+      <button
+        @click="store.setError(null)"
+        class="text-error/70 hover:text-error transition-colors"
+      >
+        <X class="w-4 h-4" />
       </button>
     </div>
 
-    <div v-if="store.hasResult && store.routeResult" class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <div class="space-y-4">
-        <RouteMap />
-        <AirportInfo />
-      </div>
-      <div class="space-y-4">
-        <RouteResult />
-        <div class="flex gap-4">
-          <SIDSelector class="flex-1" />
-          <STARSelector class="flex-1" />
-        </div>
-        <WeatherCard />
+    <!-- Result State -->
+    <div v-if="store.hasResult && store.routeResult" class="space-y-8">
+      <!-- Route Hero -->
+      <RouteHero
+        :route="store.routeResult.route"
+        :distance="store.routeResult.distance"
+        :totalTime="store.routeResult.total_time"
+        :dataVersion="store.routeResult.data_version"
+      />
+
+      <!-- Bento Grid -->
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <!-- Map Cell -->
+        <BentoCell class="md:col-span-2 lg:col-span-2 p-0 overflow-hidden" :padding="false">
+          <RouteMap />
+        </BentoCell>
+
+        <!-- Waypoints Cell -->
+        <BentoCell title="航点" class="md:col-span-2 lg:col-span-1">
+          <div class="max-h-80 overflow-y-auto space-y-0">
+            <div
+              v-for="(node, i) in store.routeResult.nodes"
+              :key="i"
+              class="flex items-center justify-between py-3 border-b border-border last:border-0"
+            >
+              <div class="flex items-center gap-3">
+                <div
+                  class="w-2 h-2 rounded-full"
+                  :class="i === 0 || i === store.routeResult.nodes.length - 1 ? 'bg-accent' : 'bg-route-line'"
+                />
+                <span
+                  class="font-mono text-sm font-medium"
+                  :class="i === 0 || i === store.routeResult.nodes.length - 1 ? 'text-accent' : 'text-text-primary'"
+                >
+                  {{ node.name }}
+                </span>
+              </div>
+              <div class="text-xs text-text-secondary font-mono">
+                {{ node.lat.toFixed(4) }}, {{ node.lon.toFixed(4) }}
+              </div>
+            </div>
+          </div>
+        </BentoCell>
+
+        <!-- Airport Info Cell -->
+        <BentoCell title="机场信息">
+          <div class="space-y-3">
+            <div v-if="store.departureAirport">
+              <div class="flex items-center justify-between">
+                <span class="font-mono text-sm font-semibold text-accent">{{ store.departureAirport.name }}</span>
+                <span v-if="store.routeResult?.airportName?.[0]" class="text-xs text-text-secondary">{{ store.routeResult.airportName[0] }}</span>
+              </div>
+              <div class="text-xs text-text-secondary font-mono mt-1">
+                {{ store.departureAirport.lat.toFixed(4) }}, {{ store.departureAirport.lon.toFixed(4) }}
+              </div>
+            </div>
+            <div v-if="store.arrivalAirport" class="pt-3 border-t border-border">
+              <div class="flex items-center justify-between">
+                <span class="font-mono text-sm font-semibold text-accent">{{ store.arrivalAirport.name }}</span>
+                <span v-if="store.routeResult?.airportName?.[1]" class="text-xs text-text-secondary">{{ store.routeResult.airportName[1] }}</span>
+              </div>
+              <div class="text-xs text-text-secondary font-mono mt-1">
+                {{ store.arrivalAirport.lat.toFixed(4) }}, {{ store.arrivalAirport.lon.toFixed(4) }}
+              </div>
+            </div>
+          </div>
+        </BentoCell>
+
+        <!-- Weather Cell -->
+        <BentoCell v-if="store.routeResult?.weather" title="天气">
+          <div class="space-y-3">
+            <div>
+              <div class="text-xs text-text-secondary mb-1">出发机场</div>
+              <p class="text-sm font-mono text-text-primary break-all">{{ store.routeResult.weather[0] }}</p>
+            </div>
+            <div class="pt-3 border-t border-border">
+              <div class="text-xs text-text-secondary mb-1">到达机场</div>
+              <p class="text-sm font-mono text-text-primary break-all">{{ store.routeResult.weather[1] }}</p>
+            </div>
+          </div>
+        </BentoCell>
+
+        <!-- SID Cell -->
+        <BentoCell v-if="store.selectedSIDProcedures.length > 0" title="离场程序 (SID)">
+          <SIDSelector />
+        </BentoCell>
+
+        <!-- STAR Cell -->
+        <BentoCell v-if="store.selectedSTARProcedures.length > 0" title="进场程序 (STAR)">
+          <STARSelector />
+        </BentoCell>
       </div>
     </div>
   </div>
@@ -39,15 +127,15 @@
 
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import { X } from '@lucide/vue'
 import { useRouteStore } from '@/stores/routeStore'
 import { useRouteQuery } from '@/composables/useRouteQuery'
 import SearchForm from '@/components/SearchForm.vue'
 import RouteMap from '@/components/RouteMap.vue'
-import RouteResult from '@/components/RouteResult.vue'
+import RouteHero from '@/components/RouteHero.vue'
+import BentoCell from '@/components/BentoCell.vue'
 import SIDSelector from '@/components/SIDSelector.vue'
 import STARSelector from '@/components/STARSelector.vue'
-import WeatherCard from '@/components/WeatherCard.vue'
-import AirportInfo from '@/components/AirportInfo.vue'
 
 const store = useRouteStore()
 const { mutate: searchRoute } = useRouteQuery()
