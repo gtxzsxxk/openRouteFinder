@@ -46,29 +46,26 @@
           <RouteMap />
         </BentoCell>
 
-        <!-- Waypoints Cell -->
-        <BentoCell title="航点" class="md:col-span-2 lg:col-span-1 animate-fade-in-up stagger-2">
-          <div class="max-h-80 overflow-y-auto space-y-0">
-            <div
-              v-for="(node, i) in store.routeResult.nodes"
-              :key="i"
-              class="flex items-center justify-between py-4 border-b border-border last:border-0"
-            >
-              <div class="flex items-center gap-3">
-                <div
-                  class="w-2 h-2 rounded-full"
-                  :class="i === 0 || i === store.routeResult.nodes.length - 1 ? 'bg-accent' : 'bg-route-line'"
-                />
-                <span
-                  class="font-mono text-sm font-medium"
-                  :class="i === 0 || i === store.routeResult.nodes.length - 1 ? 'text-accent' : 'text-text-primary'"
-                >
-                  {{ node.name }}
-                </span>
-              </div>
-              <div class="text-xs text-text-secondary font-mono">
-                {{ node.lat.toFixed(4) }}, {{ node.lon.toFixed(4) }}
-              </div>
+        <!-- Procedures Cell (SID + STAR merged) -->
+        <BentoCell
+          v-if="store.selectedSIDProcedures.length > 0 || store.selectedSTARProcedures.length > 0"
+          title="进离场程序"
+          class="md:col-span-2 lg:col-span-1 animate-fade-in-up stagger-2"
+        >
+          <div class="space-y-5">
+            <!-- SID Section -->
+            <div v-if="store.selectedSIDProcedures.length > 0">
+              <div class="text-xs font-medium text-text-secondary mb-2 uppercase tracking-wider">离场 (SID)</div>
+              <SIDSelector />
+            </div>
+
+            <!-- Divider between SID and STAR -->
+            <div v-if="store.selectedSIDProcedures.length > 0 && store.selectedSTARProcedures.length > 0" class="border-t border-border" />
+
+            <!-- STAR Section -->
+            <div v-if="store.selectedSTARProcedures.length > 0">
+              <div class="text-xs font-medium text-text-secondary mb-2 uppercase tracking-wider">进场 (STAR)</div>
+              <STARSelector />
             </div>
           </div>
         </BentoCell>
@@ -111,26 +108,29 @@
           </div>
         </BentoCell>
 
-        <!-- Procedures Cell (SID + STAR merged) -->
-        <BentoCell
-          v-if="store.selectedSIDProcedures.length > 0 || store.selectedSTARProcedures.length > 0"
-          title="进离场程序"
-          class="animate-fade-in-up stagger-5"
-        >
-          <div class="space-y-5">
-            <!-- SID Section -->
-            <div v-if="store.selectedSIDProcedures.length > 0">
-              <div class="text-xs font-medium text-text-secondary mb-2 uppercase tracking-wider">离场 (SID)</div>
-              <SIDSelector />
-            </div>
-
-            <!-- Divider between SID and STAR -->
-            <div v-if="store.selectedSIDProcedures.length > 0 && store.selectedSTARProcedures.length > 0" class="border-t border-border" />
-
-            <!-- STAR Section -->
-            <div v-if="store.selectedSTARProcedures.length > 0">
-              <div class="text-xs font-medium text-text-secondary mb-2 uppercase tracking-wider">进场 (STAR)</div>
-              <STARSelector />
+        <!-- Waypoints Cell -->
+        <BentoCell title="航点" class="animate-fade-in-up stagger-5">
+          <div class="max-h-80 overflow-y-auto space-y-0">
+            <div
+              v-for="(node, i) in store.routeResult.nodes"
+              :key="i"
+              class="flex items-center justify-between py-4 border-b border-border last:border-0"
+            >
+              <div class="flex items-center gap-3">
+                <div
+                  class="w-2 h-2 rounded-full"
+                  :class="i === 0 || i === store.routeResult.nodes.length - 1 ? 'bg-accent' : 'bg-route-line'"
+                />
+                <span
+                  class="font-mono text-sm font-medium"
+                  :class="i === 0 || i === store.routeResult.nodes.length - 1 ? 'text-accent' : 'text-text-primary'"
+                >
+                  {{ node.name }}
+                </span>
+              </div>
+              <div class="text-xs text-text-secondary font-mono">
+                {{ node.lat.toFixed(4) }}, {{ node.lon.toFixed(4) }}
+              </div>
             </div>
           </div>
         </BentoCell>
