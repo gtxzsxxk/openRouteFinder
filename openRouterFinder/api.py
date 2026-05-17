@@ -166,7 +166,7 @@ def get_airport_procedures(icao: str):
             seen.add(exit_name)
             sid_exits.append({
                 "name": exit_name,
-                "procedures": [p.name for p in proc_list],
+                "procedures": list(dict.fromkeys(p.name for p in proc_list)),
             })
 
     star_entries = []
@@ -178,7 +178,7 @@ def get_airport_procedures(icao: str):
             seen.add(entry_name)
             star_entries.append({
                 "name": entry_name,
-                "procedures": [p.name for p in proc_list],
+                "procedures": list(dict.fromkeys(p.name for p in proc_list)),
             })
 
     return {
