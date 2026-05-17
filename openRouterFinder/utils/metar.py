@@ -12,24 +12,30 @@ _metar_lock = threading.Lock()
 
 
 def fetch_metar() -> str:
-    """Fetch latest METAR data from NOAA."""
+    """Fetch latest METAR data from NOAA with retry."""
     gmt_hr = f"{time.gmtime().tm_hour:02d}"
     url = f"https://tgftp.nws.noaa.gov/data/observations/metar/cycles/{gmt_hr}Z.TXT"
-    try:
-        r = requests.get(
-            url,
-            headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"},
-            timeout=30,
-        )
-        with open(settings.metar_full_path, "w") as f:
-            f.write(r.text)
-        with _metar_lock:
-            global _metar_data
-            _metar_data = r.text
-        return r.text
-    except Exception as e:
-        print(f"METAR update failed: {e}")
-        return ""
+
+    for attempt in range(1, 4):
+        try:
+            r = requests.get(
+                url,
+                headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"},
+                timeout=(5, 15),
+            )
+            with open(settings.metar_full_path, "w") as f:
+                f.write(r.text)
+            with _metar_lock:
+                global _metar_data
+                _metar_data = r.text
+            return r.text
+        except Exception as e:
+            print(f"METAR update attempt {attempt}/3 failed: {e}")
+            if attempt < 3:
+                time.sleep(2 ** attempt)
+
+    print("METAR update failed after 3 attempts, using cached data if available")
+    return ""
 
 
 def read_metar(icao: str) -> str:
