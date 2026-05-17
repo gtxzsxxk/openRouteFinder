@@ -37,8 +37,9 @@ def build_route_info(
     airport_name: list,
     active_sid_transition: str = None,
     active_star_transition: str = None,
+    route_segments: list = None,
 ) -> str:
-    return json.dumps({
+    result = {
         "data_version": data_version,
         "total_time": total_time,
         "route": route,
@@ -49,7 +50,10 @@ def build_route_info(
         "airportName": airport_name,
         "activeSIDTransition": active_sid_transition,
         "activeSTARTransition": active_star_transition,
-    })
+    }
+    if route_segments is not None:
+        result["routeSegments"] = route_segments
+    return json.dumps(result)
 
 
 class RouteEngine:
@@ -156,6 +160,7 @@ class RouteEngine:
         dist_str = "%.2f nm / %.2f km" % (dist_nm, dist_km)
         route_total = self._sort_route(orig, target.route_list)
         node_info = self._build_node_info(sid_conn, star_conn, target.route_list)
+        route_segments = self._build_route_segments(sid_conn, target.route_list)
 
         # Detect active transitions from route_list
         active_sid_transition = None
@@ -189,6 +194,7 @@ class RouteEngine:
             airport_names,
             active_sid_transition,
             active_star_transition,
+            route_segments,
         )
 
     def _build_adjacency(
@@ -314,3 +320,20 @@ class RouteEngine:
             if node:
                 result.append([node.name, node.px, node.py])
         return result
+
+    def _build_route_segments(
+        self,
+        sid_conn: AirportConnection,
+        route_list: List[Tuple[str, str, int]],
+    ) -> List[dict]:
+        """Build list of route segments with airway names."""
+        segments = []
+        prev_name = sid_conn.airport_node.name
+        for edge_name, node_name, _ in route_list:
+            segments.append({
+                "from": prev_name,
+                "to": node_name,
+                "airway": edge_name,
+            })
+            prev_name = node_name
+        return segments
