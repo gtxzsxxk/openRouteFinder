@@ -56,7 +56,7 @@ class AirportConnector:
         """Check if a line contains waypoint name + lat/lon data."""
         return line.startswith(("CF,", "TF,", "IF,", "DF,"))
 
-    def build_sid(self, icao: str) -> Optional[AirportConnection]:
+    def build_sid(self, icao: str, filter_name: Optional[str] = None) -> Optional[AirportConnection]:
         """Build departure (SID) connections for an airport."""
         icao = icao.upper()
         if icao not in self.airport_maps:
@@ -130,6 +130,19 @@ class AirportConnector:
                 common_segments[proc_name] = (exit_node, points)
             else:
                 runway_segments.append((proc_name, field2, exit_node, points))
+
+        # Apply filter if specified
+        if filter_name:
+            runway_segments = [
+                (proc_name, runway, exit_node, points)
+                for proc_name, runway, exit_node, points in runway_segments
+                if exit_node.name == filter_name
+            ]
+            transition_segments = [
+                (proc_name, trans_name, from_node, to_node, points)
+                for proc_name, trans_name, from_node, to_node, points in transition_segments
+                if to_node.name == filter_name
+            ]
 
         # Phase 2: build connections and internal edges
         connections = []
@@ -211,7 +224,7 @@ class AirportConnector:
             internal_edges=internal_edges,
         )
 
-    def build_star(self, icao: str) -> Optional[AirportConnection]:
+    def build_star(self, icao: str, filter_name: Optional[str] = None) -> Optional[AirportConnection]:
         """Build arrival (STAR) connections for an airport."""
         icao = icao.upper()
         if icao not in self.airport_maps:
@@ -284,6 +297,19 @@ class AirportConnector:
                 common_segments[proc_name] = (entry_node, points)
             else:
                 runway_segments.append((proc_name, field2, entry_node, points))
+
+        # Apply filter if specified
+        if filter_name:
+            runway_segments = [
+                (proc_name, runway, entry_node, points)
+                for proc_name, runway, entry_node, points in runway_segments
+                if entry_node.name == filter_name
+            ]
+            transition_segments = [
+                (proc_name, trans_name, from_node, to_node, points)
+                for proc_name, trans_name, from_node, to_node, points in transition_segments
+                if from_node.name == filter_name
+            ]
 
         # Phase 2: build connections and internal edges
         connections = []

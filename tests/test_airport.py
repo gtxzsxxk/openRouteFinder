@@ -19,3 +19,37 @@ def test_get_airport_names():
     conn = AirportConnector(maps, {})
     names = conn.get_airport_names("ZGHA")
     assert names == ["Changsha Huanghua"]
+
+
+def test_build_sid_with_filter():
+    """build_sid with filter_name only keeps matching exit procedures."""
+    from openRouterFinder.core.data_loader import get_airport_maps
+
+    maps = get_airport_maps()
+    conn = AirportConnector(maps, {})
+
+    result = conn.build_sid("ZGHA", filter_name="NONEXISTENT")
+    assert result is not None
+    assert len(result.connections) == 0
+    assert len(result.procedures) == 0
+
+    result_all = conn.build_sid("ZGHA")
+    assert result_all is not None
+    assert len(result_all.connections) > 0 or len(result_all.procedures) > 0
+
+
+def test_build_star_with_filter():
+    """build_star with filter_name only keeps matching entry procedures."""
+    from openRouterFinder.core.data_loader import get_airport_maps
+
+    maps = get_airport_maps()
+    conn = AirportConnector(maps, {})
+
+    result = conn.build_star("ZJSY", filter_name="NONEXISTENT")
+    assert result is not None
+    assert len(result.connections) == 0
+    assert len(result.procedures) == 0
+
+    result_all = conn.build_star("ZJSY")
+    assert result_all is not None
+    assert len(result_all.connections) > 0 or len(result_all.procedures) > 0
