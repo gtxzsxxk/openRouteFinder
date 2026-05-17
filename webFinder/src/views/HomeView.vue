@@ -42,12 +42,12 @@
       <!-- Bento Grid -->
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         <!-- Map Cell -->
-        <BentoCell class="md:col-span-2 lg:col-span-2 p-0 overflow-hidden" :padding="false">
+        <BentoCell class="md:col-span-2 lg:col-span-2 p-0 overflow-hidden animate-fade-in-up stagger-1" :padding="false">
           <RouteMap />
         </BentoCell>
 
         <!-- Waypoints Cell -->
-        <BentoCell title="航点" class="md:col-span-2 lg:col-span-1">
+        <BentoCell title="航点" class="md:col-span-2 lg:col-span-1 animate-fade-in-up stagger-2">
           <div class="max-h-80 overflow-y-auto space-y-0">
             <div
               v-for="(node, i) in store.routeResult.nodes"
@@ -74,7 +74,7 @@
         </BentoCell>
 
         <!-- Airport Info Cell -->
-        <BentoCell title="机场信息">
+        <BentoCell title="机场信息" class="animate-fade-in-up stagger-3">
           <div class="space-y-3">
             <div v-if="store.departureAirport">
               <div class="flex items-center justify-between">
@@ -98,7 +98,7 @@
         </BentoCell>
 
         <!-- Weather Cell -->
-        <BentoCell v-if="store.routeResult?.weather" title="天气">
+        <BentoCell v-if="store.routeResult?.weather" title="天气" class="animate-fade-in-up stagger-4">
           <div class="space-y-3">
             <div>
               <div class="text-xs text-text-secondary mb-1">出发机场</div>
@@ -112,12 +112,12 @@
         </BentoCell>
 
         <!-- SID Cell -->
-        <BentoCell v-if="store.selectedSIDProcedures.length > 0" title="离场程序 (SID)">
+        <BentoCell v-if="store.selectedSIDProcedures.length > 0" title="离场程序 (SID)" class="animate-fade-in-up stagger-5">
           <SIDSelector />
         </BentoCell>
 
         <!-- STAR Cell -->
-        <BentoCell v-if="store.selectedSTARProcedures.length > 0" title="进场程序 (STAR)">
+        <BentoCell v-if="store.selectedSTARProcedures.length > 0" title="进场程序 (STAR)" class="animate-fade-in-up stagger-6">
           <STARSelector />
         </BentoCell>
       </div>
@@ -173,3 +173,28 @@ watch(() => store.isLoading, (loading) => {
   }
 })
 </script>
+
+<style scoped>
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 0.4s ease-out forwards;
+  opacity: 0;
+}
+
+.stagger-1 { animation-delay: 80ms; }
+.stagger-2 { animation-delay: 160ms; }
+.stagger-3 { animation-delay: 240ms; }
+.stagger-4 { animation-delay: 320ms; }
+.stagger-5 { animation-delay: 400ms; }
+.stagger-6 { animation-delay: 480ms; }
+</style>
