@@ -60,3 +60,18 @@ export interface Metar {
   icao: string
   metar: string
 }
+
+export interface ProcedureOption {
+  name: string
+  procedures: string[]
+}
+
+export interface AirportProcedureResponse {
+  icao: string
+  sid: {
+    exits: ProcedureOption[]
+  }
+  star: {
+    entries: ProcedureOption[]
+  }
+}
