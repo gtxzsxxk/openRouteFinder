@@ -26,6 +26,50 @@ export interface Runway {
   width: number
 }
 
+export interface RunwayDetail {
+  name: string
+  lengthFt: number
+  widthFt: number
+  surface: string
+  lighting: string
+  thresholds: RunwayThreshold[]
+  ils?: Array<{ runwayEnd: string; frequency: string; heading: number; category: string }>
+}
+
+export interface AirportDetail {
+  icao: string
+  name: string
+  lat: number
+  lon: number
+  elevation: number
+  transitionAltitude: number
+  transitionLevel: number
+  runways: RunwayDetail[]
+}
+
+export interface ParsedMetar {
+  raw: string
+  station?: string
+  issue_time?: string
+  windDirection?: number
+  windSpeed?: number
+  windSpeedUnit: string
+  windGust?: number
+  visibility?: string
+  weather: string[]
+  clouds: Array<{ cover: string; base?: number }>
+  temperature?: number
+  dewpoint?: number
+  qnh?: number
+  trend?: string
+}
+
+export interface RouteSegment {
+  from: string
+  to: string
+  airway: string
+}
+
 // SID/STAR procedure from backend: [name, runway, points, transitions]
 // transitions: [[transName, transPoints], ...]
 export type ProcedureTuple = [string, string, [string, number, number][], [string, [string, number, number][]][]]
@@ -49,6 +93,9 @@ export interface RouteResult {
   destRunways?: Runway[]
   activeSIDTransition?: string
   activeSTARTransition?: string
+  airportDetails?: { orig: AirportDetail; dest: AirportDetail }
+  parsedWeather?: [ParsedMetar, ParsedMetar]
+  routeSegments?: RouteSegment[]
 }
 
 export interface ValidCode {

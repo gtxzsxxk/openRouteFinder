@@ -96,6 +96,11 @@ export const useRouteStore = defineStore('route', () => {
     return star.transitions[selectedSTARTransitionIndex.value] || null
   })
 
+  const origAirportDetail = computed(() => routeResult.value?.airportDetails?.orig ?? null)
+  const destAirportDetail = computed(() => routeResult.value?.airportDetails?.dest ?? null)
+  const parsedWeather = computed(() => routeResult.value?.parsedWeather ?? null)
+  const routeSegments = computed(() => routeResult.value?.routeSegments ?? [])
+
   function setRouteResult(result: RouteResult | null) {
     routeResult.value = result
     selectedSIDIndex.value = 0
@@ -179,6 +184,10 @@ export const useRouteStore = defineStore('route', () => {
     selectedSTAR,
     selectedSIDTransition,
     selectedSTARTransition,
+    origAirportDetail,
+    destAirportDetail,
+    parsedWeather,
+    routeSegments,
     setRouteResult,
     setLoading,
     setError,
