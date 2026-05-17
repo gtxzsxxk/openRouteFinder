@@ -1,9 +1,7 @@
 <template>
   <div class="space-y-6">
-    <!-- Search Form -->
     <SearchForm @search="handleSearch" />
 
-    <!-- Loading State -->
     <div v-if="store.isLoading" class="flex items-center justify-center py-12">
       <div class="flex items-center gap-3 text-text-muted">
         <svg class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -15,7 +13,6 @@
       </div>
     </div>
 
-    <!-- Error State -->
     <div v-else-if="store.error" class="bg-surface border border-border rounded-xl p-6 text-center">
       <p class="text-highlight">{{ store.error }}</p>
       <button @click="store.setError(null)" class="mt-3 text-sm text-text-muted hover:text-white transition-colors">
@@ -23,21 +20,13 @@
       </button>
     </div>
 
-    <!-- Result -->
     <div v-if="store.hasResult && store.routeResult" class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <!-- Left Column -->
       <div class="space-y-4">
         <RouteMap />
         <AirportInfo />
       </div>
-
-      <!-- Right Column -->
       <div class="space-y-4">
         <RouteResult />
-        <div class="flex gap-4">
-          <SIDSelector class="flex-1" />
-          <STARSelector class="flex-1" />
-        </div>
         <WeatherCard />
       </div>
     </div>
@@ -51,8 +40,6 @@ import { useRouteQuery } from '@/composables/useRouteQuery'
 import SearchForm from '@/components/SearchForm.vue'
 import RouteMap from '@/components/RouteMap.vue'
 import RouteResult from '@/components/RouteResult.vue'
-import SIDSelector from '@/components/SIDSelector.vue'
-import STARSelector from '@/components/STARSelector.vue'
 import WeatherCard from '@/components/WeatherCard.vue'
 import AirportInfo from '@/components/AirportInfo.vue'
 
@@ -62,7 +49,7 @@ const { mutate: searchRoute } = useRouteQuery()
 const queryTime = ref(0)
 let timer: ReturnType<typeof setInterval> | null = null
 
-function handleSearch(params: { orig: string; dest: string; validCode: string; validToken: string }) {
+function handleSearch(params: { orig: string; dest: string; validCode: string; validToken: string; sidExit: string; starEntry: string }) {
   store.setLoading(true)
   store.setError(null)
   queryTime.value = 0
