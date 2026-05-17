@@ -1,23 +1,6 @@
 <template>
-  <div class="bg-surface border border-border rounded-xl overflow-hidden">
-    <div class="px-4 py-3 border-b border-border flex items-center justify-between">
-      <h3 class="font-medium text-white">航路地图</h3>
-      <div class="flex gap-3 text-xs">
-        <span class="flex items-center gap-1">
-          <span class="w-3 h-0.5 bg-highlight rounded"></span>
-          航路
-        </span>
-        <span class="flex items-center gap-1">
-          <span class="w-3 h-0.5 bg-emerald-500 rounded border-dashed"></span>
-          SID
-        </span>
-        <span class="flex items-center gap-1">
-          <span class="w-3 h-0.5 bg-amber-500 rounded border-dashed"></span>
-          STAR
-        </span>
-      </div>
-    </div>
-    <div ref="mapContainer" class="w-full h-[500px]"></div>
+  <div class="relative w-full h-full min-h-[320px]">
+    <div ref="mapContainer" class="w-full h-full" />
   </div>
 </template>
 

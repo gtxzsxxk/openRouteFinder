@@ -3,7 +3,8 @@ import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import type { RouteResult, Runway, RunwayThreshold } from '@/types'
 
-const STYLE_URL = 'https://demotiles.maplibre.org/style.json'
+const STYLE_LIGHT = 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json'
+const STYLE_DARK = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json'
 
 interface TransitionData {
   name: string
@@ -17,6 +18,10 @@ interface ProcedureData {
   transitions: TransitionData[]
 }
 
+function isDarkMode() {
+  return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+}
+
 export function useMap(
   containerRef: Ref<HTMLElement | null>,
   routeResult: Ref<RouteResult | null>,
@@ -28,13 +33,28 @@ export function useMap(
   const map = ref<any>(null)
   const isMapReady = ref(false)
   const isUpdating = ref(false)
+  const currentStyle = ref(isDarkMode() ? STYLE_DARK : STYLE_LIGHT)
+
+  function getColors() {
+    const dark = isDarkMode()
+    return {
+      route: dark ? '#22d3ee' : '#06b6d4',
+      routeGlow: dark ? '#22d3ee' : '#06b6d4',
+      endpoint: '#6366f1',
+      midpoint: dark ? '#22d3ee' : '#06b6d4',
+      sid: dark ? '#34d399' : '#10b981',
+      star: dark ? '#fbbf24' : '#f59e0b',
+      stroke: dark ? '#111827' : '#ffffff',
+      textHalo: dark ? '#111827' : '#ffffff',
+    }
+  }
 
   function initMap() {
     if (!containerRef.value) return
 
     map.value = new maplibregl.Map({
       container: containerRef.value,
-      style: STYLE_URL,
+      style: currentStyle.value,
       center: [113.22, 28.19],
       zoom: 4,
     })
@@ -46,6 +66,23 @@ export function useMap(
       isMapReady.value = true
       updateMap()
     })
+
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    const onChange = (e: MediaQueryListEvent | MediaQueryList) => {
+      const newStyle = e.matches ? STYLE_DARK : STYLE_LIGHT
+      if (newStyle !== currentStyle.value && map.value) {
+        currentStyle.value = newStyle
+        map.value.setStyle(newStyle)
+        map.value.once('styledata', () => {
+          updateMap()
+        })
+      }
+    }
+    if (mq.addEventListener) {
+      mq.addEventListener('change', onChange)
+    } else if ((mq as any).addListener) {
+      (mq as any).addListener(onChange)
+    }
   }
 
   function safeRemoveLayer(m: any, id: string) {
@@ -137,8 +174,10 @@ export function useMap(
       const nodes = routeResult.value.nodes
       if (nodes.length === 0) return
 
+      const c = getColors()
+
       const allLayers = [
-        'route-line', 'all-points', 'all-labels',
+        'route-glow', 'route-line', 'all-points', 'all-labels',
         'sid-line', 'sid-labels',
         'star-line', 'star-labels',
         'runways', 'runway-labels', 'runway-ends', 'runway-end-labels',
@@ -218,10 +257,11 @@ export function useMap(
             'text-offset': [0, 0.8],
             'text-anchor': 'top',
             'text-size': 9,
+            'text-font': ['Open Sans Regular'],
           },
           paint: {
             'text-color': '#9ca3af',
-            'text-halo-color': '#1a1a2e',
+            'text-halo-color': c.textHalo,
             'text-halo-width': 1,
           },
         })
@@ -240,7 +280,7 @@ export function useMap(
             'circle-radius': 3,
             'circle-color': '#6b7280',
             'circle-stroke-width': 1,
-            'circle-stroke-color': '#fff',
+            'circle-stroke-color': c.stroke,
             'circle-opacity': 0.8,
           },
         })
@@ -253,10 +293,11 @@ export function useMap(
             'text-offset': [0, -1.2],
             'text-anchor': 'bottom',
             'text-size': 8,
+            'text-font': ['Open Sans Regular'],
           },
           paint: {
             'text-color': '#9ca3af',
-            'text-halo-color': '#1a1a2e',
+            'text-halo-color': c.textHalo,
             'text-halo-width': 1,
           },
         })
@@ -286,11 +327,26 @@ export function useMap(
           },
         })
         m.addLayer({
+          id: 'route-glow',
+          type: 'line',
+          source: 'route',
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: {
+            'line-color': c.routeGlow,
+            'line-width': 8,
+            'line-opacity': 0.3,
+            'line-blur': 4,
+          },
+        })
+        m.addLayer({
           id: 'route-line',
           type: 'line',
           source: 'route',
           layout: { 'line-join': 'round', 'line-cap': 'round' },
-          paint: { 'line-color': '#e94560', 'line-width': 3 },
+          paint: {
+            'line-color': c.route,
+            'line-width': 3,
+          },
         })
       }
 
@@ -344,9 +400,9 @@ export function useMap(
           source: 'sid',
           layout: { 'line-join': 'round', 'line-cap': 'round' },
           paint: {
-            'line-color': '#10b981',
+            'line-color': c.sid,
             'line-width': 2,
-            'line-dasharray': [2, 1],
+            'line-dasharray': [4, 2],
           },
         })
 
@@ -388,10 +444,11 @@ export function useMap(
               'text-offset': [0, -1.2],
               'text-anchor': 'bottom',
               'text-size': 10,
+              'text-font': ['Open Sans Regular'],
             },
             paint: {
-              'text-color': '#10b981',
-              'text-halo-color': '#1a1a2e',
+              'text-color': c.sid,
+              'text-halo-color': c.textHalo,
               'text-halo-width': 2,
             },
           })
@@ -412,9 +469,9 @@ export function useMap(
             source: 'sid-active-runway',
             paint: {
               'circle-radius': 6,
-              'circle-color': '#10b981',
+              'circle-color': c.sid,
               'circle-stroke-width': 2,
-              'circle-stroke-color': '#fff',
+              'circle-stroke-color': c.stroke,
             },
           })
         }
@@ -473,9 +530,9 @@ export function useMap(
           source: 'star',
           layout: { 'line-join': 'round', 'line-cap': 'round' },
           paint: {
-            'line-color': '#f59e0b',
+            'line-color': c.star,
             'line-width': 2,
-            'line-dasharray': [2, 1],
+            'line-dasharray': [4, 2],
           },
         })
 
@@ -494,9 +551,9 @@ export function useMap(
             source: 'star-active-runway',
             paint: {
               'circle-radius': 6,
-              'circle-color': '#f59e0b',
+              'circle-color': c.star,
               'circle-stroke-width': 2,
-              'circle-stroke-color': '#fff',
+              'circle-stroke-color': c.stroke,
             },
           })
         }
@@ -539,10 +596,11 @@ export function useMap(
               'text-offset': [0, -1.2],
               'text-anchor': 'bottom',
               'text-size': 10,
+              'text-font': ['Open Sans Regular'],
             },
             paint: {
-              'text-color': '#f59e0b',
-              'text-halo-color': '#1a1a2e',
+              'text-color': c.star,
+              'text-halo-color': c.textHalo,
               'text-halo-width': 2,
             },
           })
@@ -564,19 +622,19 @@ export function useMap(
         paint: {
           'circle-radius': [
             'case',
-            ['get', 'isEndpoint'], 8,
-            ['get', 'isSidStar'], 3,
-            5,
+            ['get', 'isEndpoint'], 6,
+            ['get', 'isSidStar'], 4,
+            4,
           ],
           'circle-color': [
             'case',
-            ['get', 'isEndpoint'], '#e94560',
-            ['==', ['get', 'kind'], 'SID'], '#10b981',
-            ['==', ['get', 'kind'], 'STAR'], '#f59e0b',
-            '#0f3460',
+            ['get', 'isEndpoint'], c.endpoint,
+            ['==', ['get', 'kind'], 'SID'], c.sid,
+            ['==', ['get', 'kind'], 'STAR'], c.star,
+            c.midpoint,
           ],
           'circle-stroke-width': 2,
-          'circle-stroke-color': '#fff',
+          'circle-stroke-color': c.stroke,
         },
       })
       m.addLayer({
@@ -585,23 +643,24 @@ export function useMap(
         source: 'all-points',
         layout: {
           'text-field': ['get', 'name'],
-          'text-offset': [0, -1.2],
-          'text-anchor': 'bottom',
+          'text-offset': [0, 1.2],
+          'text-anchor': 'top',
           'text-size': [
             'case',
             ['get', 'isEndpoint'], 12,
-            10,
+            11,
           ],
+          'text-font': ['Open Sans Regular'],
         },
         paint: {
           'text-color': [
             'case',
-            ['get', 'isEndpoint'], '#e94560',
-            ['==', ['get', 'kind'], 'SID'], '#10b981',
-            ['==', ['get', 'kind'], 'STAR'], '#f59e0b',
-            '#e5e7eb',
+            ['get', 'isEndpoint'], c.endpoint,
+            ['==', ['get', 'kind'], 'SID'], c.sid,
+            ['==', ['get', 'kind'], 'STAR'], c.star,
+            c.midpoint,
           ],
-          'text-halo-color': '#1a1a2e',
+          'text-halo-color': c.textHalo,
           'text-halo-width': 2,
         },
       })
@@ -623,7 +682,7 @@ export function useMap(
       origRunways.forEach(r => r.thresholds.forEach(t => bounds.extend([t.lon, t.lat])))
       destRunways.forEach(r => r.thresholds.forEach(t => bounds.extend([t.lon, t.lat])))
 
-      m.fitBounds(bounds, { padding: 80, maxZoom: 12, duration: 1500 })
+      m.fitBounds(bounds, { padding: 60, maxZoom: 12, duration: 1500 })
     } finally {
       isUpdating.value = false
     }
