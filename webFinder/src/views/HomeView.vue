@@ -76,17 +76,8 @@
         </BentoCell>
 
         <!-- Weather Cell -->
-        <BentoCell v-if="store.routeResult?.weather" title="天气" class="animate-fade-in-up stagger-4">
-          <div class="space-y-4">
-            <div>
-              <div class="text-xs text-text-secondary mb-2">出发机场</div>
-              <p class="text-sm font-mono text-text-primary break-all leading-relaxed">{{ store.routeResult.weather[0] }}</p>
-            </div>
-            <div class="pt-4 border-t border-border">
-              <div class="text-xs text-text-secondary mb-2">到达机场</div>
-              <p class="text-sm font-mono text-text-primary break-all leading-relaxed">{{ store.routeResult.weather[1] }}</p>
-            </div>
-          </div>
+        <BentoCell v-if="store.parsedWeather" title="天气" class="animate-fade-in-up stagger-4">
+          <WeatherCard />
         </BentoCell>
 
         <!-- Waypoints Cell -->
@@ -132,6 +123,7 @@ import BentoCell from '@/components/BentoCell.vue'
 import SIDSelector from '@/components/SIDSelector.vue'
 import STARSelector from '@/components/STARSelector.vue'
 import AirportInfo from '@/components/AirportInfo.vue'
+import WeatherCard from '@/components/WeatherCard.vue'
 
 const store = useRouteStore()
 const { mutate: searchRoute } = useRouteQuery()
