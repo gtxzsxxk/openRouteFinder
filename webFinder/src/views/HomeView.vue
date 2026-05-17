@@ -72,26 +72,7 @@
 
         <!-- Airport Info Cell -->
         <BentoCell title="机场信息" class="animate-fade-in-up stagger-3">
-          <div class="space-y-4">
-            <div v-if="store.departureAirport">
-              <div class="flex items-center justify-between">
-                <span class="font-mono text-sm font-semibold text-accent">{{ store.departureAirport.name }}</span>
-                <span v-if="store.routeResult?.airportName?.[0]" class="text-xs text-text-secondary">{{ store.routeResult.airportName[0] }}</span>
-              </div>
-              <div class="text-xs text-text-secondary font-mono mt-1.5">
-                {{ store.departureAirport.lat.toFixed(4) }}, {{ store.departureAirport.lon.toFixed(4) }}
-              </div>
-            </div>
-            <div v-if="store.arrivalAirport" class="pt-4 border-t border-border">
-              <div class="flex items-center justify-between">
-                <span class="font-mono text-sm font-semibold text-accent">{{ store.arrivalAirport.name }}</span>
-                <span v-if="store.routeResult?.airportName?.[1]" class="text-xs text-text-secondary">{{ store.routeResult.airportName[1] }}</span>
-              </div>
-              <div class="text-xs text-text-secondary font-mono mt-1.5">
-                {{ store.arrivalAirport.lat.toFixed(4) }}, {{ store.arrivalAirport.lon.toFixed(4) }}
-              </div>
-            </div>
-          </div>
+          <AirportInfo />
         </BentoCell>
 
         <!-- Weather Cell -->
@@ -150,6 +131,7 @@ import RouteHero from '@/components/RouteHero.vue'
 import BentoCell from '@/components/BentoCell.vue'
 import SIDSelector from '@/components/SIDSelector.vue'
 import STARSelector from '@/components/STARSelector.vue'
+import AirportInfo from '@/components/AirportInfo.vue'
 
 const store = useRouteStore()
 const { mutate: searchRoute } = useRouteQuery()
