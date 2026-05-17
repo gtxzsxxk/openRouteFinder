@@ -6,4 +6,5 @@ docs/
 data/*
 !data/.gitkeep
 webFinder/dist/
+.env
 

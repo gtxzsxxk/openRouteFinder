@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     listen_port: int = 9807
     metar_update_minutes: int = 15
     bing_maps_key: str = ""
-    backstage_key: str = "set_yourself"
+    admin_key: str = ""
 
     navdat_path: str = "data/navidata_2206.map"
     apdat_path: str = "data/airport_2206.air"

@@ -1,17 +1,24 @@
 """FastAPI application with thread-pooled A* route search."""
 
 import asyncio
+import time
 import uuid
 import json
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from openRouterFinder.config import settings
+from openRouterFinder.core.admin import (
+    record_request,
+    record_route_search,
+    record_error,
+    get_stats as get_admin_stats,
+)
 from openRouterFinder.core.data_loader import (
     get_data_version,
     get_airport_maps,
@@ -110,6 +117,20 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def admin_logging(request: Request, call_next):
+    start = time.time()
+    response = await call_next(request)
+    duration_ms = (time.time() - start) * 1000
+    client_ip = (
+        request.headers.get("x-forwarded-for", request.client.host if request.client else "unknown")
+        .split(",")[0]
+        .strip()
+    )
+    record_request(client_ip, request.method, request.url.path, response.status_code, duration_ms)
+    return response
+
+
 @app.get("/api/version")
 def get_version():
     return {"version": get_data_version()}
@@ -204,10 +225,40 @@ async def post_route(req: RouteRequest):
                 lambda: search_route(req.orig, req.dest, sid_exit=req.sidExit, star_entry=req.starEntry),
             )
     except Exception as e:
+        record_error(f"Route calculation failed: {e}", "/api/route", "POST", 500)
         raise HTTPException(status_code=500, detail=f"Route calculation failed: {e}")
 
     if result is None:
+        record_error(f"No route found: {req.orig} → {req.dest}", "/api/route", "POST", 404)
         raise HTTPException(status_code=404, detail="无法找到航路，请检查机场代码是否正确")
+
+    # Extract stats before mutating result
+    distance_raw = result.get("distance", "")
+    distance = None
+    try:
+        # "676.59 nm / 1253.05 km" -> 676.59
+        distance = float(distance_raw.split()[0]) if distance_raw else None
+    except (ValueError, IndexError):
+        pass
+
+    time_min = None
+    try:
+        time_min = float(result.get("total_time", 0))
+    except (ValueError, TypeError):
+        pass
+
+    nodeinformation = result.get("nodeinformation", [])
+    nodes_count = len([n for n in nodeinformation if len(n) >= 3]) if nodeinformation else 0
+
+    record_route_search(
+        req.orig,
+        req.dest,
+        req.sidExit,
+        req.starEntry,
+        distance=distance,
+        nodes_count=nodes_count,
+        time_min=time_min,
+    )
 
     # Map legacy fields
     if "nodeinformation" in result:
@@ -277,6 +328,15 @@ def get_valid_code():
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
+
+
+@app.get("/api/admin")
+def get_admin(x_admin_key: str = Header(default="")):
+    if not settings.admin_key or settings.admin_key == "set_yourself":
+        raise HTTPException(status_code=403, detail="Admin not configured")
+    if x_admin_key != settings.admin_key:
+        raise HTTPException(status_code=403, detail="Invalid key")
+    return get_admin_stats()
 
 
 # Static files

@@ -28,7 +28,18 @@
       </div>
     </header>
     <main class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <HomeView />
+      <Transition
+        enter-active-class="transition-all duration-300 ease-out"
+        enter-from-class="opacity-0"
+        enter-to-class="opacity-100"
+        leave-active-class="transition-all duration-200 ease-in"
+        leave-from-class="opacity-100"
+        leave-to-class="opacity-0"
+        mode="out-in"
+      >
+        <HomeView v-if="currentView === 'home'" />
+        <AdminView v-else @go-home="currentView = 'home'" />
+      </Transition>
     </main>
   </div>
 </template>
@@ -37,12 +48,18 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { Sun, Moon } from '@lucide/vue'
 import HomeView from './views/HomeView.vue'
+import AdminView from './views/AdminView.vue'
 import { useTheme } from './composables/useTheme'
 import { useLocale } from './composables/useLocale'
 
 const { isDark, mode, toggleTheme } = useTheme()
 const { locale, toggleLocale } = useLocale()
 const scrolled = ref(false)
+const currentView = ref<'home' | 'admin'>('home')
+
+function updateViewFromHash() {
+  currentView.value = window.location.hash === '#admin' ? 'admin' : 'home'
+}
 
 function onScroll() {
   scrolled.value = window.scrollY > 10
@@ -50,9 +67,12 @@ function onScroll() {
 
 onMounted(() => {
   window.addEventListener('scroll', onScroll, { passive: true })
+  window.addEventListener('hashchange', updateViewFromHash)
+  updateViewFromHash()
 })
 
 onUnmounted(() => {
   window.removeEventListener('scroll', onScroll)
+  window.removeEventListener('hashchange', updateViewFromHash)
 })
 </script>
