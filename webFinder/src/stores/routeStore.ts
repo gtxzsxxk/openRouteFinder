@@ -22,6 +22,8 @@ export const useRouteStore = defineStore('route', () => {
   const selectedSTARTransitionIndex = ref(-1)  // -1 = no transition
   const isLoading = ref(false)
   const error = ref<string | null>(null)
+  const preSelectedSidExit = ref('')
+  const preSelectedStarEntry = ref('')
 
   const hasResult = computed(() => routeResult.value !== null)
 
@@ -164,6 +166,8 @@ export const useRouteStore = defineStore('route', () => {
     selectedSTARTransitionIndex,
     isLoading,
     error,
+    preSelectedSidExit,
+    preSelectedStarEntry,
     hasResult,
     departureAirport,
     arrivalAirport,
