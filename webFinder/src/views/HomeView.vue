@@ -82,7 +82,7 @@
 
         <!-- Waypoints Cell -->
         <BentoCell title="航点" class="animate-fade-in-up stagger-5">
-          <div class="max-h-80 overflow-y-auto space-y-0">
+          <div class="overflow-y-auto space-y-0">
             <div
               v-for="(node, i) in store.routeResult.nodes"
               :key="i"

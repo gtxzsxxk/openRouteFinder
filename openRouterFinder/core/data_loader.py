@@ -132,6 +132,33 @@ def _opposite_runway(name: str) -> str:
     return f"{opp_num:02d}{opp_suffix}"
 
 
+_SURFACE_MAP = {
+    '1': '沥青',
+    '2': '混凝土',
+    '3': '草地',
+    '4': '碎石',
+    '5': '泥土',
+    '6': '冰面',
+    '7': '铺砌',
+}
+
+_LIGHTING_MAP = {
+    '0': '无',
+    '1': '简易',
+    '2': '中等',
+    '3': '高强度',
+    '4': '其他',
+}
+
+
+def _parse_surface(code: str) -> str:
+    return _SURFACE_MAP.get(code, code)
+
+
+def _parse_lighting(code: str) -> str:
+    return _LIGHTING_MAP.get(code, code)
+
+
 def _parse_runways(airport_str: str) -> list:
     """Parse runway data from raw airport string."""
     runways = {}
@@ -148,8 +175,8 @@ def _parse_runways(airport_str: str) -> list:
             lat = float(parts[8].strip())
             lon = float(parts[9].strip())
             elevation = int(float(parts[10].strip())) if len(parts) > 10 else None
-            surface = parts[13].strip() if len(parts) > 13 else ''
-            lighting = parts[12].strip() if len(parts) > 12 else ''
+            surface = _parse_surface(parts[13].strip()) if len(parts) > 13 else ''
+            lighting = _parse_lighting(parts[12].strip()) if len(parts) > 12 else ''
         except (ValueError, IndexError):
             continue
 
@@ -195,8 +222,8 @@ def _parse_runways(airport_str: str) -> list:
                     {'name': name, 'lat': rwy['lat'], 'lon': rwy['lon'], 'heading': rwy['heading'], 'elevationFt': rwy['elevation']},
                     {'name': opp_name, 'lat': opp['lat'], 'lon': opp['lon'], 'heading': opp['heading'], 'elevationFt': opp['elevation']},
                 ],
-                'length': rwy['length'],
-                'width': rwy['width'],
+                'lengthFt': rwy['length'],
+                'widthFt': rwy['width'],
                 'surface': rwy.get('surface', ''),
                 'lighting': rwy.get('lighting', ''),
                 'ils': rwy.get('ils', []) + opp.get('ils', []),
@@ -205,8 +232,8 @@ def _parse_runways(airport_str: str) -> list:
             result.append({
                 'name': name,
                 'thresholds': [{'name': name, 'lat': rwy['lat'], 'lon': rwy['lon'], 'heading': rwy['heading'], 'elevationFt': rwy['elevation']}],
-                'length': rwy['length'],
-                'width': rwy['width'],
+                'lengthFt': rwy['length'],
+                'widthFt': rwy['width'],
                 'surface': rwy.get('surface', ''),
                 'lighting': rwy.get('lighting', ''),
                 'ils': rwy.get('ils', []),

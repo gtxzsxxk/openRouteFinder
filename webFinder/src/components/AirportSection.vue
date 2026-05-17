@@ -23,12 +23,27 @@
       leave-to-class="opacity-0 -translate-y-1"
     >
       <div v-show="isOpen" class="mt-3 space-y-3">
-        <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-text-secondary">
-          <span>纬度 {{ airport.lat.toFixed(4) }}</span>
-          <span>经度 {{ airport.lon.toFixed(4) }}</span>
-          <span>海拔 {{ airport.elevation }} ft</span>
-          <span>过渡高度 {{ airport.transitionAltitude }} ft</span>
-          <span>过渡层 {{ airport.transitionLevel }} ft</span>
+        <div class="bg-bg-elevated rounded-xl p-3 grid grid-cols-2 gap-2">
+          <div class="text-xs">
+            <span class="text-text-tertiary">纬度</span>
+            <span class="text-text-primary font-mono ml-1">{{ airport.lat.toFixed(4) }}</span>
+          </div>
+          <div class="text-xs">
+            <span class="text-text-tertiary">经度</span>
+            <span class="text-text-primary font-mono ml-1">{{ airport.lon.toFixed(4) }}</span>
+          </div>
+          <div class="text-xs">
+            <span class="text-text-tertiary">海拔</span>
+            <span class="text-text-primary font-mono ml-1">{{ airport.elevation }} ft</span>
+          </div>
+          <div class="text-xs">
+            <span class="text-text-tertiary">过渡高度</span>
+            <span class="text-text-primary font-mono ml-1">{{ airport.transitionAltitude }} ft</span>
+          </div>
+          <div class="text-xs col-span-2">
+            <span class="text-text-tertiary">过渡层</span>
+            <span class="text-text-primary font-mono ml-1">{{ airport.transitionLevel }} ft</span>
+          </div>
         </div>
 
         <div>
@@ -92,5 +107,5 @@ defineProps<{
 }>()
 
 const isOpen = ref(true)
-const runwaysOpen = ref(false)
+const runwaysOpen = ref(true)
 </script>

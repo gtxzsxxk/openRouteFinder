@@ -159,3 +159,65 @@ def parse_metar(raw: str) -> ParsedMetar:
         result.trend = ' '.join(tokens[idx:])
 
     return result
+
+
+_TREND_MAP = {
+    'NOSIG': '无显著变化',
+    'TEMPO': '临时',
+    'BECMG': '逐渐变为',
+    'FM': '从',
+    'TL': '至',
+    'AT': '在',
+}
+
+_WEATHER_MAP = {
+    'RA': '雨',
+    'SN': '雪',
+    'FG': '雾',
+    'BR': '轻雾',
+    'HZ': '霾',
+    'FU': '烟',
+    'DU': '浮尘',
+    'SA': '沙',
+    'SS': '沙暴',
+    'DS': '尘暴',
+    'TS': '雷暴',
+    'SQ': '飑',
+    'FC': '漏斗云',
+    'SH': '阵性',
+    'BL': '高吹',
+    'DR': '低吹',
+    'MI': '浅',
+    'BC': '碎片',
+    'PR': '部分',
+    'VC': '附近',
+    'PO': '尘卷风',
+}
+
+
+def translate_trend(trend: str) -> str:
+    """Translate METAR trend string to Chinese."""
+    if not trend:
+        return trend
+    tokens = trend.split()
+    parts = []
+    for token in tokens:
+        if token in _TREND_MAP:
+            parts.append(_TREND_MAP[token])
+            continue
+        m = re.match(r'^(FM|TL|AT)(\d{4})$', token)
+        if m:
+            prefix = _TREND_MAP.get(m.group(1), m.group(1))
+            parts.append(f"{prefix} {m.group(2)}Z")
+            continue
+        if token in _WEATHER_MAP:
+            parts.append(_WEATHER_MAP[token])
+            continue
+        if token.startswith('-') and token[1:] in _WEATHER_MAP:
+            parts.append(f"小{_WEATHER_MAP[token[1:]]}")
+            continue
+        if token.startswith('+') and token[1:] in _WEATHER_MAP:
+            parts.append(f"大{_WEATHER_MAP[token[1:]]}")
+            continue
+        parts.append(token)
+    return ' '.join(parts)

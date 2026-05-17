@@ -224,7 +224,7 @@ async def post_route(req: RouteRequest):
     result["weather"] = [read_metar(req.orig), read_metar(req.dest)]
 
     # Enrich with airport details and parsed weather
-    from openRouterFinder.utils.metar_parser import parse_metar
+    from openRouterFinder.utils.metar_parser import parse_metar, translate_trend
 
     result["airportDetails"] = {
         "orig": result.pop("origAirportDetail", None),
@@ -246,7 +246,7 @@ async def post_route(req: RouteRequest):
             "temperature": m.temperature,
             "dewpoint": m.dewpoint,
             "qnh": m.qnh,
-            "trend": m.trend,
+            "trend": translate_trend(m.trend) if m.trend else None,
         }
 
     result["parsedWeather"] = [
