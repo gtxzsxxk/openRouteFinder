@@ -27,6 +27,10 @@
       </div>
       <div class="space-y-4">
         <RouteResult />
+        <div class="flex gap-4">
+          <SIDSelector class="flex-1" />
+          <STARSelector class="flex-1" />
+        </div>
         <WeatherCard />
       </div>
     </div>
@@ -40,6 +44,8 @@ import { useRouteQuery } from '@/composables/useRouteQuery'
 import SearchForm from '@/components/SearchForm.vue'
 import RouteMap from '@/components/RouteMap.vue'
 import RouteResult from '@/components/RouteResult.vue'
+import SIDSelector from '@/components/SIDSelector.vue'
+import STARSelector from '@/components/STARSelector.vue'
 import WeatherCard from '@/components/WeatherCard.vue'
 import AirportInfo from '@/components/AirportInfo.vue'
 
