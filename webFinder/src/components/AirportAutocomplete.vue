@@ -1,5 +1,5 @@
 <template>
-  <div class="relative" ref="containerRef">
+  <div class="relative">
     <label class="block text-sm font-medium text-text-muted mb-1.5">{{ label }}</label>
     <input
       v-model="inputValue"
@@ -54,7 +54,6 @@ const inputValue = ref(props.modelValue)
 const suggestions = ref<Airport[]>([])
 const isOpen = ref(false)
 const highlightedIndex = ref(-1)
-const containerRef = ref<HTMLElement | null>(null)
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
 
 watch(() => props.modelValue, (val) => {
