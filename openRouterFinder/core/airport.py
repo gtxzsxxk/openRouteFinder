@@ -131,17 +131,33 @@ class AirportConnector:
             else:
                 runway_segments.append((proc_name, field2, exit_node, points))
 
-        # Apply filter if specified
+        # Apply filter if specified: find all procedure names containing the target waypoint,
+        # then keep all segments belonging to those procedures.
         if filter_name:
+            target_procs = set()
+            for proc_name, runway, exit_node, points in runway_segments:
+                if exit_node.name == filter_name:
+                    target_procs.add(proc_name)
+            for proc_name, (exit_node, points) in common_segments.items():
+                if exit_node.name == filter_name:
+                    target_procs.add(proc_name)
+            for proc_name, trans_name, from_node, to_node, points in transition_segments:
+                if to_node.name == filter_name:
+                    target_procs.add(proc_name)
+
             runway_segments = [
                 (proc_name, runway, exit_node, points)
                 for proc_name, runway, exit_node, points in runway_segments
-                if exit_node.name == filter_name
+                if proc_name in target_procs
             ]
+            common_segments = {
+                k: v for k, v in common_segments.items()
+                if k in target_procs
+            }
             transition_segments = [
                 (proc_name, trans_name, from_node, to_node, points)
                 for proc_name, trans_name, from_node, to_node, points in transition_segments
-                if to_node.name == filter_name
+                if proc_name in target_procs
             ]
 
         # Phase 2: build connections and internal edges
@@ -298,17 +314,33 @@ class AirportConnector:
             else:
                 runway_segments.append((proc_name, field2, entry_node, points))
 
-        # Apply filter if specified
+        # Apply filter if specified: find all procedure names containing the target waypoint,
+        # then keep all segments belonging to those procedures.
         if filter_name:
+            target_procs = set()
+            for proc_name, runway, entry_node, points in runway_segments:
+                if entry_node.name == filter_name:
+                    target_procs.add(proc_name)
+            for proc_name, (entry_node, points) in common_segments.items():
+                if entry_node.name == filter_name:
+                    target_procs.add(proc_name)
+            for proc_name, trans_name, from_node, to_node, points in transition_segments:
+                if from_node.name == filter_name:
+                    target_procs.add(proc_name)
+
             runway_segments = [
                 (proc_name, runway, entry_node, points)
                 for proc_name, runway, entry_node, points in runway_segments
-                if entry_node.name == filter_name
+                if proc_name in target_procs
             ]
+            common_segments = {
+                k: v for k, v in common_segments.items()
+                if k in target_procs
+            }
             transition_segments = [
                 (proc_name, trans_name, from_node, to_node, points)
                 for proc_name, trans_name, from_node, to_node, points in transition_segments
-                if from_node.name == filter_name
+                if proc_name in target_procs
             ]
 
         # Phase 2: build connections and internal edges
