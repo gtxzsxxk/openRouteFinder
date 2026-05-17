@@ -1,27 +1,27 @@
 <template>
   <div>
     <label class="block text-xs font-medium text-text-secondary mb-2 uppercase tracking-wider">{{ label }}</label>
-    <div v-if="isLoading" class="text-xs text-text-secondary py-2">加载中...</div>
-    <div v-else-if="error" class="text-xs text-red-500 py-2">{{ error }}</div>
+    <div v-if="isLoading" class="text-xs text-text-secondary py-2">{{ $t('common.loading') }}</div>
+    <div v-else-if="error" class="text-xs text-red-500 py-2">{{ $t('common.loadFailed') }}</div>
     <div v-else-if="!hasLoaded" class="text-xs text-text-secondary py-2 cursor-pointer hover:text-text-primary transition-colors" @click="loadProcedures">
-      <span class="mr-1">&#9660;</span> 点击展开{{ type === 'sid' ? '离场' : '进场' }}程序选择
+      <span class="mr-1">&#9660;</span> {{ type === 'sid' ? $t('search.expandSID') : $t('search.expandSTAR') }}
     </div>
     <div v-else-if="options.length === 0" class="text-xs text-text-secondary py-2">
-      该机场无可用{{ type === 'sid' ? '离场' : '进场' }}程序
+      {{ type === 'sid' ? $t('search.noSID') : $t('search.noSTAR') }}
     </div>
     <div v-else class="space-y-2">
       <select
         v-model="selectedValue"
         class="w-full h-10 px-3 bg-bg-page border border-border rounded-lg text-text-primary focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent text-sm"
       >
-        <option value="">&#128260; 自动选择（推荐）</option>
+        <option value="">&#128260; {{ $t('common.autoSelect') }}</option>
         <option v-for="opt in options" :key="opt.name" :value="opt.name">
           {{ opt.name }}（{{ opt.procedures.join('、') }}）
         </option>
       </select>
 
       <div v-if="selectedOption" class="text-xs text-text-secondary space-y-1 pt-1">
-        <p>对应程序: {{ selectedOption.procedures.join('、') }}</p>
+        <p>{{ $t('common.procedure') }}: {{ selectedOption.procedures.join('、') }}</p>
       </div>
     </div>
   </div>
@@ -41,7 +41,10 @@ const emit = defineEmits<{
   'update:modelValue': [value: string]
 }>()
 
-const label = computed(() => props.type === 'sid' ? '离场点 (SID)' : '进场点 (STAR)')
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
+const label = computed(() => props.type === 'sid' ? t('search.sid') : t('search.star'))
 const options = ref<ProcedureOption[]>([])
 const isLoading = ref(false)
 const error = ref<string | null>(null)
@@ -72,7 +75,7 @@ async function loadProcedures() {
       if (response.status === 404) {
         options.value = []
       } else {
-        error.value = '加载失败'
+        error.value = t('common.loadFailed')
       }
       hasLoaded.value = true
       return
@@ -85,7 +88,7 @@ async function loadProcedures() {
     }
     hasLoaded.value = true
   } catch {
-    error.value = '加载失败'
+    error.value = t('common.loadFailed')
     hasLoaded.value = true
   } finally {
     isLoading.value = false

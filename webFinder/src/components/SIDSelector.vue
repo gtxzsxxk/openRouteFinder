@@ -11,25 +11,25 @@
         :key="i"
         :value="i"
       >
-        {{ proc[0] }} - 跑道 {{ proc[1] }}
+        {{ proc[0] }} - {{ $t('airport.runway') }} {{ proc[1] }}
       </option>
     </select>
 
     <div v-if="store.selectedSID" class="text-xs text-text-secondary space-y-1">
       <div class="flex justify-between">
-        <span>程序</span>
+        <span>{{ $t('airport.program') }}</span>
         <span class="font-mono text-text-primary">{{ store.selectedSID.name }}</span>
       </div>
       <div class="flex justify-between">
-        <span>跑道</span>
+        <span>{{ $t('airport.runway') }}</span>
         <span class="font-mono text-text-primary">{{ store.selectedSID.runway }}</span>
       </div>
       <div class="flex justify-between">
-        <span>航点</span>
-        <span class="font-mono text-text-primary">{{ store.selectedSID.points.length }} 个</span>
+        <span>{{ $t('airport.waypoints') }}</span>
+        <span class="font-mono text-text-primary">{{ $t('common.waypointCount', { count: store.selectedSID.points.length }) }}</span>
       </div>
       <div v-if="store.selectedSIDTransition" class="flex justify-between pt-2 border-t border-border">
-        <span>过渡点</span>
+        <span>{{ $t('airport.transition') }}</span>
         <span class="font-mono text-text-primary">{{ store.selectedSIDTransition.name }}</span>
       </div>
     </div>

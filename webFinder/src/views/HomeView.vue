@@ -49,13 +49,13 @@
         <!-- Procedures Cell (SID + STAR merged) -->
         <BentoCell
           v-if="store.selectedSIDProcedures.length > 0 || store.selectedSTARProcedures.length > 0"
-          title="进离场程序"
+          :title="$t('bento.procedures')"
           class="md:col-span-2 lg:col-span-1 animate-fade-in-up stagger-2"
         >
           <div class="space-y-5">
             <!-- SID Section -->
             <div v-if="store.selectedSIDProcedures.length > 0">
-              <div class="text-xs font-medium text-text-secondary mb-2 uppercase tracking-wider">离场 (SID)</div>
+              <div class="text-xs font-medium text-text-secondary mb-2 uppercase tracking-wider">{{ $t('bento.sid') }}</div>
               <SIDSelector />
             </div>
 
@@ -64,24 +64,24 @@
 
             <!-- STAR Section -->
             <div v-if="store.selectedSTARProcedures.length > 0">
-              <div class="text-xs font-medium text-text-secondary mb-2 uppercase tracking-wider">进场 (STAR)</div>
+              <div class="text-xs font-medium text-text-secondary mb-2 uppercase tracking-wider">{{ $t('bento.star') }}</div>
               <STARSelector />
             </div>
           </div>
         </BentoCell>
 
         <!-- Airport Info Cell -->
-        <BentoCell title="机场信息" class="animate-fade-in-up stagger-3">
+        <BentoCell :title="$t('bento.airport')" class="animate-fade-in-up stagger-3">
           <AirportInfo />
         </BentoCell>
 
         <!-- Weather Cell -->
-        <BentoCell v-if="store.parsedWeather" title="天气" class="animate-fade-in-up stagger-4">
+        <BentoCell v-if="store.parsedWeather" :title="$t('bento.weather')" class="animate-fade-in-up stagger-4">
           <WeatherCard />
         </BentoCell>
 
         <!-- Waypoints Cell -->
-        <BentoCell title="航点" class="animate-fade-in-up stagger-5">
+        <BentoCell :title="$t('bento.waypoints')" class="animate-fade-in-up stagger-5 overflow-hidden">
           <div class="h-full overflow-y-auto space-y-0">
             <div
               v-for="(node, i) in store.routeResult.nodes"

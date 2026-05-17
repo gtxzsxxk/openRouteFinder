@@ -3,7 +3,7 @@
     <!-- Airport Selection — clean, no card wrapper -->
     <div class="flex items-center gap-3">
       <div class="flex-1 min-w-0">
-        <label class="block text-xs font-medium text-text-secondary mb-2 uppercase tracking-wider">出发机场</label>
+        <label class="block text-xs font-medium text-text-secondary mb-2 uppercase tracking-wider">{{ $t('search.departure') }}</label>
         <AirportAutocomplete
           v-model="departure"
           placeholder="ZBAA"
@@ -17,13 +17,13 @@
           'self-end h-14 w-14 flex items-center justify-center bg-bg-elevated rounded-xl border border-border text-text-secondary hover:text-text-primary hover:bg-bg-surface transition-all duration-200 shrink-0',
           isSwapping ? 'rotate-180' : '',
         ]"
-        title="交换机场"
+        :title="$t('common.swap')"
       >
         <ArrowLeftRight class="w-5 h-5" />
       </button>
 
       <div class="flex-1 min-w-0">
-        <label class="block text-xs font-medium text-text-secondary mb-2 uppercase tracking-wider">到达机场</label>
+        <label class="block text-xs font-medium text-text-secondary mb-2 uppercase tracking-wider">{{ $t('search.arrival') }}</label>
         <AirportAutocomplete
           v-model="arrival"
           placeholder="ZJSY"
@@ -55,7 +55,7 @@
       >
         <Loader2 v-if="store.isLoading" class="w-5 h-5 animate-spin" />
         <Search v-else class="w-5 h-5" />
-        <span class="text-base">{{ store.isLoading ? '查询中...' : '查询航路' }}</span>
+        <span class="text-base">{{ store.isLoading ? $t('common.searching') : $t('common.search') }}</span>
       </button>
     </div>
 

@@ -15,7 +15,7 @@
               : 'text-text-tertiary hover:text-text-secondary',
           ]"
         >
-          {{ mode === 'card' ? '卡片' : 'Raw' }}
+          {{ mode === 'card' ? $t('weather.card') : 'Raw' }}
         </button>
       </div>
     </div>
@@ -45,7 +45,7 @@
             />
             <Wind v-else class="w-4 h-4 text-text-secondary" />
             <div>
-              <div class="text-xs text-text-tertiary">风速</div>
+              <div class="text-xs text-text-tertiary">{{ $t('weather.windSpeed') }}</div>
               <div class="text-sm text-text-primary font-mono">
                 {{ data.windSpeed != null ? `${data.windSpeed} ${data.windSpeedUnit}` : '--' }}
               </div>
@@ -54,21 +54,21 @@
           <div class="flex items-center gap-2">
             <Eye class="w-4 h-4 text-text-secondary" />
             <div>
-              <div class="text-xs text-text-tertiary">能见度</div>
+              <div class="text-xs text-text-tertiary">{{ $t('weather.visibility') }}</div>
               <div class="text-sm text-text-primary font-mono">{{ data.visibility || '--' }}</div>
             </div>
           </div>
           <div class="flex items-center gap-2">
             <Cloud class="w-4 h-4 text-text-secondary" />
             <div>
-              <div class="text-xs text-text-tertiary">云底</div>
+              <div class="text-xs text-text-tertiary">{{ $t('weather.cloudBase') }}</div>
               <div class="text-sm text-text-primary font-mono">{{ cloudBaseText }}</div>
             </div>
           </div>
           <div class="flex items-center gap-2">
             <Droplets class="w-4 h-4 text-text-secondary" />
             <div>
-              <div class="text-xs text-text-tertiary">露点</div>
+              <div class="text-xs text-text-tertiary">{{ $t('weather.dewpoint') }}</div>
               <div class="text-sm text-text-primary font-mono">{{ data.dewpoint != null ? `${data.dewpoint}°C` : '--' }}</div>
             </div>
           </div>
@@ -77,7 +77,7 @@
         <div class="flex items-center gap-2">
           <Gauge class="w-4 h-4 text-text-secondary" />
           <div>
-            <div class="text-xs text-text-tertiary">气压</div>
+            <div class="text-xs text-text-tertiary">{{ $t('weather.pressure') }}</div>
             <div class="text-sm text-text-primary font-mono">{{ data.qnh != null ? `${data.qnh} hPa` : '--' }}</div>
           </div>
         </div>
@@ -96,6 +96,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ArrowUpRight, Wind, Eye, Cloud, Droplets, Gauge } from '@lucide/vue'
 import type { ParsedMetar } from '@/types'
 
@@ -104,19 +105,20 @@ const props = defineProps<{
   data: ParsedMetar
 }>()
 
+const { t } = useI18n()
 const displayMode = ref<'card' | 'raw'>('card')
 
 const cloudDescription = computed(() => {
-  if (props.data.clouds.length === 0) return '无云'
+  if (props.data.clouds.length === 0) return t('weather.noClouds')
   const c = props.data.clouds[0]
   const coverMap: Record<string, string> = {
-    FEW: '少量云',
-    SCT: '疏云',
-    BKN: '多云',
-    OVC: '阴天',
-    NSC: '无显著云',
-    NCD: '无云',
-    SKC: '晴空',
+    FEW: t('weather.few'),
+    SCT: t('weather.scattered'),
+    BKN: t('weather.broken'),
+    OVC: t('weather.overcast'),
+    NSC: t('weather.nsc'),
+    NCD: t('weather.ncd'),
+    SKC: t('weather.skc'),
   }
   return coverMap[c.cover] || c.cover
 })

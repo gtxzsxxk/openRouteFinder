@@ -21,8 +21,8 @@
           class="relative w-full max-w-sm bg-bg-surface rounded-2xl border border-border shadow-xl p-6 space-y-5"
         >
           <div class="text-center">
-            <h3 class="text-base font-semibold text-text-primary">安全验证</h3>
-            <p class="text-sm text-text-secondary mt-1">请输入验证码以继续查询</p>
+            <h3 class="text-base font-semibold text-text-primary">{{ $t('captcha.title') }}</h3>
+            <p class="text-sm text-text-secondary mt-1">{{ $t('captcha.subtitle') }}</p>
           </div>
 
           <!-- Captcha Image -->
@@ -31,7 +31,7 @@
             @click="refreshValidCode"
           >
             <img v-if="validCodeImage" :src="validCodeImage" alt="valid code" class="h-full w-auto" />
-            <span v-else class="text-sm text-text-tertiary">点击加载验证码</span>
+            <span v-else class="text-sm text-text-tertiary">{{ $t('captcha.refresh') }}</span>
           </div>
 
           <!-- Captcha Input -->
@@ -40,7 +40,7 @@
             v-model="validCodeInput"
             type="text"
             maxlength="4"
-            placeholder="输入4位验证码"
+            :placeholder="$t('captcha.placeholder')"
             class="w-full h-14 px-4 bg-bg-elevated rounded-xl text-text-primary placeholder-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent transition-all duration-150 uppercase font-mono text-lg tracking-wider text-center border border-border"
             @keydown.enter="confirm"
           />
@@ -51,7 +51,7 @@
               @click="close"
               class="flex-1 h-12 bg-bg-elevated hover:bg-bg-page text-text-primary font-medium rounded-xl transition-all duration-150 border border-border"
             >
-              取消
+              {{ $t('common.cancel') }}
             </button>
             <button
               @click="confirm"
@@ -59,7 +59,7 @@
               class="flex-1 h-12 bg-accent hover:bg-accent-hover disabled:bg-bg-elevated disabled:text-text-tertiary disabled:cursor-not-allowed text-white font-semibold rounded-xl transition-all duration-150 flex items-center justify-center gap-2"
             >
               <Loader2 v-if="isLoading" class="w-4 h-4 animate-spin" />
-              <span>确认</span>
+              <span>{{ $t('common.confirm') }}</span>
             </button>
           </div>
         </div>

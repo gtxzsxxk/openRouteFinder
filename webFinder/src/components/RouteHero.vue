@@ -15,7 +15,7 @@
         class="shrink-0 w-9 h-9 flex items-center justify-center bg-bg-elevated hover:bg-bg-surface
                rounded-full border border-border text-text-secondary hover:text-text-primary
                transition-all duration-150 active:scale-95"
-        :title="copied ? '已复制' : '复制航线'"
+        :title="copied ? $t('common.copied') : $t('common.copy')"
       >
         <Check v-if="copied" class="w-4 h-4 text-success" />
         <Copy v-else class="w-4 h-4" />

@@ -2,13 +2,13 @@
   <div class="space-y-4">
     <WeatherSection
       v-if="weather"
-      title="出发机场"
+      :title="$t('weather.departure')"
       :data="weather[0]"
     />
     <div v-if="weather" class="border-t border-border" />
     <WeatherSection
       v-if="weather"
-      title="到达机场"
+      :title="$t('weather.arrival')"
       :data="weather[1]"
     />
   </div>
