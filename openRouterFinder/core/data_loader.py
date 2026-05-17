@@ -147,8 +147,25 @@ def _parse_runways(airport_str: str) -> list:
             width = float(parts[4].strip())
             lat = float(parts[8].strip())
             lon = float(parts[9].strip())
+            elevation = int(float(parts[10].strip())) if len(parts) > 10 else None
+            surface = parts[13].strip() if len(parts) > 13 else ''
+            lighting = parts[12].strip() if len(parts) > 12 else ''
         except (ValueError, IndexError):
             continue
+
+        # Parse ILS info
+        ils = []
+        if len(parts) > 7 and parts[5].strip() not in ('', '0'):
+            try:
+                ils.append({
+                    'runwayEnd': name,
+                    'frequency': parts[6].strip(),
+                    'heading': float(parts[7].strip()),
+                    'category': 'I',
+                })
+            except ValueError:
+                pass
+
         runways[name] = {
             'name': name,
             'heading': heading,
@@ -156,6 +173,10 @@ def _parse_runways(airport_str: str) -> list:
             'width': width,
             'lat': lat,
             'lon': lon,
+            'elevation': elevation,
+            'surface': surface,
+            'lighting': lighting,
+            'ils': ils,
         }
 
     result = []
@@ -167,23 +188,74 @@ def _parse_runways(airport_str: str) -> list:
         if opp_name in runways and opp_name not in paired:
             paired.add(name)
             paired.add(opp_name)
+            opp = runways[opp_name]
             result.append({
                 'name': f"{name}/{opp_name}",
                 'thresholds': [
-                    {'name': name, 'lat': rwy['lat'], 'lon': rwy['lon'], 'heading': rwy['heading']},
-                    {'name': opp_name, 'lat': runways[opp_name]['lat'], 'lon': runways[opp_name]['lon'], 'heading': runways[opp_name]['heading']},
+                    {'name': name, 'lat': rwy['lat'], 'lon': rwy['lon'], 'heading': rwy['heading'], 'elevationFt': rwy['elevation']},
+                    {'name': opp_name, 'lat': opp['lat'], 'lon': opp['lon'], 'heading': opp['heading'], 'elevationFt': opp['elevation']},
                 ],
                 'length': rwy['length'],
                 'width': rwy['width'],
+                'surface': rwy.get('surface', ''),
+                'lighting': rwy.get('lighting', ''),
+                'ils': rwy.get('ils', []) + opp.get('ils', []),
             })
         else:
             result.append({
                 'name': name,
-                'thresholds': [{'name': name, 'lat': rwy['lat'], 'lon': rwy['lon'], 'heading': rwy['heading']}],
+                'thresholds': [{'name': name, 'lat': rwy['lat'], 'lon': rwy['lon'], 'heading': rwy['heading'], 'elevationFt': rwy['elevation']}],
                 'length': rwy['length'],
                 'width': rwy['width'],
+                'surface': rwy.get('surface', ''),
+                'lighting': rwy.get('lighting', ''),
+                'ils': rwy.get('ils', []),
             })
     return result
+
+
+def _parse_airport_detail(icao: str) -> Optional[dict]:
+    """Extract full airport details from raw airport data."""
+    graph = get_nav_graph()
+    icao = icao.upper()
+    if icao not in graph.airport_maps:
+        return None
+
+    name = None
+    lat = lon = None
+    elevation = transition_alt = transition_level = None
+    for line in graph.airport_maps[icao].strip().split('\n'):
+        if not line.startswith('A,'):
+            continue
+        parts = line.split(',')
+        if len(parts) >= 5:
+            name = parts[2].strip()
+            try:
+                lat = float(parts[3].strip())
+                lon = float(parts[4].strip())
+            except ValueError:
+                pass
+        if len(parts) >= 10:
+            try:
+                elevation = int(float(parts[5].strip()))
+                transition_alt = int(float(parts[6].strip()))
+                transition_level = int(float(parts[7].strip()))
+            except ValueError:
+                pass
+        break
+
+    runways = _parse_runways(graph.airport_maps[icao])
+
+    return {
+        'icao': icao,
+        'name': name or icao,
+        'lat': lat,
+        'lon': lon,
+        'elevation': elevation,
+        'transitionAltitude': transition_alt,
+        'transitionLevel': transition_level,
+        'runways': runways,
+    }
 
 
 def search_route(orig: str, dest: str, sid_exit: Optional[str] = None, star_entry: Optional[str] = None) -> Optional[dict]:
@@ -222,9 +294,11 @@ def search_route(orig: str, dest: str, sid_exit: Optional[str] = None, star_entr
     import json
     result = json.loads(result_json)
 
-    # Enrich with runway data
+    # Enrich with runway and airport detail data
     if isinstance(result, dict):
         result['origRunways'] = _parse_runways(graph.airport_maps[orig])
         result['destRunways'] = _parse_runways(graph.airport_maps[dest])
+        result['origAirportDetail'] = _parse_airport_detail(orig)
+        result['destAirportDetail'] = _parse_airport_detail(dest)
 
     return result

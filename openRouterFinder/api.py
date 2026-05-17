@@ -222,6 +222,38 @@ async def post_route(req: RouteRequest):
             result["nodes"] = []
 
     result["weather"] = [read_metar(req.orig), read_metar(req.dest)]
+
+    # Enrich with airport details and parsed weather
+    from openRouterFinder.utils.metar_parser import parse_metar
+
+    result["airportDetails"] = {
+        "orig": result.pop("origAirportDetail", None),
+        "dest": result.pop("destAirportDetail", None),
+    }
+
+    def _metar_to_dict(m):
+        return {
+            "raw": m.raw,
+            "station": m.station,
+            "issue_time": m.issue_time,
+            "windDirection": m.wind_direction,
+            "windSpeed": m.wind_speed,
+            "windSpeedUnit": m.wind_speed_unit,
+            "windGust": m.wind_gust,
+            "visibility": m.visibility,
+            "weather": m.weather,
+            "clouds": [{"cover": c.cover, "base": c.base} for c in m.clouds],
+            "temperature": m.temperature,
+            "dewpoint": m.dewpoint,
+            "qnh": m.qnh,
+            "trend": m.trend,
+        }
+
+    result["parsedWeather"] = [
+        _metar_to_dict(parse_metar(read_metar(req.orig))),
+        _metar_to_dict(parse_metar(read_metar(req.dest))),
+    ]
+
     return result
 
 
