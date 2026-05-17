@@ -9,10 +9,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@lucide/vue": "^1.16.0",
     "@tailwindcss/vite": "^4.3.0",
     "@tanstack/vue-query": "^5.100.10",
     "@vueuse/core": "^14.3.0",
-    "lucide-vue-next": "^1.0.0",
     "maplibre-gl": "^5.24.0",
     "pinia": "^3.0.4",
     "tailwindcss": "^4.3.0",
