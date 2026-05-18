@@ -5,6 +5,10 @@ docs/
 .claude/
 data/*
 !data/.gitkeep
+!data/*.air
+!data/*.map
 webFinder/dist/
 .env
+.superpowers/
+.vscode/
 
