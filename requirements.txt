@@ -5,3 +5,4 @@ pydantic>=2.10.0
 pydantic-settings>=2.0.0
 requests>=2.25.1
 Pillow>=8.2.0
+flatbuffers>=24.3.25
