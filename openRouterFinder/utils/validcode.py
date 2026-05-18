@@ -46,25 +46,3 @@ def generate_captcha_b64(num: int) -> str:
     img_bytes = generate_captcha(num)
     b64 = base64.b64encode(img_bytes).decode("utf-8")
     return f"data:image/jpeg;base64,{b64}"
-
-
-def rotate_runway_image(angle: int) -> str:
-    """Rotate runway icon and return base64 PNG."""
-    paths = [
-        Path(__file__).parent.parent.parent / "webFinder" / "public" / "runway.png",
-    ]
-    img_path = None
-    for p in paths:
-        if p.exists():
-            img_path = p
-            break
-    if img_path is None:
-        raise FileNotFoundError("runway.png not found")
-
-    img = Image.open(img_path)
-    img = img.rotate(360 - angle)
-    img = img.resize((32, 32))
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
-    return f"data:image/png;base64,{b64}"
