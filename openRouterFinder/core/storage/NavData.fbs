@@ -1,0 +1,205 @@
+namespace NavData;
+
+enum AirwayLevel : byte {
+  Both = 0,
+  High = 1,
+  Low = 2
+}
+
+enum ProcedureType : byte {
+  Unknown = 0,
+  SID = 1,
+  STAR = 2,
+  Approach = 3
+}
+
+table Node {
+  iid:int;
+  name:string;
+  lat:float;
+  lon:float;
+}
+
+table Edge {
+  nfrom:int;
+  nend:int;
+  name:string;
+  level:AirwayLevel;
+}
+
+table RunwayEnd {
+  name:string;
+  lat:float;
+  lon:float;
+  heading:float;
+  elevation_ft:int;
+}
+
+table ILS {
+  runway_end:string;
+  ident:string;
+  frequency:string;
+  heading:float;
+  category:string;
+  gs_angle:float;
+  lat:float;
+  lon:float;
+  elevation:int;
+  has_dme:bool;
+  crossing_height:int;
+}
+
+table Runway {
+  name:string;
+  ends:[RunwayEnd];
+  length_ft:float;
+  width_ft:float;
+  surface:string;
+  lighting:string;
+  ils:[ILS];
+}
+
+table ProcLeg {
+  name:string;
+  lat:float;
+  lon:float;
+  alt_restriction:string;
+  speed_limit:string;
+  path_terminator:string;
+  course:float;
+  distance_nm:float;
+  turn_direction:string;
+  is_fly_over:bool;
+  nav_reference:string;
+  nav_lat:float;
+  nav_lon:float;
+  nav_bearing:float;
+  nav_distance:float;
+  arc_radius:float;
+  center_lat:float;
+  center_lon:float;
+}
+
+table ProcTransition {
+  name:string;
+  legs:[ProcLeg];
+}
+
+table Procedure {
+  name:string;
+  type:ProcedureType;
+  runway:string;
+  legs:[ProcLeg];
+  transitions:[ProcTransition];
+}
+
+table Airport {
+  icao:string;
+  name:string;
+  lat:float;
+  lon:float;
+  elevation:int;
+  transition_altitude:int;
+  transition_level:int;
+  speed_limit:int;
+  speed_limit_altitude:int;
+  runways:[Runway];
+  procedures:[Procedure];
+}
+
+table Navaid {
+  ident:string;
+  name:string;
+  type:string;
+  frequency:string;
+  channel:string;
+  lat:float;
+  lon:float;
+  elevation:int;
+  range_nm:int;
+  usage:string;
+  slaved_var:float;
+  magnetic_variation:float;
+}
+
+table Holding {
+  area_code:string;
+  region_code:string;
+  icao_code:string;
+  waypoint_identifier:string;
+  holding_name:string;
+  lat:float;
+  lon:float;
+  duplicate_identifier:int;
+  inbound_course:float;
+  turn_direction:string;
+  leg_length_nm:float;
+  leg_time_min:float;
+  min_altitude:int;
+  max_altitude:int;
+  speed_limit:int;
+}
+
+table Marker {
+  airport_icao:string;
+  runway_name:string;
+  llz_ident:string;
+  marker_ident:string;
+  marker_type:string;
+  lat:float;
+  lon:float;
+}
+
+table GLS {
+  area_code:string;
+  airport_icao:string;
+  icao_code:string;
+  ref_path_ident:string;
+  category:string;
+  channel:int;
+  runway:string;
+  approach_bearing:float;
+  station_lat:float;
+  station_lon:float;
+  station_ident:string;
+  approach_slope:float;
+  magnetic_variation:float;
+  station_elevation:int;
+  station_type:string;
+}
+
+table GridMora {
+  start_lat:int;
+  start_lon:int;
+  mora_values:[string];
+}
+
+table AirportComm {
+  area_code:string;
+  icao_code:string;
+  airport_icao:string;
+  comm_type:string;
+  frequency:float;
+  frequency_units:string;
+  service_indicator:string;
+  callsign:string;
+  lat:float;
+  lon:float;
+}
+
+table NavData {
+  cycle:string;
+  effective_from:string;
+  effective_to:string;
+  nodes:[Node];
+  edges:[Edge];
+  airports:[Airport];
+  navaids:[Navaid];
+  holdings:[Holding];
+  markers:[Marker];
+  gls:[GLS];
+  grid_mora:[GridMora];
+  airport_comms:[AirportComm];
+}
+
+root_type NavData;
