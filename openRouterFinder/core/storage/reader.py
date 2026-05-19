@@ -1,0 +1,209 @@
+"""mmap-based FlatBuffers reader for NavData files."""
+
+import io
+import mmap
+import os
+import sys
+import tempfile
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+
+import zstandard as zstd
+
+# FlatBuffers generated code uses absolute imports like "from NavData.Node import Node"
+_storage_dir = Path(__file__).parent
+if str(_storage_dir) not in sys.path:
+    sys.path.insert(0, str(_storage_dir))
+
+from openRouterFinder.core.storage.NavData.NavData import NavData
+from openRouterFinder.core.storage.NavData.Node import Node as FBNode
+from openRouterFinder.core.storage.NavData.Edge import Edge as FBEdge
+from openRouterFinder.core.storage.NavData.Airport import Airport as FBAirport
+from openRouterFinder.core.storage.NavData.AirwayLevel import AirwayLevel
+from openRouterFinder.core.graph import Node as GraphNode, Edge as GraphEdge
+
+
+class MmappedNavData:
+    """Read-only navigation data loaded via mmap.
+
+    Supports plain .fb files and zstd-compressed .fb.zst files.
+    Compressed files are transparently decompressed to a temp file on init.
+    """
+
+    def __init__(self, fb_path: Path):
+        self._path = fb_path
+        self._tmp_path: Optional[Path] = None
+
+        actual_path = fb_path
+        if str(fb_path).endswith(".fb.zst"):
+            # Decompress to a temp file for mmap
+            tmp_fd, tmp_name = tempfile.mkstemp(suffix=".fb", prefix="navdata_")
+            try:
+                dctx = zstd.ZstdDecompressor()
+                with open(fb_path, "rb") as zst_in:
+                    with dctx.stream_reader(zst_in) as reader:
+                        while True:
+                            chunk = reader.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            os.write(tmp_fd, chunk)
+            finally:
+                os.close(tmp_fd)
+            actual_path = Path(tmp_name)
+            self._tmp_path = actual_path
+
+        self._file = open(actual_path, "rb")
+        self._mmap = mmap.mmap(self._file.fileno(), 0, access=mmap.ACCESS_READ)
+        self._nav = NavData.GetRootAs(self._mmap, 0)
+
+        # Build O(1) lookups
+        self._node_index: Dict[tuple, GraphNode] = {}
+        self._node_by_iid: Dict[int, GraphNode] = {}
+        self._airport_by_icao: Dict[str, int] = {}  # icao -> index in _nav.Airports()
+        self._navaid_by_ident: Dict[str, List[int]] = {}
+
+        self._build_indices()
+
+    def _build_indices(self):
+        # Node index by (name, lat, lon)
+        for i in range(self._nav.NodesLength()):
+            n = self._nav.Nodes(i)
+            gn = GraphNode(
+                iid=n.Iid(),
+                name=n.Name().decode("utf-8") if n.Name() else "",
+                px=n.Lat(),
+                py=n.Lon(),
+            )
+            self._node_index[gn.node_key()] = gn
+            self._node_by_iid[n.Iid()] = gn
+
+        # Attach edges to nodes
+        for i in range(self._nav.EdgesLength()):
+            e = self._nav.Edges(i)
+            nfrom = e.Nfrom()
+            nend = e.Nend()
+            if nfrom in self._node_by_iid and nend in self._node_by_iid:
+                name = e.Name().decode("utf-8") if e.Name() else ""
+                ge = GraphEdge(
+                    nfrom=nfrom,
+                    nend=nend,
+                    name=name,
+                )
+                self._node_by_iid[nfrom].next_list.append(ge)
+
+        # Airport index by ICAO
+        for i in range(self._nav.AirportsLength()):
+            ap = self._nav.Airports(i)
+            icao = ap.Icao().decode("utf-8") if ap.Icao() else ""
+            if icao:
+                self._airport_by_icao[icao] = i
+
+        # Navaid index by ident
+        for i in range(self._nav.NavaidsLength()):
+            nav = self._nav.Navaids(i)
+            ident = nav.Ident().decode("utf-8") if nav.Ident() else ""
+            if ident:
+                self._navaid_by_ident.setdefault(ident, []).append(i)
+
+    @property
+    def cycle(self) -> str:
+        c = self._nav.Cycle()
+        return c.decode("utf-8") if c else ""
+
+    @property
+    def effective_from(self) -> str:
+        s = self._nav.EffectiveFrom()
+        return s.decode("utf-8") if s else ""
+
+    @property
+    def effective_to(self) -> str:
+        s = self._nav.EffectiveTo()
+        return s.decode("utf-8") if s else ""
+
+    @property
+    def num_nodes(self) -> int:
+        return self._nav.NodesLength()
+
+    @property
+    def num_edges(self) -> int:
+        return self._nav.EdgesLength()
+
+    @property
+    def num_airports(self) -> int:
+        return self._nav.AirportsLength()
+
+    @property
+    def num_navaids(self) -> int:
+        return self._nav.NavaidsLength()
+
+    @property
+    def num_holdings(self) -> int:
+        return self._nav.HoldingsLength()
+
+    @property
+    def num_markers(self) -> int:
+        return self._nav.MarkersLength()
+
+    @property
+    def num_gls(self) -> int:
+        return self._nav.GlsLength()
+
+    @property
+    def num_grid_mora(self) -> int:
+        return self._nav.GridMoraLength()
+
+    @property
+    def num_airport_comms(self) -> int:
+        return self._nav.AirportCommsLength()
+
+    def get_airport(self, icao: str) -> Optional[FBAirport]:
+        """Get airport by ICAO code."""
+        icao = icao.upper()
+        idx = self._airport_by_icao.get(icao)
+        if idx is not None:
+            return self._nav.Airports(idx)
+        return None
+
+    def list_airport_icaos(self) -> List[str]:
+        """Return sorted list of all airport ICAO codes."""
+        return sorted(self._airport_by_icao.keys())
+
+    def get_navaids(self, ident: str) -> List:
+        """Get navaid(s) by ident."""
+        indices = self._navaid_by_ident.get(ident, [])
+        return [self._nav.Navaids(i) for i in indices]
+
+    def find_node(self, name: str, lat: float, lon: float) -> Optional[GraphNode]:
+        key = (name, round(lat, 6), round(lon, 6))
+        return self._node_index.get(key)
+
+    def find_nodes_by_name(self, name: str) -> List[GraphNode]:
+        return [n for n in self._node_by_iid.values() if n.name == name]
+
+    @property
+    def node_list(self) -> Tuple[Optional[GraphNode], ...]:
+        # Build array where node_list[iid] returns the node with that iid.
+        # Handles both 0-based (new builds) and 1-based (legacy) iids.
+        if not self._node_by_iid:
+            return ()
+        max_iid = max(self._node_by_iid.keys())
+        arr: List[Optional[GraphNode]] = [None] * (max_iid + 1)
+        for iid, node in self._node_by_iid.items():
+            arr[iid] = node
+        return tuple(arr)
+
+    @property
+    def node_index(self) -> Dict[tuple, GraphNode]:
+        return self._node_index
+
+    def close(self):
+        self._mmap.close()
+        self._file.close()
+        if self._tmp_path is not None and self._tmp_path.exists():
+            os.unlink(self._tmp_path)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
