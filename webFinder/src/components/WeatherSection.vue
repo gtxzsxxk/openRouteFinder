@@ -130,24 +130,29 @@ const cloudBaseText = computed(() => {
   return `${c.cover} ${c.base}ft`
 })
 
+const _hasKey = (key: string) => {
+  const msg = t(key)
+  return msg !== key
+}
+
 const translatedTrend = computed(() => {
   if (!props.data.trend) return ''
   const tokens = props.data.trend.split(' ')
   return tokens.map((token) => {
-    if (t(`trend.${token}`) !== `trend.${token}`) {
+    if (_hasKey(`trend.${token}`)) {
       return t(`trend.${token}`)
     }
     const m = token.match(/^(FM|TL|AT)(\d{4})$/)
-    if (m && t(`trend.${m[1]}`) !== `trend.${m[1]}`) {
+    if (m && _hasKey(`trend.${m[1]}`)) {
       return `${t(`trend.${m[1]}`)} ${m[2]}Z`
     }
-    if (t(`weatherCode.${token}`) !== `weatherCode.${token}`) {
+    if (_hasKey(`weatherCode.${token}`)) {
       return t(`weatherCode.${token}`)
     }
-    if (token.startsWith('-') && t(`weatherCode.${token.slice(1)}`) !== `weatherCode.${token.slice(1)}`) {
+    if (token.startsWith('-') && _hasKey(`weatherCode.${token.slice(1)}`)) {
       return `${t('weather.light') || 'Light'}${t(`weatherCode.${token.slice(1)}`)}`
     }
-    if (token.startsWith('+') && t(`weatherCode.${token.slice(1)}`) !== `weatherCode.${token.slice(1)}`) {
+    if (token.startsWith('+') && _hasKey(`weatherCode.${token.slice(1)}`)) {
       return `${t('weather.heavy') || 'Heavy'}${t(`weatherCode.${token.slice(1)}`)}`
     }
     return token

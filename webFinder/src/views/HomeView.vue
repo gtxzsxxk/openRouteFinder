@@ -131,7 +131,7 @@ const { mutate: searchRoute } = useRouteQuery()
 const queryTime = ref(0)
 let timer: ReturnType<typeof setInterval> | null = null
 
-function handleSearch(params: { orig: string; dest: string; validCode: string; validToken: string; sidExit: string; starEntry: string }) {
+function handleSearch(params: { orig: string; dest: string; validCode: string; validToken: string; sidExit: string; starEntry: string; cycle: string }) {
   store.setLoading(true)
   store.setError(null)
   queryTime.value = 0

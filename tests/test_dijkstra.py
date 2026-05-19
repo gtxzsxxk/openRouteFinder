@@ -33,11 +33,15 @@ def test_build_node_info():
 
 def test_route_engine_search_accepts_constraint_params():
     """RouteEngine.search should accept sid_exit and star_entry without error."""
-    from openRouterFinder.core.data_loader import get_nav_graph
-    from openRouterFinder.core.airport import AirportConnector
+    from openRouterFinder.core.data_loader import get_nav_data
+    from openRouterFinder.core.airport import FlatbuffersAirportConnector
 
-    graph = get_nav_graph()
-    connector = AirportConnector(graph.airport_maps, graph._node_index)
+    nav = get_nav_data()
+    if nav is None:
+        import pytest
+        pytest.skip("Navdata not available")
+
+    connector = FlatbuffersAirportConnector(nav)
     sid_conn = connector.build_sid("ZGHA")
     star_conn = connector.build_star("ZJSY")
 
@@ -45,7 +49,7 @@ def test_route_engine_search_accepts_constraint_params():
         import pytest
         pytest.skip("Need both airports to have data")
 
-    engine = RouteEngine(graph.node_list, graph.data_version)
+    engine = RouteEngine(nav.node_list, nav.cycle)
     result = engine.search(
         "ZGHA", "ZJSY", sid_conn, star_conn,
         connector.get_airport_names("ZGHA") + connector.get_airport_names("ZJSY"),

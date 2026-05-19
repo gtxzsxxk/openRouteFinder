@@ -1,4 +1,4 @@
-from openRouterFinder.core.airport import AirportConnector
+from openRouterFinder.core.airport import AirportConnector, FlatbuffersAirportConnector
 
 
 def test_get_airport_coords():
@@ -23,10 +23,14 @@ def test_get_airport_names():
 
 def test_build_sid_with_filter():
     """build_sid with filter_name only keeps matching exit procedures."""
-    from openRouterFinder.core.data_loader import get_airport_maps
+    from openRouterFinder.core.data_loader import get_nav_data
 
-    maps = get_airport_maps()
-    conn = AirportConnector(maps, {})
+    nav = get_nav_data()
+    if nav is None:
+        import pytest
+        pytest.skip("Navdata not available")
+
+    conn = FlatbuffersAirportConnector(nav)
 
     result = conn.build_sid("ZGHA", filter_name="NONEXISTENT")
     assert result is not None
@@ -40,10 +44,14 @@ def test_build_sid_with_filter():
 
 def test_build_star_with_filter():
     """build_star with filter_name only keeps matching entry procedures."""
-    from openRouterFinder.core.data_loader import get_airport_maps
+    from openRouterFinder.core.data_loader import get_nav_data
 
-    maps = get_airport_maps()
-    conn = AirportConnector(maps, {})
+    nav = get_nav_data()
+    if nav is None:
+        import pytest
+        pytest.skip("Navdata not available")
+
+    conn = FlatbuffersAirportConnector(nav)
 
     result = conn.build_star("ZJSY", filter_name="NONEXISTENT")
     assert result is not None

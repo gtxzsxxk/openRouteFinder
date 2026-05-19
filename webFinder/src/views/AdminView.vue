@@ -134,6 +134,109 @@
           />
         </div>
 
+        <!-- Navdata Management -->
+        <BentoCell :title="$t('admin.navdata')" class="animate-fade-in-up" style="animation-delay: 300ms">
+          <div class="space-y-4">
+            <!-- Upload Form -->
+            <div class="bg-bg-elevated/50 rounded-xl p-4 space-y-3">
+              <h3 class="text-sm font-medium text-text-primary">{{ $t('admin.navdataUpload') }}</h3>
+              <div class="flex items-center gap-3">
+                <input
+                  ref="fileInput"
+                  type="file"
+                  accept=".zip"
+                  class="flex-1 text-xs text-text-primary file:mr-2 file:py-1 file:px-2 file:rounded file:border-0 file:bg-accent file:text-white file:cursor-pointer"
+                  @change="hasSelectedFile = !!fileInput?.files?.length"
+                />
+                <button
+                  @click="handleUpload"
+                  :disabled="isUploading || isBuilding || !hasSelectedFile"
+                  class="px-4 h-9 bg-accent hover:bg-accent-hover text-white text-xs font-semibold rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 shrink-0"
+                >
+                  <Loader2 v-if="isUploading" class="w-3.5 h-3.5 animate-spin" />
+                  <span>{{ isUploading ? $t('admin.navdataUploading') : $t('common.confirm') }}</span>
+                </button>
+              </div>
+              <p class="text-xs text-text-secondary">{{ $t('admin.navdataUploadHint') }}</p>
+              <p v-if="uploadError" class="text-xs text-error">{{ uploadError }}</p>
+            </div>
+
+            <!-- Build Progress Modal -->
+            <Transition
+              enter-active-class="transition-all duration-300 ease-out"
+              enter-from-class="opacity-0 scale-95"
+              enter-to-class="opacity-100 scale-100"
+              leave-active-class="transition-all duration-200 ease-in"
+              leave-from-class="opacity-100 scale-100"
+              leave-to-class="opacity-0 scale-95"
+            >
+              <div v-if="showProgressModal" class="bg-bg-surface rounded-xl border border-border p-5 space-y-4">
+                <div class="flex items-center justify-between">
+                  <h3 class="text-sm font-medium text-text-primary">
+                    {{ buildProgress.status === 'done' ? $t('admin.navdataUploadSuccess') : buildProgress.status === 'error' ? $t('admin.navdataUploadFailed') : $t('admin.navdataUploading') }}
+                  </h3>
+                  <span v-if="buildProgress.status === 'building'" class="text-xs text-text-secondary font-mono">{{ buildProgress.percent }}%</span>
+                </div>
+
+                <!-- Progress bar -->
+                <div class="h-2 bg-bg-elevated rounded-full overflow-hidden">
+                  <div
+                    class="h-full bg-accent rounded-full transition-all duration-500 ease-out"
+                    :style="{ width: `${buildProgress.percent}%` }"
+                  />
+                </div>
+
+                <!-- Step info -->
+                <div class="flex items-center justify-between text-xs">
+                  <span class="text-text-secondary">{{ stepLabel }}</span>
+                  <span v-if="buildProgress.status === 'error'" class="text-error">{{ buildProgress.detail }}</span>
+                </div>
+              </div>
+            </Transition>
+
+            <!-- Cycle List -->
+            <div v-if="navCycles && navCycles.length > 0" class="overflow-x-auto">
+              <table class="w-full text-xs">
+                <thead>
+                  <tr class="border-b border-border text-text-secondary">
+                    <th class="text-left py-2 pr-3 font-medium uppercase tracking-wider">{{ $t('admin.navdataCycle') }}</th>
+                    <th class="text-right py-2 pr-3 font-medium uppercase tracking-wider">{{ $t('admin.navdataSize') }}</th>
+                    <th class="text-right py-2 pr-3 font-medium uppercase tracking-wider">{{ $t('admin.navdataNodes') }}</th>
+                    <th class="text-right py-2 pr-3 font-medium uppercase tracking-wider">{{ $t('admin.navdataEdges') }}</th>
+                    <th class="text-right py-2 pr-3 font-medium uppercase tracking-wider">{{ $t('admin.navdataAirports') }}</th>
+                    <th class="text-right py-2 pr-3 font-medium uppercase tracking-wider">{{ $t('admin.navdataProcedures') }}</th>
+                    <th class="text-right py-2 font-medium uppercase tracking-wider"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr
+                    v-for="c in navCycles"
+                    :key="c.cycle"
+                    class="border-b border-border/50 hover:bg-bg-elevated/50 transition-colors"
+                  >
+                    <td class="py-2 pr-3 font-mono text-text-primary">{{ c.cycle }}</td>
+                    <td class="py-2 pr-3 text-right font-mono text-text-secondary">{{ c.file_size_mb }} MB</td>
+                    <td class="py-2 pr-3 text-right font-mono text-text-secondary">{{ c.node_count.toLocaleString() }}</td>
+                    <td class="py-2 pr-3 text-right font-mono text-text-secondary">{{ c.edge_count.toLocaleString() }}</td>
+                    <td class="py-2 pr-3 text-right font-mono text-text-secondary">{{ c.airport_count.toLocaleString() }}</td>
+                    <td class="py-2 pr-3 text-right font-mono text-text-secondary">{{ c.procedure_count.toLocaleString() }}</td>
+                    <td class="py-2 text-right">
+                      <button
+                        @click="handleDelete(c.cycle)"
+                        :disabled="isDeleting"
+                        class="px-2 py-1 rounded text-xs bg-error/10 text-error hover:bg-error/20 transition-colors disabled:opacity-50"
+                      >
+                        {{ $t('admin.navdataDelete') }}
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p v-else class="text-center text-text-tertiary text-xs py-4">{{ $t('admin.navdataNoCycles') }}</p>
+          </div>
+        </BentoCell>
+
         <!-- Recent Requests -->
         <BentoCell :title="$t('admin.recentRequests')" class="animate-fade-in-up" style="animation-delay: 320ms">
           <div v-if="data" class="overflow-x-auto">
@@ -231,7 +334,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   Shield,
@@ -247,6 +350,21 @@ import {
 } from '@lucide/vue'
 import BentoCell from '@/components/BentoCell.vue'
 import { useAdmin } from '@/composables/useAdmin'
+import { useNavData } from '@/composables/useNavData'
+
+const stepLabels: Record<string, string> = {
+  starting: 'Preparing...',
+  waypoints: 'Building waypoints...',
+  airways: 'Building airways...',
+  airports: 'Building airports...',
+  navaids: 'Building navaids...',
+  holdings: 'Building holdings...',
+  markers: 'Building markers...',
+  gls: 'Building GLS...',
+  grid_mora: 'Building grid MORA...',
+  airport_comms: 'Building airport comms...',
+  serialization: 'Serializing...',
+}
 
 const emit = defineEmits<{
   goHome: []
@@ -259,6 +377,37 @@ const inputKey = ref('')
 const loginError = ref('')
 const shakeError = ref(false)
 const isLoggedIn = computed(() => data.value !== undefined && !error.value)
+
+// Navdata upload state
+const fileInput = ref<HTMLInputElement | null>(null)
+const hasSelectedFile = ref(false)
+const isBuilding = ref(false)
+
+const {
+  cycles: navCycles,
+  activeBuilds,
+  uploadError,
+  deleteCycle,
+  isDeleting,
+  uploadCycleAsync: doUpload,
+  isUploading,
+  connectProgress,
+} = useNavData(computed(() => inputKey.value))
+
+// Build progress tracking
+const showProgressModal = ref(false)
+const buildProgress = ref<{
+  status: 'building' | 'done' | 'error'
+  step?: string
+  percent?: number
+  detail?: string
+}>({ status: 'building', step: 'starting', percent: 0 })
+
+const stepLabel = computed(() => {
+  if (buildProgress.value.status === 'done') return 'Complete'
+  if (buildProgress.value.status === 'error') return 'Failed'
+  return stepLabels[buildProgress.value.step || ''] || buildProgress.value.step || 'Processing...'
+})
 
 async function handleLogin() {
   if (!inputKey.value) return
@@ -283,6 +432,67 @@ function goHome() {
   window.location.hash = ''
   emit('goHome')
 }
+
+function handleDelete(cycle: string) {
+  if (!confirm(t('admin.navdataDeleteConfirm'))) return
+  deleteCycle(cycle)
+}
+
+let activeEsCleanup: (() => void) | null = null
+
+function attachProgress(buildId: string) {
+  if (activeEsCleanup) return
+  isBuilding.value = true
+  activeEsCleanup = connectProgress(buildId, (p) => {
+    buildProgress.value = {
+      status: p.status,
+      step: p.step,
+      percent: p.percent ?? 0,
+      detail: p.detail,
+    }
+    if (p.status === 'done' || p.status === 'error') {
+      isBuilding.value = false
+      activeEsCleanup = null
+      setTimeout(() => {
+        showProgressModal.value = false
+        hasSelectedFile.value = false
+        if (fileInput.value) fileInput.value.value = ''
+      }, p.status === 'done' ? 1500 : 4000)
+    }
+  })
+}
+
+async function handleUpload() {
+  const file = fileInput.value?.files?.[0]
+  if (!file) return
+  uploadError.value = ''
+  buildProgress.value = { status: 'building', step: 'starting', percent: 0 }
+  showProgressModal.value = true
+  isBuilding.value = true
+
+  const formData = new FormData()
+  formData.append('file', file)
+
+  try {
+    const result = await doUpload(formData)
+    if (result?.build_id) {
+      attachProgress(result.build_id)
+    }
+  } catch (e: any) {
+    isBuilding.value = false
+    showProgressModal.value = false
+  }
+}
+
+watch(activeBuilds, (builds) => {
+  if (!builds || builds.length === 0) return
+  const first = builds[0]
+  if (!isBuilding.value) {
+    buildProgress.value = { status: 'building', step: first.step, percent: first.percent }
+    showProgressModal.value = true
+    attachProgress(first.build_id)
+  }
+})
 
 function formatUptime(seconds: number): string {
   const h = Math.floor(seconds / 3600)

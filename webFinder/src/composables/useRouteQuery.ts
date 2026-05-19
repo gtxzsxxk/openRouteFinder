@@ -8,6 +8,7 @@ interface RouteQueryParams {
   validToken: string
   sidExit: string
   starEntry: string
+  cycle: string
 }
 
 export function useRouteQuery() {

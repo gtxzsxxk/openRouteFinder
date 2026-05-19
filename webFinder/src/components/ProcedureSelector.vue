@@ -35,6 +35,7 @@ const props = defineProps<{
   icao: string
   type: 'sid' | 'star'
   modelValue: string
+  cycle?: string
 }>()
 
 const emit = defineEmits<{
@@ -70,7 +71,10 @@ async function loadProcedures() {
   isLoading.value = true
   error.value = null
   try {
-    const response = await fetch(`/api/airports/${encodeURIComponent(props.icao)}/procedures`)
+    const url = props.cycle
+      ? `/api/airports/${encodeURIComponent(props.icao)}/procedures?cycle=${encodeURIComponent(props.cycle)}`
+      : `/api/airports/${encodeURIComponent(props.icao)}/procedures`
+    const response = await fetch(url)
     if (!response.ok) {
       if (response.status === 404) {
         options.value = []
@@ -106,5 +110,12 @@ watch(() => props.icao, (newIcao, oldIcao) => {
     hasLoaded.value = false
     error.value = null
   }
+})
+
+watch(() => props.cycle, () => {
+  selectedValue.value = ''
+  options.value = []
+  hasLoaded.value = false
+  error.value = null
 })
 </script>

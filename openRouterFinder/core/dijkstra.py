@@ -38,6 +38,8 @@ def build_route_info(
     active_sid_transition: str = None,
     active_star_transition: str = None,
     route_segments: list = None,
+    sid_node_name: str = None,
+    star_node_name: str = None,
 ) -> str:
     result = {
         "data_version": data_version,
@@ -50,6 +52,8 @@ def build_route_info(
         "airportName": airport_name,
         "activeSIDTransition": active_sid_transition,
         "activeSTARTransition": active_star_transition,
+        "sidNodeName": sid_node_name,
+        "starNodeName": star_node_name,
     }
     if route_segments is not None:
         result["routeSegments"] = route_segments
@@ -61,7 +65,7 @@ class RouteEngine:
 
     def __init__(
         self,
-        node_list: Tuple[Node, ...],
+        node_list: Tuple[Optional[Node], ...],
         data_version: str,
     ):
         self.node_list = node_list
@@ -183,6 +187,19 @@ class RouteEngine:
                 if active_star_transition:
                     break
 
+        # Find SID exit node name and STAR entry node name from route
+        sid_node_name = None
+        for _, node_name, _ in target.route_list:
+            if node_name in sid_conn.procedures:
+                sid_node_name = node_name
+                break
+
+        star_node_name = None
+        for _, node_name, _ in reversed(target.route_list):
+            if node_name in star_conn.procedures:
+                star_node_name = node_name
+                break
+
         return build_route_info(
             self.data_version,
             sttime,
@@ -195,6 +212,8 @@ class RouteEngine:
             active_sid_transition,
             active_star_transition,
             route_segments,
+            sid_node_name,
+            star_node_name,
         )
 
     def _build_adjacency(
@@ -205,7 +224,8 @@ class RouteEngine:
         """Build adjacency list: shared nodes + temporary airport connections."""
         adj: Dict[int, List[Edge]] = {}
         for node in self.node_list:
-            adj[node.iid] = list(node.next_list)
+            if node is not None:
+                adj[node.iid] = list(node.next_list)
 
         # Add temp nodes
         for node in sid_conn.temp_nodes:
@@ -252,7 +272,9 @@ class RouteEngine:
         if iid == star_conn.airport_node.iid:
             return star_conn.airport_node
         if 0 <= iid < self.num_nodes:
-            return self.node_list[iid]
+            node = self.node_list[iid]
+            if node is not None and node.iid == iid:
+                return node
         # Check temp nodes
         for node in sid_conn.temp_nodes:
             if node.iid == iid:

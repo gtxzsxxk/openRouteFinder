@@ -95,6 +95,8 @@ export interface RouteResult {
   airportDetails?: { orig: AirportDetail; dest: AirportDetail }
   parsedWeather?: [ParsedMetar, ParsedMetar]
   routeSegments?: RouteSegment[]
+  sidNodeName?: string
+  starNodeName?: string
 }
 
 export interface ValidCode {

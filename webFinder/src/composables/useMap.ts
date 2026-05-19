@@ -157,42 +157,6 @@ export function useMap(
     return [end.lon + dLon, end.lat + dLat]
   }
 
-  // Compute a point along the actual runway centerline (from runway end coordinates)
-  function pointAlongRunway(end: RunwayThreshold, runways: Runway[], distanceMeters: number, reverse = false): [number, number] {
-    const runway = runways.find(r => r.thresholds.some(t => t.name === end.name))
-    if (runway && runway.thresholds.length >= 2) {
-      const other = runway.thresholds.find(t => t.name !== end.name)
-      if (other) {
-        const dNorth = (other.lat - end.lat) * 111320
-        const dEast = (other.lon - end.lon) * (111320 * Math.cos((end.lat * Math.PI) / 180))
-        const len = Math.sqrt(dNorth * dNorth + dEast * dEast)
-        const uNorth = dNorth / len
-        const uEast = dEast / len
-        const dir = reverse ? -1 : 1
-        const extNorth = distanceMeters * uNorth * dir
-        const extEast = distanceMeters * uEast * dir
-        const extLat = end.lat + extNorth / 111320
-        const extLon = end.lon + extEast / (111320 * Math.cos((end.lat * Math.PI) / 180))
-        return [extLon, extLat]
-      }
-    }
-    return pointAlongHeading(end, distanceMeters, reverse)
-  }
-
-  // Compute extension line distance based on turn angle
-  function computeExtensionDistance(end: RunwayThreshold, waypoint: { lon: number; lat: number }): number {
-    const dx = waypoint.lon - end.lon
-    const dy = waypoint.lat - end.lat
-    let wpBearing = (Math.atan2(dx, dy) * 180) / Math.PI
-    if (wpBearing < 0) wpBearing += 360
-    let angle = Math.abs(wpBearing - end.heading)
-    if (angle > 180) angle = 360 - angle
-
-    if (angle < 10) return 500      // nearly aligned, short extension
-    if (angle < 60) return 3000     // moderate turn
-    return 8000                     // sharp turn needs more room
-  }
-
   // Find a runway end by its designation (e.g., "36L")
   function findRunwayEnd(runways: Runway[] | undefined, runwayName: string): RunwayThreshold | null {
     if (!runways || runwayName === 'ALL') return null
@@ -200,6 +164,20 @@ export function useMap(
       for (const end of rwy.thresholds) {
         if (end.name === runwayName) {
           return end
+        }
+      }
+    }
+    return null
+  }
+
+  // Find the opposite runway end (e.g., "36L" -> "18R")
+  function findOppositeRunwayEnd(runways: Runway[] | undefined, runwayName: string): RunwayThreshold | null {
+    if (!runways || runwayName === 'ALL') return null
+    for (const rwy of runways) {
+      for (const end of rwy.thresholds) {
+        if (end.name === runwayName) {
+          const other = rwy.thresholds.find(t => t.name !== runwayName)
+          return other || end
         }
       }
     }
@@ -432,22 +410,16 @@ export function useMap(
       let sidFeatures: any[] = []
       if (selectedSID.value) {
         const sidPoints = selectedSID.value.points
-        const sidEnd = findRunwayEnd(origRunways, selectedSID.value.runway)
+        // SID starts at the opposite end of the departure runway
+        // (aircraft takes off along the runway and exits at the far end)
+        const sidEnd = findOppositeRunwayEnd(origRunways, selectedSID.value.runway)
         const sidStart = sidEnd
           ? [sidEnd.lon, sidEnd.lat]
           : [nodes[0].lon, nodes[0].lat]
 
         const sidRawCoords: number[][] = [sidStart]
 
-        // Extension line from runway end along heading
-        if (sidEnd) {
-          const extDist = sidPoints.length > 0
-            ? computeExtensionDistance(sidEnd, sidPoints[0])
-            : 3000
-          sidRawCoords.push(pointAlongRunway(sidEnd, origRunways, extDist, false))
-        }
-
-        // Main SID points
+        // Main SID points (airport->network order)
         sidRawCoords.push(...sidPoints.map(p => [p.lon, p.lat]))
 
         // Transition segment points (append after main points, skipping duplicates)
@@ -461,7 +433,6 @@ export function useMap(
           }
         }
 
-        sidRawCoords.push([nodes[1].lon, nodes[1].lat])
         const sidCoords = sidRawCoords
 
         m.addSource('sid', {
@@ -566,31 +537,21 @@ export function useMap(
 
         const starRawCoords: number[][] = []
 
-        // Transition segment points (already in flight order: transition_start -> ... -> common_entry)
+        // Main STAR points (network->airport order)
+        const mainNames = new Set(starPoints.map(p => p.name))
+        starRawCoords.push(...starPoints.map(p => [p.lon, p.lat]))
+
+        // Transition segment points (network->airport order; append after main, skipping duplicates)
         if (selectedSTARTransition.value) {
           const transPoints = selectedSTARTransition.value.points
-          starRawCoords.push(...transPoints.map(p => [p.lon, p.lat]))
-        } else {
-          // No transition, start from the network entry point (common_entry)
-          starRawCoords.push([nodes[nodes.length - 2].lon, nodes[nodes.length - 2].lat])
-        }
-
-        // Main STAR points (skip duplicates already in transition)
-        const transNames = new Set(selectedSTARTransition.value?.points.map(p => p.name) || [])
-        for (const p of starPoints) {
-          if (!transNames.has(p.name)) {
-            starRawCoords.push([p.lon, p.lat])
+          for (const tp of transPoints) {
+            if (!mainNames.has(tp.name)) {
+              starRawCoords.push([tp.lon, tp.lat])
+            }
           }
         }
 
-        // Extension line aligned with runway heading before runway end
-        if (starEnd) {
-          const allPoints = starPoints.length > 0 ? starPoints : []
-          const lastWp = allPoints.length > 0 ? allPoints[allPoints.length - 1] : null
-          const extDist = lastWp ? computeExtensionDistance(starEnd, lastWp) : 3000
-          starRawCoords.push(pointAlongRunway(starEnd, destRunways, extDist, true))
-        }
-
+        // Connect directly to runway end
         starRawCoords.push(starEndCoords)
         const starCoords = starRawCoords
 
@@ -747,13 +708,17 @@ export function useMap(
       nodes.forEach(n => bounds.extend([n.lon, n.lat]))
       if (selectedSID.value) {
         selectedSID.value.points.forEach(p => bounds.extend([p.lon, p.lat]))
-        selectedSID.value.transitions.forEach(t => t.points.forEach(p => bounds.extend([p.lon, p.lat])))
+        if (selectedSIDTransition.value) {
+          selectedSIDTransition.value.points.forEach(p => bounds.extend([p.lon, p.lat]))
+        }
         const sidBoundEnd = findRunwayEnd(origRunways, selectedSID.value.runway)
         if (sidBoundEnd) bounds.extend([sidBoundEnd.lon, sidBoundEnd.lat])
       }
       if (selectedSTAR.value) {
         selectedSTAR.value.points.forEach(p => bounds.extend([p.lon, p.lat]))
-        selectedSTAR.value.transitions.forEach(t => t.points.forEach(p => bounds.extend([p.lon, p.lat])))
+        if (selectedSTARTransition.value) {
+          selectedSTARTransition.value.points.forEach(p => bounds.extend([p.lon, p.lat]))
+        }
         const starBoundEnd = findRunwayEnd(destRunways, selectedSTAR.value.runway)
         if (starBoundEnd) bounds.extend([starBoundEnd.lon, starBoundEnd.lat])
       }

@@ -48,14 +48,16 @@ export const useRouteStore = defineStore('route', () => {
   })
 
   const selectedSIDProcedures = computed(() => {
-    if (!routeResult.value || !sidNode.value) return [] as ProcedureTuple[]
-    const key = sidNode.value.name
+    if (!routeResult.value) return [] as ProcedureTuple[]
+    const key = routeResult.value.sidNodeName || sidNode.value?.name
+    if (!key) return [] as ProcedureTuple[]
     return routeResult.value.SID[key] || []
   })
 
   const selectedSTARProcedures = computed(() => {
-    if (!routeResult.value || !starNode.value) return [] as ProcedureTuple[]
-    const key = starNode.value.name
+    if (!routeResult.value) return [] as ProcedureTuple[]
+    const key = routeResult.value.starNodeName || starNode.value?.name
+    if (!key) return [] as ProcedureTuple[]
     return routeResult.value.STAR[key] || []
   })
 
@@ -112,7 +114,7 @@ export const useRouteStore = defineStore('route', () => {
     if (!result) return
 
     // Auto-select active transitions returned by A*
-    const sidKey = result.nodes[1]?.name
+    const sidKey = result.sidNodeName || result.nodes[1]?.name
     if (sidKey) {
       const sidProcs = result.SID[sidKey] || []
       if (sidProcs.length > 0 && result.activeSIDTransition) {
@@ -124,7 +126,7 @@ export const useRouteStore = defineStore('route', () => {
       }
     }
 
-    const starKey = result.nodes[result.nodes.length - 2]?.name
+    const starKey = result.starNodeName || result.nodes[result.nodes.length - 2]?.name
     if (starKey) {
       const starProcs = result.STAR[starKey] || []
       if (starProcs.length > 0 && result.activeSTARTransition) {

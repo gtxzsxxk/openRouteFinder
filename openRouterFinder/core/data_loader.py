@@ -14,6 +14,7 @@ if "RouteFinderLib" not in sys.modules:
 
 
 _nav_graph = None
+_nav_registry = None
 
 
 def _convert_old_nodes(old_nodes):
@@ -108,12 +109,45 @@ def get_nav_graph() -> NavGraph:
     return _nav_graph
 
 
+def _init_registry():
+    """Initialize NavDataRegistry from data directory."""
+    global _nav_registry
+    if _nav_registry is not None:
+        return _nav_registry
+    from openRouterFinder.core.storage.registry import NavDataRegistry
+    data_dir = settings.navdat_full_path.parent
+    _nav_registry = NavDataRegistry(data_dir)
+    return _nav_registry
+
+
+def get_nav_registry():
+    """Get the NavDataRegistry (initializes on first call)."""
+    return _init_registry()
+
+
+def has_registry() -> bool:
+    """Check if NavDataRegistry has any loaded cycles."""
+    reg = _init_registry()
+    return len(reg) > 0
+
+
+def get_nav_data(cycle: Optional[str] = None):
+    """Get MmappedNavData for a specific cycle, or latest if None.
+
+    Returns None if registry is empty.
+    """
+    reg = _init_registry()
+    return reg.get(cycle)
+
+
 def get_data_version() -> str:
-    return get_nav_graph().data_version
+    reg = _init_registry()
+    latest = reg.get()
+    return latest.cycle if latest else ""
 
 
 def get_airport_maps() -> dict:
-    return get_nav_graph().airport_maps
+    return {}
 
 
 def _opposite_runway(name: str) -> str:
@@ -268,20 +302,43 @@ def _parse_airport_detail(icao: str) -> Optional[dict]:
     }
 
 
-def search_route(orig: str, dest: str, sid_exit: Optional[str] = None, star_entry: Optional[str] = None) -> Optional[dict]:
+def _get_airport_detail_from_fb(nav, icao: str) -> Optional[dict]:
+    """Build airport detail dict from FlatBuffers airport data."""
+    ap = nav.get_airport(icao.upper())
+    if ap is None:
+        return None
+
+    name = ap.Name()
+    name = name.decode("utf-8") if isinstance(name, bytes) else (name or icao)
+
+    return {
+        'icao': icao.upper(),
+        'name': name,
+        'lat': float(ap.Lat()),
+        'lon': float(ap.Lon()),
+        'elevation': int(ap.Elevation()),
+        'transitionAltitude': int(ap.TransitionAltitude()),
+        'transitionLevel': int(ap.TransitionLevel()),
+        'runways': _parse_runways_from_fb(ap),
+    }
+
+
+def search_route(orig: str, dest: str, sid_exit: Optional[str] = None, star_entry: Optional[str] = None, cycle: Optional[str] = None) -> Optional[dict]:
     """Thread-safe route search. Each call gets isolated state."""
-    from openRouterFinder.core.airport import AirportConnector
+    from openRouterFinder.core.airport import FlatbuffersAirportConnector
     from openRouterFinder.core.dijkstra import RouteEngine
 
-    graph = get_nav_graph()
     orig = orig.upper()
     dest = dest.upper()
 
-    if orig not in graph.airport_maps or dest not in graph.airport_maps:
+    nav = get_nav_data(cycle)
+    if nav is None:
         return None
 
-    connector = AirportConnector(graph.airport_maps, graph._node_index)
+    if nav.get_airport(orig) is None or nav.get_airport(dest) is None:
+        return None
 
+    connector = FlatbuffersAirportConnector(nav)
     sid_conn = connector.build_sid(orig, filter_name=sid_exit)
     star_conn = connector.build_star(dest, filter_name=star_entry)
 
@@ -290,7 +347,7 @@ def search_route(orig: str, dest: str, sid_exit: Optional[str] = None, star_entr
     if not sid_conn.connections or not star_conn.connections:
         return None
 
-    engine = RouteEngine(graph.node_list, graph.data_version)
+    engine = RouteEngine(nav.node_list, nav.cycle)
     result_json = engine.search(
         orig, dest, sid_conn, star_conn,
         connector.get_airport_names(orig) + connector.get_airport_names(dest),
@@ -304,11 +361,77 @@ def search_route(orig: str, dest: str, sid_exit: Optional[str] = None, star_entr
     import json
     result = json.loads(result_json)
 
-    # Enrich with runway and airport detail data
     if isinstance(result, dict):
-        result['origRunways'] = _parse_runways(graph.airport_maps[orig])
-        result['destRunways'] = _parse_runways(graph.airport_maps[dest])
-        result['origAirportDetail'] = _parse_airport_detail(orig)
-        result['destAirportDetail'] = _parse_airport_detail(dest)
+        result['origAirportDetail'] = _get_airport_detail_from_fb(nav, orig)
+        result['destAirportDetail'] = _get_airport_detail_from_fb(nav, dest)
+        orig_ap = nav.get_airport(orig)
+        dest_ap = nav.get_airport(dest)
+        result['origRunways'] = _parse_runways_from_fb(orig_ap) if orig_ap else []
+        result['destRunways'] = _parse_runways_from_fb(dest_ap) if dest_ap else []
 
+    return result
+
+
+def _parse_runways_from_fb(ap) -> list:
+    """Parse runway data from FlatBuffers Airport object."""
+    if ap is None:
+        return []
+    result = []
+    for i in range(ap.RunwaysLength()):
+        rw = ap.Runways(i)
+        name_bytes = rw.Name()
+        name = name_bytes.decode("utf-8") if isinstance(name_bytes, bytes) else (name_bytes or "")
+
+        thresholds = []
+        for j in range(rw.EndsLength()):
+            end = rw.Ends(j)
+            end_name_bytes = end.Name()
+            end_name = end_name_bytes.decode("utf-8") if isinstance(end_name_bytes, bytes) else (end_name_bytes or "")
+            try:
+                thresholds.append({
+                    'name': end_name,
+                    'lat': float(end.Lat()),
+                    'lon': float(end.Lon()),
+                    'heading': float(end.Heading()),
+                    'elevationFt': int(end.ElevationFt()),
+                })
+            except (ValueError, TypeError):
+                continue
+
+        ils_list = []
+        for j in range(rw.IlsLength()):
+            ils = rw.Ils(j)
+            ident_bytes = ils.Ident()
+            ident = ident_bytes.decode("utf-8") if isinstance(ident_bytes, bytes) else (ident_bytes or "")
+            freq_bytes = ils.Frequency()
+            freq = freq_bytes.decode("utf-8") if isinstance(freq_bytes, bytes) else (freq_bytes or "")
+            cat_bytes = ils.Category()
+            cat = cat_bytes.decode("utf-8") if isinstance(cat_bytes, bytes) else (cat_bytes or "")
+            rw_end_bytes = ils.RunwayEnd()
+            rw_end = rw_end_bytes.decode("utf-8") if isinstance(rw_end_bytes, bytes) else (rw_end_bytes or "")
+            try:
+                ils_list.append({
+                    'runwayEnd': rw_end,
+                    'ident': ident,
+                    'frequency': freq,
+                    'heading': float(ils.Heading()),
+                    'category': cat,
+                })
+            except (ValueError, TypeError):
+                continue
+
+        lighting = ''
+        try:
+            lighting = _parse_lighting(str(rw.Lighting())) if rw.Lighting() else ''
+        except (ValueError, TypeError):
+            pass
+
+        result.append({
+            'name': name,
+            'thresholds': thresholds,
+            'lengthFt': float(rw.LengthFt()) if rw.LengthFt() else 0.0,
+            'widthFt': float(rw.WidthFt()) if rw.WidthFt() else 0.0,
+            'lighting': lighting,
+            'ils': ils_list,
+        })
     return result
