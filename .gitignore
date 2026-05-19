@@ -4,9 +4,7 @@ image.png
 docs/
 .claude/
 data/*
-!data/.gitkeep
-!data/*.air
-!data/*.map
+!data/*.fb.zst
 webFinder/dist/
 .env
 .superpowers/
