@@ -320,6 +320,36 @@ class FlatbuffersAirportConnector:
             i += 1
         return proc_name[:i] if i > 0 else proc_name
 
+    def _register_common_procedures(self, common_segments, procedures, key_from_points):
+        """Register common segment procedures for runways covered by their transitions.
+
+        key_from_points: callable(points) -> str, extracts the dict key from
+        the common segment's main-leg points (e.g. lambda pts: pts[-1][0] for SID).
+        """
+        for proc_name, (anchor_node, points, transitions) in common_segments.items():
+            merged_points = list(points)
+            key = key_from_points(points) if points else anchor_node.name
+
+            rwy_names_from_trans = set()
+            for trans_name, _ in transitions:
+                rwy_name = trans_name[2:] if trans_name.startswith("RW") else trans_name
+                if rwy_name:
+                    rwy_names_from_trans.add(rwy_name)
+
+            if rwy_names_from_trans:
+                for rwy_name in sorted(rwy_names_from_trans):
+                    proc = Procedure(name=proc_name, runway=rwy_name, points=merged_points, transitions=transitions)
+                    if key not in procedures:
+                        procedures[key] = [proc]
+                    else:
+                        procedures[key].append(proc)
+            else:
+                proc = Procedure(name=proc_name, runway="ALL", points=merged_points, transitions=transitions)
+                if key not in procedures:
+                    procedures[key] = [proc]
+                else:
+                    procedures[key].append(proc)
+
     def build_sid(self, icao: str, filter_name: Optional[str] = None) -> Optional[AirportConnection]:
         """Build departure (SID) connections for an airport."""
         icao = icao.upper()
@@ -421,30 +451,7 @@ class FlatbuffersAirportConnector:
 
         # Also register common segment procedures as selectable exits.
         # Only offer for runways covered by this procedure's transitions.
-        for proc_name, (exit_node, points, transitions) in common_segments.items():
-            merged_points = list(points)
-            # SID points are airport->network; key by network-side exit point
-            key = points[-1][0] if points else exit_node.name
-
-            rwy_names_from_trans = set()
-            for trans_name, _ in transitions:
-                rwy_name = trans_name[2:] if trans_name.startswith("RW") else trans_name
-                if rwy_name:
-                    rwy_names_from_trans.add(rwy_name)
-
-            if rwy_names_from_trans:
-                for rwy_name in sorted(rwy_names_from_trans):
-                    proc = Procedure(name=proc_name, runway=rwy_name, points=merged_points, transitions=transitions)
-                    if key not in procedures:
-                        procedures[key] = [proc]
-                    else:
-                        procedures[key].append(proc)
-            else:
-                proc = Procedure(name=proc_name, runway="ALL", points=merged_points, transitions=transitions)
-                if key not in procedures:
-                    procedures[key] = [proc]
-                else:
-                    procedures[key].append(proc)
+        self._register_common_procedures(common_segments, procedures, lambda pts: pts[-1][0])
 
         return AirportConnection(
             airport_node=airport_node,
@@ -580,30 +587,7 @@ class FlatbuffersAirportConnector:
 
         # Also register common segment procedures as selectable entries.
         # Only offer for runways covered by this procedure's transitions.
-        for proc_name, (entry_node, points, transitions) in common_segments.items():
-            merged_points = list(points)
-            # STAR common segments are network->airport; key by network-side entry point
-            key = points[0][0] if points else entry_node.name
-
-            rwy_names_from_trans = set()
-            for trans_name, _ in transitions:
-                rwy_name = trans_name[2:] if trans_name.startswith("RW") else trans_name
-                if rwy_name:
-                    rwy_names_from_trans.add(rwy_name)
-
-            if rwy_names_from_trans:
-                for rwy_name in sorted(rwy_names_from_trans):
-                    proc = Procedure(name=proc_name, runway=rwy_name, points=merged_points, transitions=transitions)
-                    if key not in procedures:
-                        procedures[key] = [proc]
-                    else:
-                        procedures[key].append(proc)
-            else:
-                proc = Procedure(name=proc_name, runway="ALL", points=merged_points, transitions=transitions)
-                if key not in procedures:
-                    procedures[key] = [proc]
-                else:
-                    procedures[key].append(proc)
+        self._register_common_procedures(common_segments, procedures, lambda pts: pts[0][0])
 
         return AirportConnection(
             airport_node=airport_node,
