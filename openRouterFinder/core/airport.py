@@ -95,8 +95,37 @@ class FlatbuffersAirportConnector:
         """Split a concatenated Fenix transition into unique route options.
 
         Fenix sometimes stores multiple route options in a single transition
-        by concatenating them. Each option ends at the same anchor point.
+        by concatenating them. We try forward split first (when options all
+        start with the same point), then fall back to backward split (when
+        options all end at the same anchor point).
         """
+        if not points:
+            return []
+
+        # Forward split: if the first point repeats, each occurrence marks
+        # the start of a new option. This handles transitions like IKAVO8
+        # where all options start at IKAVO but end at different points.
+        first_name = points[0][0]
+        if first_name and first_name != anchor_name:
+            first_indices = [i for i, p in enumerate(points) if p[0] == first_name]
+            if len(first_indices) > 1:
+                options = []
+                seen = set()
+                for i in range(len(first_indices)):
+                    start = first_indices[i]
+                    end = first_indices[i + 1] if i + 1 < len(first_indices) else len(points)
+                    option = points[start:end]
+                    if len(option) > 1:
+                        opt_tuple = tuple(p[0] for p in option)
+                        if opt_tuple not in seen:
+                            seen.add(opt_tuple)
+                            options.append(option)
+                if options:
+                    return options
+
+        # Backward split: find occurrences of the anchor from the end.
+        # This handles transitions like OMDE2G where options end at the
+        # same anchor but start at different runway exits.
         result = []
         seen = set()
         i = len(points) - 1
@@ -391,14 +420,20 @@ class FlatbuffersAirportConnector:
                 procedures[key].append(proc)
 
         # Also register common segment procedures as selectable exits.
-        # Expand ALL-runway procedures to all actual runway ends.
-        runway_names = self._get_runway_names(icao)
+        # Only offer for runways covered by this procedure's transitions.
         for proc_name, (exit_node, points, transitions) in common_segments.items():
             merged_points = list(points)
             # SID points are airport->network; key by network-side exit point
             key = points[-1][0] if points else exit_node.name
-            if runway_names:
-                for rwy_name in runway_names:
+
+            rwy_names_from_trans = set()
+            for trans_name, _ in transitions:
+                rwy_name = trans_name[2:] if trans_name.startswith("RW") else trans_name
+                if rwy_name:
+                    rwy_names_from_trans.add(rwy_name)
+
+            if rwy_names_from_trans:
+                for rwy_name in sorted(rwy_names_from_trans):
                     proc = Procedure(name=proc_name, runway=rwy_name, points=merged_points, transitions=transitions)
                     if key not in procedures:
                         procedures[key] = [proc]
@@ -544,14 +579,20 @@ class FlatbuffersAirportConnector:
                 procedures[key].append(proc)
 
         # Also register common segment procedures as selectable entries.
-        # Expand ALL-runway procedures to all actual runway ends.
-        runway_names = self._get_runway_names(icao)
+        # Only offer for runways covered by this procedure's transitions.
         for proc_name, (entry_node, points, transitions) in common_segments.items():
             merged_points = list(points)
             # STAR common segments are network->airport; key by network-side entry point
             key = points[0][0] if points else entry_node.name
-            if runway_names:
-                for rwy_name in runway_names:
+
+            rwy_names_from_trans = set()
+            for trans_name, _ in transitions:
+                rwy_name = trans_name[2:] if trans_name.startswith("RW") else trans_name
+                if rwy_name:
+                    rwy_names_from_trans.add(rwy_name)
+
+            if rwy_names_from_trans:
+                for rwy_name in sorted(rwy_names_from_trans):
                     proc = Procedure(name=proc_name, runway=rwy_name, points=merged_points, transitions=transitions)
                     if key not in procedures:
                         procedures[key] = [proc]
