@@ -158,7 +158,7 @@ def get_cycles():
             result.append({
                 "cycle": info["cycle"],
             })
-    return {"cycles": result, "default": result[-1]["cycle"] if result else None}
+    return {"cycles": result, "default": result[-1]["cycle"] if result else None, "disableCaptcha": settings.disable_captcha}
 
 
 @app.get("/api/airports")
@@ -236,12 +236,13 @@ def get_airport_procedures(icao: str, cycle: Optional[str] = None):
 
 @app.post("/api/route")
 async def post_route(req: RouteRequest):
-    # Validate captcha
-    if req.validToken not in _valid_codes:
-        raise HTTPException(status_code=401, detail="验证码已过期")
-    if _valid_codes[req.validToken] != req.validCode:
-        raise HTTPException(status_code=401, detail="验证码错误")
-    del _valid_codes[req.validToken]
+    # Validate captcha (skip if disabled via config)
+    if not settings.disable_captcha:
+        if req.validToken not in _valid_codes:
+            raise HTTPException(status_code=401, detail="验证码已过期")
+        if _valid_codes[req.validToken] != req.validCode:
+            raise HTTPException(status_code=401, detail="验证码错误")
+        del _valid_codes[req.validToken]
 
     try:
         async with _route_semaphore:

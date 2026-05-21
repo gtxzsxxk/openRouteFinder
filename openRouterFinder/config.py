@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     navdat_cycle: str = "AUTO"
 
     local_asdata_path: str = ""
+    disable_captcha: bool = False
 
     @property
     def navdat_full_path(self) -> Path:

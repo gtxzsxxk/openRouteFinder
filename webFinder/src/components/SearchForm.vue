@@ -110,8 +110,10 @@ const emit = defineEmits<{
   search: [params: { orig: string; dest: string; validCode: string; validToken: string; sidExit: string; starEntry: string; cycle: string }]
 }>()
 
-const store = useRouteStore()
 const cyclesData = useCycles()
+const disableCaptcha = computed(() => cyclesData.disableCaptcha.value)
+
+const store = useRouteStore()
 const departure = ref('')
 const arrival = ref('')
 const sidExit = ref('')
@@ -166,7 +168,19 @@ function swapAirports() {
 
 function onSearchClick() {
   if (!canSubmit.value) return
-  showCaptchaModal.value = true
+  if (disableCaptcha.value) {
+    emit('search', {
+      orig: departure.value,
+      dest: arrival.value,
+      validCode: '',
+      validToken: '',
+      sidExit: sidExit.value,
+      starEntry: starEntry.value,
+      cycle: selectedCycle.value,
+    })
+  } else {
+    showCaptchaModal.value = true
+  }
 }
 
 function onCaptchaConfirm(code: string, token: string) {

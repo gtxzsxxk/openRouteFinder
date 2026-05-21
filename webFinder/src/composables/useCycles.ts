@@ -5,6 +5,12 @@ export interface CycleInfo {
   cycle: string
 }
 
+export interface CyclesData {
+  cycles: CycleInfo[]
+  default: string | null
+  disableCaptcha: boolean
+}
+
 export function useCycles() {
   const enabled = ref(true)
 
@@ -19,7 +25,8 @@ export function useCycles() {
       return {
         cycles: (json.cycles || []) as CycleInfo[],
         default: json.default as string | null,
-      }
+        disableCaptcha: json.disableCaptcha as boolean,
+      } as CyclesData
     },
     enabled,
     refetchInterval: 30000,
@@ -30,12 +37,14 @@ export function useCycles() {
   const defaultCycle = computed(() => data.value?.default || '')
   const hasMultiple = computed(() => cycleList.value.length > 1)
   const hasAny = computed(() => cycleList.value.length > 0)
+  const disableCaptcha = computed(() => data.value?.disableCaptcha || false)
 
   return {
     cycleList,
     defaultCycle,
     hasMultiple,
     hasAny,
+    disableCaptcha,
     isLoading,
     error,
   }
