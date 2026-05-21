@@ -53,12 +53,23 @@ class FlatbuffersAirportConnector:
         return self._temp_nodes[name]
 
     def _leg_to_point(self, leg) -> Optional[Tuple[str, float, float]]:
-        """Convert a FlatBuffers ProcLeg to (name, lat, lon)."""
+        """Convert a FlatBuffers ProcLeg to (name, lat, lon).
+
+        Filters out synthetic heading+distance markers (e.g. D091M, D123)
+        that should be merged into real waypoints rather than standing alone.
+        """
         name = leg.Name()
         if name is None:
             return None
         name = name.decode("utf-8") if isinstance(name, bytes) else name
         if not name:
+            return None
+        if _RUNWAY_ENDPOINT_RE.match(name):
+            return (name, float(leg.Lat()), float(leg.Lon()))
+        # Heading+distance markers like D091M, D123, D194Q
+        if len(name) >= 2 and name[0] == "D" and name[1:].isdigit():
+            return None
+        if len(name) >= 3 and name[0] == "D" and name[1:-1].isdigit() and name[-1].isalpha():
             return None
         return (name, float(leg.Lat()), float(leg.Lon()))
 
