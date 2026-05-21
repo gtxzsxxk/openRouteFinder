@@ -111,18 +111,22 @@ export function useMap(
   }
 
   function safeRemoveLayer(m: any, id: string) {
-    try {
-      m.removeLayer(id)
-    } catch {
-      // ignore: layer may not exist
+    if (m.getLayer(id)) {
+      try {
+        m.removeLayer(id)
+      } catch {
+        // ignore
+      }
     }
   }
 
   function safeRemoveSource(m: any, id: string) {
-    try {
-      m.removeSource(id)
-    } catch {
-      // ignore: source may not exist or still referenced
+    if (m.getSource(id)) {
+      try {
+        m.removeSource(id)
+      } catch {
+        // ignore: source may still be referenced
+      }
     }
   }
 
