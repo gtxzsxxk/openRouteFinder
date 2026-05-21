@@ -1,10 +1,13 @@
 """Airport SID/STAR parsing and temporary connector generation."""
 
+import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import List, Dict, Tuple, Optional
 
 from openRouterFinder.core.graph import Node, Edge
+
+_RUNWAY_ENDPOINT_RE = re.compile(r'^DER\d{2}[LCR]?$|^DE\d{2}[LCR]?$')
 
 
 @dataclass
@@ -84,6 +87,58 @@ class FlatbuffersAirportConnector:
                     continue
                 points.append(pt)
         return points
+
+    @staticmethod
+    def _is_runway_endpoint(name: str) -> bool:
+        return bool(_RUNWAY_ENDPOINT_RE.match(name))
+
+    def _extract_transition_segments(self, trans, proc_type: int = 0) -> List[List[Tuple[str, float, float]]]:
+        """Extract transition segments, splitting on (0,0) separator legs.
+
+        Fenix sometimes stores multiple disconnected segments in a single
+        transition. Each segment is deduplicated and returned independently.
+
+        For SID (proc_type == 1), if a segment ends with a runway endpoint
+        marker (DERxx / DExx), that marker belongs to the next segment
+        (SID legs are airport->network, so the runway end should be at the
+        start of a segment, not the end).
+        """
+        segments = []
+        current = []
+        pending = []  # runway endpoint to prepend to next segment (SID only)
+        for i in range(trans.LegsLength()):
+            leg = trans.Legs(i)
+            name_bytes = leg.Name()
+            name = name_bytes.decode("utf-8") if isinstance(name_bytes, bytes) else (name_bytes or "")
+            lat = float(leg.Lat())
+            lon = float(leg.Lon())
+            if lat == 0.0 and lon == 0.0 and not name:
+                # Segment separator
+                if current:
+                    # For SID, if segment ends with runway endpoint marker,
+                    # move it to the next segment (it is the next segment's start)
+                    if proc_type == 1 and len(current) > 1 and self._is_runway_endpoint(current[-1][0]):
+                        pending = [current.pop()]
+                    segments.append(self._dedup_consecutive(current))
+                    current = list(pending)
+                    pending = []
+            elif lat != 0.0 or lon != 0.0:
+                pt = self._leg_to_point(leg)
+                if pt:
+                    current.append(pt)
+        if current:
+            segments.append(self._dedup_consecutive(current))
+        return segments
+
+    @staticmethod
+    def _infer_runway_from_points(points: List[Tuple[str, float, float]], default: str = "") -> str:
+        """Infer runway from DERxx / DExx markers in segment points."""
+        for name, _, _ in points:
+            if name.startswith("DER"):
+                return name[3:]
+            if name.startswith("DE"):
+                return name[2:]
+        return default
 
     def _resolve_node(self, name: str, lat: float, lon: float) -> Node:
         """Find node in network or create temp node."""
@@ -213,19 +268,22 @@ class FlatbuffersAirportConnector:
             # Collect and split transitions. Fenix sometimes concatenates
             # multiple route options inside a single transition; we split them
             # here so downstream code never sees concatenated data.
+            # We also split on (0,0) segment separators so disconnected
+            # segments (e.g. different runways) are processed independently.
             transitions = []
             for j in range(proc.TransitionsLength()):
                 trans = proc.Transitions(j)
                 trans_name_bytes = trans.Name()
                 trans_name = trans_name_bytes.decode("utf-8") if isinstance(trans_name_bytes, bytes) else (trans_name_bytes or "")
-                trans_points = self._get_transition_points(trans)
-                if trans_points:
-                    t_anchor_name = trans_points[-1][0]
-                    options = self._split_transition_options(trans_points, t_anchor_name)
+                segments = self._extract_transition_segments(trans, proc_type)
+                for segment in segments:
+                    seg_points = [(n, lat, lon) for n, lat, lon in segment if n]
+                    if not seg_points:
+                        continue
+                    t_anchor_name = seg_points[-1][0]
+                    options = self._split_transition_options(seg_points, t_anchor_name)
                     for option in options:
                         transitions.append((trans_name, option))
-                else:
-                    transitions.append((trans_name, trans_points))
 
             if points:
                 # Main legs exist: use as common/runway segment
@@ -249,7 +307,10 @@ class FlatbuffersAirportConnector:
                 for trans_name, trans_points in transitions:
                     if not trans_points:
                         continue
-                    runway_name = trans_name[2:] if trans_name.startswith("RW") else trans_name
+                    # Infer runway from segment content (DERxx/DExx markers);
+                    # fallback to transition name for normal transitions.
+                    default_runway = trans_name[2:] if trans_name.startswith("RW") else trans_name
+                    runway_name = self._infer_runway_from_points(trans_points, default_runway)
                     if proc_type == 1:
                         t_anchor_name, t_anchor_lat, t_anchor_lon = trans_points[-1]
                         t_anchor_node = self._resolve_node(t_anchor_name, t_anchor_lat, t_anchor_lon)
@@ -363,11 +424,21 @@ class FlatbuffersAirportConnector:
             i += 1
         return proc_name[:i] if i > 0 else proc_name
 
-    def _register_common_procedures(self, common_segments, procedures, key_from_points):
+    def _register_common_procedures(
+        self,
+        common_segments,
+        procedures,
+        key_from_points,
+        approach_bridges: Optional[Dict[Tuple[str, str], List[Tuple[str, float, float]]]] = None,
+    ):
         """Register common segment procedures for runways covered by their transitions.
 
         key_from_points: callable(points) -> str, extracts the dict key from
         the common segment's main-leg points (e.g. lambda pts: pts[-1][0] for SID).
+
+        When no transitions exist and approach_bridges is provided (STAR case),
+        runway is inferred from which runways have approach bridges starting from
+        this segment's final point. This avoids falling back to runway="ALL".
         """
         for proc_name, (anchor_node, points, transitions) in common_segments.items():
             merged_points = list(points)
@@ -382,6 +453,27 @@ class FlatbuffersAirportConnector:
             if rwy_names_from_trans:
                 for rwy_name in sorted(rwy_names_from_trans):
                     proc = Procedure(name=proc_name, runway=rwy_name, points=merged_points, transitions=transitions)
+                    if key not in procedures:
+                        procedures[key] = [proc]
+                    else:
+                        procedures[key].append(proc)
+            elif approach_bridges is not None:
+                # Infer runways from approach bridges for this segment's final point
+                final_point = points[-1][0] if points else anchor_node.name
+                rwy_names_from_bridges = set()
+                for (rwy, entry), _bridge in approach_bridges.items():
+                    if entry == final_point:
+                        rwy_names_from_bridges.add(rwy)
+
+                if rwy_names_from_bridges:
+                    for rwy_name in sorted(rwy_names_from_bridges):
+                        proc = Procedure(name=proc_name, runway=rwy_name, points=merged_points, transitions=transitions)
+                        if key not in procedures:
+                            procedures[key] = [proc]
+                        else:
+                            procedures[key].append(proc)
+                else:
+                    proc = Procedure(name=proc_name, runway="ALL", points=merged_points, transitions=transitions)
                     if key not in procedures:
                         procedures[key] = [proc]
                     else:
@@ -500,7 +592,36 @@ class FlatbuffersAirportConnector:
 
         procedures = {}
         for (proc_name, runway), group in runway_groups.items():
-            exit_node, points, transitions, is_main = group[0]
+            # Prefer option whose points contain the current runway endpoint
+            # marker (DERxx / DExx). Fallback to an option that does NOT
+            # contain any other runway marker, avoiding cross-runway pollution
+            # when Fenix mixes multiple runway segments in one transition.
+            best_exit, best_points, best_trans, best_is_main = group[0]
+            for exit_node, points, transitions, is_main in group:
+                point_names = [p[0] for p in points]
+                der_match = f"DER{runway}" if f"DER{runway}" in point_names else (f"DE{runway}" if f"DE{runway}" in point_names else None)
+                if der_match:
+                    idx = point_names.index(der_match)
+                    # For SID, runway endpoint marker should be near the start
+                    # (airport side). If it appears in the second half, it likely
+                    # belongs to a different runway segment that wasn't cleanly
+                    # separated by Fenix.
+                    if idx < len(point_names) * 0.5:
+                        best_exit, best_points, best_trans, best_is_main = exit_node, points, transitions, is_main
+                        break
+            else:
+                for exit_node, points, transitions, is_main in group:
+                    point_names = [p[0] for p in points]
+                    has_other = any(
+                        (n.startswith("DER") and n[3:] != runway) or
+                        (n.startswith("DE") and n[2:] != runway)
+                        for n in point_names
+                    )
+                    if not has_other:
+                        best_exit, best_points, best_trans, best_is_main = exit_node, points, transitions, is_main
+                        break
+
+            exit_node, points, transitions, is_main = best_exit, best_points, best_trans, best_is_main
             merged_points = list(points)
             merged_transitions = list(transitions)
 
@@ -554,11 +675,22 @@ class FlatbuffersAirportConnector:
         """Collect Type=3 approach procedures and build (runway, entry_point) -> path mapping.
 
         Returns a dict mapping (runway, entry_point_name) to a list of points
-        representing the full approach path from entry_point to the FAF.
+        representing the full approach path from entry_point to the runway.
+        Missed approach / go-around legs are truncated.
         """
         ap = self.nav_data.get_airport(icao)
         if ap is None:
             return {}
+
+        # Build runway end coordinate lookup
+        runway_coords: Dict[str, Tuple[float, float]] = {}
+        for i in range(ap.RunwaysLength()):
+            rw = ap.Runways(i)
+            for j in range(rw.EndsLength()):
+                end = rw.Ends(j)
+                end_name = end.Name().decode("utf-8") if isinstance(end.Name(), bytes) else (end.Name() or "")
+                if end_name:
+                    runway_coords[end_name] = (float(end.Lat()), float(end.Lon()))
 
         bridges: Dict[Tuple[str, str], List[Tuple[str, float, float]]] = {}
 
@@ -572,8 +704,24 @@ class FlatbuffersAirportConnector:
             if not runway:
                 continue
 
-            # Main legs: keep up to and including the FAF (FIxx/FFxx).
-            # Points after the FAF are missed approach / go-around.
+            rwy_lat_lon = runway_coords.get(runway)
+            if rwy_lat_lon is None:
+                continue
+
+            # Collect raw main points including unnamed points (skip (0,0) placeholders)
+            raw_main: List[Tuple[str, float, float]] = []
+            for j in range(proc.LegsLength()):
+                leg = proc.Legs(j)
+                name_bytes = leg.Name()
+                name = name_bytes.decode("utf-8") if isinstance(name_bytes, bytes) else (name_bytes or "")
+                lat = float(leg.Lat())
+                lon = float(leg.Lon())
+                if lat == 0.0 and lon == 0.0:
+                    continue
+                raw_main.append((name, lat, lon))
+            raw_main = self._dedup_consecutive(raw_main)
+
+            # Filtered main points for transition merging (without unnamed points)
             main_points = self._get_leg_points(proc)
             approach_main = []
             for p in main_points:
@@ -581,45 +729,76 @@ class FlatbuffersAirportConnector:
                 if p[0].startswith(("FI", "FF")):
                     break
 
-            # Process transitions (feeder routes)
+            # Process transitions (feeder routes).
+            # Fenix sometimes stores multiple disconnected segments in a single
+            # transition, separated by unnamed (0,0) legs. For approaches, these
+            # may be genuine feeder-route splits (e.g. I33-Y NLG vs NLG30) or
+            # missed-approach separators (e.g. I19LY). We first try segment split,
+            # but if a segment yields no valid options (because the anchor changed
+            # after splitting), fall back to the full transition points.
             for j in range(proc.TransitionsLength()):
                 trans = proc.Transitions(j)
                 trans_name = trans.Name().decode("utf-8") if isinstance(trans.Name(), bytes) else (trans.Name() or "")
-                trans_points = self._get_transition_points(trans)
-                if not trans_points:
-                    continue
 
-                # Split concatenated transitions. For approaches, transitions are
-                # stored entry_point -> IAF, so the anchor is the last point (IAF).
-                anchor_name = trans_points[-1][0] if trans_points else ""
-                options = self._split_transition_options(trans_points, anchor_name)
+                segments = self._extract_transition_segments(trans, proc_type=3)
+                full_points = self._get_transition_points(trans)
 
-                for option in options:
-                    if not option:
+                for seg_idx, segment in enumerate(segments):
+                    if not segment:
                         continue
-                    entry_name = option[0][0]
-                    # Combine transition + main legs, avoiding duplicate IAF
-                    full_path = list(option)
-                    seen = {p[0] for p in full_path}
-                    for p in approach_main:
-                        if p[0] not in seen:
-                            full_path.append(p)
-                            seen.add(p[0])
-                    # Register full bridge and all sub-bridges so a STAR that
-                    # ends at any intermediate fix can join the approach there.
-                    for i in range(len(full_path)):
-                        sub_path = full_path[i:]
-                        sub_entry = sub_path[0][0]
-                        key = (runway, sub_entry)
-                        if key not in bridges or len(sub_path) > len(bridges[key]):
-                            bridges[key] = sub_path
+
+                    trans_points = [(n, lat, lon) for n, lat, lon in segment if n]
+                    if not trans_points:
+                        continue
+
+                    # Split concatenated transitions. For approaches, transitions are
+                    # stored entry_point -> IAF, so the anchor is the last point (IAF).
+                    anchor_name = trans_points[-1][0] if trans_points else ""
+                    options = self._split_transition_options(trans_points, anchor_name)
+
+                    # Fallback: if the segment split changed the anchor (e.g. missed
+                    # approach cut off the IAF), use the full transition instead.
+                    if not options and seg_idx == 0 and len(segments) > 1 and full_points:
+                        anchor_name = full_points[-1][0] if full_points else ""
+                        options = self._split_transition_options(full_points, anchor_name)
+
+                    for option in options:
+                        if not option:
+                            continue
+
+                        # Build raw full path: raw transition + raw main
+                        raw_full = list(option)
+                        seen = {p[0] for p in raw_full}
+                        for p in raw_main:
+                            if p[0] not in seen:
+                                raw_full.append(p)
+                                seen.add(p[0])
+
+                        # Truncate at runway / missed approach point
+                        truncated = self._truncate_approach_path(raw_full, rwy_lat_lon)
+
+                        # Filter out unnamed points for the final bridge
+                        filtered = [(n, lat, lon) for n, lat, lon in truncated if n]
+                        if not filtered:
+                            continue
+
+                        # Register full bridge and all sub-bridges
+                        for k in range(len(filtered)):
+                            sub_path = filtered[k:]
+                            sub_entry = sub_path[0][0]
+                            key = (runway, sub_entry)
+                            if key not in bridges or len(sub_path) > len(bridges[key]):
+                                bridges[key] = sub_path
 
             # If no transitions, use main legs directly
-            if proc.TransitionsLength() == 0 and approach_main:
-                entry_name = approach_main[0][0]
-                key = (runway, entry_name)
-                if key not in bridges or len(approach_main) > len(bridges[key]):
-                    bridges[key] = list(approach_main)
+            if proc.TransitionsLength() == 0 and raw_main:
+                truncated = self._truncate_approach_path(raw_main, rwy_lat_lon)
+                filtered = [(n, lat, lon) for n, lat, lon in truncated if n]
+                if filtered:
+                    entry_name = filtered[0][0]
+                    key = (runway, entry_name)
+                    if key not in bridges or len(filtered) > len(bridges[key]):
+                        bridges[key] = filtered
 
         return bridges
 
@@ -680,7 +859,16 @@ class FlatbuffersAirportConnector:
 
         procedures = {}
         for (proc_name, runway), group in runway_groups.items():
-            entry_node, points, transitions, is_main = group[0]
+            # Prefer the option whose last point has a matching approach bridge.
+            # This avoids selecting transition options that end at waypoints
+            # with no defined final approach path for the target runway.
+            best_entry, best_points, best_trans, best_is_main = group[0]
+            for entry_node, points, transitions, is_main in group:
+                if points and (runway, points[-1][0]) in approach_bridges:
+                    best_entry, best_points, best_trans, best_is_main = entry_node, points, transitions, is_main
+                    break
+
+            entry_node, points, transitions, is_main = best_entry, best_points, best_trans, best_is_main
             merged_points = []
             seen = set()
             merged_transitions = list(transitions)
@@ -724,7 +912,10 @@ class FlatbuffersAirportConnector:
 
         # Also register common segment procedures as selectable entries.
         # Only offer for runways covered by this procedure's transitions.
-        self._register_common_procedures(common_segments, procedures, lambda pts: pts[0][0])
+        # For common segments without transitions, infer runway from approach bridges.
+        self._register_common_procedures(
+            common_segments, procedures, lambda pts: pts[0][0], approach_bridges
+        )
 
         procedures = self._deduplicate_procedures(procedures)
 
@@ -822,6 +1013,71 @@ class FlatbuffersAirportConnector:
         if ap is None:
             return None, None
         return float(ap.Lat()), float(ap.Lon())
+
+    def _get_runway_coords(self, icao: str, runway: str) -> Optional[Tuple[float, float]]:
+        """Get coordinates for a specific runway end."""
+        ap = self.nav_data.get_airport(icao.upper())
+        if ap is None:
+            return None
+        for i in range(ap.RunwaysLength()):
+            rw = ap.Runways(i)
+            for j in range(rw.EndsLength()):
+                end = rw.Ends(j)
+                end_name = end.Name().decode("utf-8") if isinstance(end.Name(), bytes) else (end.Name() or "")
+                if end_name == runway:
+                    return float(end.Lat()), float(end.Lon())
+        return None
+
+    @staticmethod
+    def _dedup_consecutive(points: List[Tuple[str, float, float]]) -> List[Tuple[str, float, float]]:
+        """Remove consecutive duplicate points."""
+        result: List[Tuple[str, float, float]] = []
+        for p in points:
+            if result and result[-1][0] == p[0] and result[-1][1] == p[1] and result[-1][2] == p[2]:
+                continue
+            result.append(p)
+        return result
+
+    def _truncate_approach_path(
+        self,
+        points: List[Tuple[str, float, float]],
+        runway_coords: Tuple[float, float],
+    ) -> List[Tuple[str, float, float]]:
+        """Truncate approach path at the runway, excluding missed approach legs.
+
+        Strategy (in order):
+        1. Unnamed point matching runway threshold coords -> truncate before it.
+        2. First MA*/MD* point -> truncate before it.
+        3. Point closest to runway -> truncate after it (include it).
+        """
+        if not points:
+            return []
+
+        rwy_lat, rwy_lon = runway_coords
+        RUNWAY_MATCH_THRESHOLD = 0.0002  # degrees, ~22 meters
+
+        # Strategy 1: unnamed runway threshold marker
+        for i, (name, lat, lon) in enumerate(points):
+            if not name:
+                dist = ((lat - rwy_lat) ** 2 + (lon - rwy_lon) ** 2) ** 0.5
+                if dist <= RUNWAY_MATCH_THRESHOLD:
+                    return points[:i]
+
+        # Strategy 2: explicit missed approach point
+        for i, (name, _lat, _lon) in enumerate(points):
+            if name.startswith(("MA", "MD")):
+                return points[:i]
+
+        # Strategy 3: closest point to runway
+        min_dist = float("inf")
+        min_idx = 0
+        for i, (_name, lat, lon) in enumerate(points):
+            dist = ((lat - rwy_lat) ** 2 + (lon - rwy_lon) ** 2) ** 0.5
+            if dist < min_dist:
+                min_dist = dist
+                min_idx = i
+
+        return points[: min_idx + 1]
 
 
 class AirportConnector:
