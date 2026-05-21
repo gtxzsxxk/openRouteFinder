@@ -102,7 +102,21 @@ class FlatbuffersAirportConnector:
         marker (DERxx / DExx), that marker belongs to the next segment
         (SID legs are airport->network, so the runway end should be at the
         start of a segment, not the end).
+
+        For STAR (proc_type == 2), we do NOT split on separators because
+        STAR transitions represent a continuous network->airport path;
+        separators are often internal format markers (e.g. transition from
+        STAR to approach) that should not break the path.
         """
+        if proc_type == 2:
+            # STAR: treat as continuous path, ignore (0,0) separators
+            points = []
+            for i in range(trans.LegsLength()):
+                pt = self._leg_to_point(trans.Legs(i))
+                if pt:
+                    points.append(pt)
+            return [self._dedup_consecutive(points)]
+
         segments = []
         current = []
         pending = []  # runway endpoint to prepend to next segment (SID only)
