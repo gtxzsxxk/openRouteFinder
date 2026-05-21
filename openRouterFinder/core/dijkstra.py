@@ -130,6 +130,9 @@ class RouteEngine:
                     current_node.px, current_node.py,
                     next_node.px, next_node.py,
                 )
+                # Prefer SID/STAR procedure edges over network shortcuts
+                if edge.name in ("SID", "STAR"):
+                    edge_dist *= 0.5
                 new_dist = current.dist + edge_dist
 
                 if new_dist < dists.get(edge.nend, INF):
@@ -170,11 +173,13 @@ class RouteEngine:
         active_sid_transition = None
         active_star_transition = None
         route_iids = set(iid for _, _, iid in target.route_list)
+        route_node_names = set(node_name for _, node_name, _ in target.route_list)
 
         for edge in sid_conn.transition_edges:
             if edge.nend in route_iids:
                 active_sid_transition = self._find_transition_name(
-                    edge, sid_conn, star_conn, is_sid=True
+                    edge, sid_conn, star_conn, is_sid=True,
+                    route_node_names=route_node_names,
                 )
                 if active_sid_transition:
                     break
@@ -182,7 +187,8 @@ class RouteEngine:
         for edge in star_conn.transition_edges:
             if edge.nfrom in route_iids:
                 active_star_transition = self._find_transition_name(
-                    edge, sid_conn, star_conn, is_sid=False
+                    edge, sid_conn, star_conn, is_sid=False,
+                    route_node_names=route_node_names,
                 )
                 if active_star_transition:
                     break
@@ -290,30 +296,50 @@ class RouteEngine:
         sid_conn: AirportConnection,
         star_conn: AirportConnection,
         is_sid: bool = True,
+        route_node_names: Optional[set] = None,
     ) -> Optional[str]:
-        """Find transition name from a transition edge by matching endpoint names."""
+        """Find transition name from a transition edge by matching endpoint names.
+
+        When route_node_names is provided and multiple transitions share the same
+        endpoint, we disambiguate by picking the transition whose procedure's main
+        leg points best match the actual route nodes.
+        """
         if is_sid:
-            # SID transition edge: common_exit -> transition_end
-            # transition_end is the last point in transition points
             end_node = self._get_node(edge.nend, sid_conn, star_conn)
             if not end_node:
                 return None
+            matches = []
             for proc_list in sid_conn.procedures.values():
                 for proc in proc_list:
                     for t_name, t_points in proc.transitions:
                         if t_points and t_points[-1][0] == end_node.name:
-                            return t_name
+                            score = 0
+                            if route_node_names:
+                                for pt in proc.points:
+                                    if pt[0] in route_node_names:
+                                        score += 1
+                            matches.append((score, t_name))
+            if matches:
+                matches.sort(key=lambda x: -x[0])
+                return matches[0][1]
         else:
-            # STAR transition edge: transition_start -> common_entry
-            # transition_start is the first point in transition points
             start_node = self._get_node(edge.nfrom, sid_conn, star_conn)
             if not start_node:
                 return None
+            matches = []
             for proc_list in star_conn.procedures.values():
                 for proc in proc_list:
                     for t_name, t_points in proc.transitions:
-                        if t_points and t_points[0][0] == start_node.name:
-                            return t_name
+                        if t_points and t_points[-1][0] == start_node.name:
+                            score = 0
+                            if route_node_names:
+                                for pt in proc.points:
+                                    if pt[0] in route_node_names:
+                                        score += 1
+                            matches.append((score, t_name))
+            if matches:
+                matches.sort(key=lambda x: -x[0])
+                return matches[0][1]
         return None
 
     def _sort_route(self, orig: str, route_list: List[Tuple[str, str, int]]) -> str:
