@@ -58,9 +58,10 @@ def _navdata_supports_route(orig: str, dest: str) -> bool:
     )
 
 
-# Known pairs that lack airway connectivity in the current navdata cycle.
-# These are skipped rather than failing the suite.
-SKIP_PAIRS = {("KJFK", "KLAX")}
+# Previously skipped pairs that required navdata fixes (now resolved):
+# - ("KJFK", "KLAX"): terminal waypoints bridged to airway network
+# - ("ZBAA", "TNCM"): TNCM has no STAR but approach bridges provide fallback
+SKIP_PAIRS = set()
 
 
 @pytest.mark.parametrize("orig,dest", AIRPORT_PAIRS)

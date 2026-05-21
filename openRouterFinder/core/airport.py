@@ -5,7 +5,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import List, Dict, Tuple, Optional
 
-from openRouterFinder.core.graph import Node, Edge
+from openRouterFinder.core.graph import Node, Edge, great_circle_distance_km
 
 _RUNWAY_ENDPOINT_RE = re.compile(r'^DER\d{2}[LCR]?$|^DE\d{2}[LCR]?$')
 
@@ -51,6 +51,71 @@ class FlatbuffersAirportConnector:
             )
             self._next_temp_iid -= 1
         return self._temp_nodes[name]
+
+    def _find_nearest_connected_node(self, lat: float, lon: float) -> Optional[Node]:
+        """Find the nearest navdata node that has at least one outgoing edge."""
+        nearest = None
+        min_dist = float("inf")
+        for node in self.nav_data.node_list:
+            if node is None or not node.next_list:
+                continue
+            d = great_circle_distance_km(node.px, node.py, lat, lon)
+            if d < min_dist:
+                min_dist = d
+                nearest = node
+        return nearest
+
+    def _ensure_continuous_paths(self, conn: AirportConnection, label: str):
+        """Add missing internal_edges so every consecutive pair in procedure points is connected."""
+        existing = {(e.nfrom, e.nend) for e in conn.internal_edges}
+        for key, proc_list in conn.procedures.items():
+            for proc in proc_list:
+                pts = proc.points
+                for i in range(len(pts) - 1):
+                    from_node = self._resolve_node(pts[i][0], pts[i][1], pts[i][2])
+                    to_node = self._resolve_node(pts[i + 1][0], pts[i + 1][1], pts[i + 1][2])
+                    if (from_node.iid, to_node.iid) not in existing:
+                        conn.internal_edges.append(Edge(nfrom=from_node.iid, nend=to_node.iid, name=label))
+                        existing.add((from_node.iid, to_node.iid))
+
+    def _add_network_bridges(self, conn: AirportConnection, proc_type: int):
+        """Add bridge edges from isolated procedure nodes to the nearest connected network node.
+
+        For SID: bridges go FROM isolated exit nodes TO nearest connected node.
+        For STAR: bridges go FROM nearest connected node TO isolated entry nodes.
+        """
+        if proc_type == 1:  # SID
+            # Collect unique exit nodes from procedures
+            exit_nodes: Dict[int, Node] = {}
+            for key, proc_list in conn.procedures.items():
+                for proc in proc_list:
+                    if proc.points:
+                        last_pt = proc.points[-1]
+                        node = self._resolve_node(last_pt[0], last_pt[1], last_pt[2])
+                        exit_nodes[node.iid] = node
+            for node in exit_nodes.values():
+                if not node.next_list:
+                    bridge = self._find_nearest_connected_node(node.px, node.py)
+                    if bridge:
+                        conn.internal_edges.append(
+                            Edge(nfrom=node.iid, nend=bridge.iid, name="SID")
+                        )
+        else:  # STAR
+            # Collect unique entry nodes from procedures
+            entry_nodes: Dict[int, Node] = {}
+            for key, proc_list in conn.procedures.items():
+                for proc in proc_list:
+                    if proc.points:
+                        first_pt = proc.points[0]
+                        node = self._resolve_node(first_pt[0], first_pt[1], first_pt[2])
+                        entry_nodes[node.iid] = node
+            for node in entry_nodes.values():
+                if not node.next_list:
+                    bridge = self._find_nearest_connected_node(node.px, node.py)
+                    if bridge:
+                        conn.internal_edges.append(
+                            Edge(nfrom=bridge.iid, nend=node.iid, name="STAR")
+                        )
 
     def _leg_to_point(self, leg) -> Optional[Tuple[str, float, float]]:
         """Convert a FlatBuffers ProcLeg to (name, lat, lon).
@@ -141,8 +206,11 @@ class FlatbuffersAirportConnector:
                 # Segment separator
                 if current:
                     # For SID, if segment ends with runway endpoint marker,
-                    # move it to the next segment (it is the next segment's start)
-                    if proc_type == 1 and len(current) > 1 and self._is_runway_endpoint(current[-1][0]):
+                    # move it to the next segment (it is the next segment's start).
+                    # A single-point runway endpoint (e.g. [DER01L]) should also
+                    # be prepended to the following segment so the full runway->
+                    # network path is preserved.
+                    if proc_type == 1 and len(current) >= 1 and self._is_runway_endpoint(current[-1][0]):
                         pending = [current.pop()]
                     segments.append(self._dedup_consecutive(current))
                     current = list(pending)
@@ -464,8 +532,15 @@ class FlatbuffersAirportConnector:
         When no transitions exist and approach_bridges is provided (STAR case),
         runway is inferred from which runways have approach bridges starting from
         this segment's final point. This avoids falling back to runway="ALL".
+
+        Single-point common segments (after filtering synthetic markers) are
+        skipped because they provide no meaningful path.
         """
         for proc_name, (anchor_node, points, transitions) in common_segments.items():
+            # Skip single-point common segments -- they provide no navigable path.
+            if len(points) < 2 and not transitions:
+                continue
+
             merged_points = list(points)
             key = key_from_points(points) if points else anchor_node.name
 
@@ -687,7 +762,7 @@ class FlatbuffersAirportConnector:
 
         procedures = self._deduplicate_procedures(procedures)
 
-        return AirportConnection(
+        result = AirportConnection(
             airport_node=airport_node,
             connections=connections,
             procedures=procedures,
@@ -695,6 +770,20 @@ class FlatbuffersAirportConnector:
             temp_nodes=list(self._temp_nodes.values()),
             internal_edges=internal_edges,
         )
+        self._ensure_continuous_paths(result, "SID")
+        self._add_network_bridges(result, 1)
+
+        # Deduplicate internal_edges (common-segment edges are duplicated once
+        # per runway variant)
+        seen_edges = set()
+        deduped_internal = []
+        for e in result.internal_edges:
+            key = (e.nfrom, e.nend, e.name)
+            if key not in seen_edges:
+                seen_edges.add(key)
+                deduped_internal.append(e)
+        result.internal_edges = deduped_internal
+        return result
 
     def _collect_approach_bridges(self, icao: str) -> Dict[Tuple[str, str], List[Tuple[str, float, float]]]:
         """Collect Type=3 approach procedures and build (runway, entry_point) -> path mapping.
@@ -983,7 +1072,37 @@ class FlatbuffersAirportConnector:
                 to_node = self._resolve_node(bridge_points[i + 1][0], bridge_points[i + 1][1], bridge_points[i + 1][2])
                 internal_edges.append(Edge(nfrom=from_node.iid, nend=to_node.iid, name="STAR"))
 
-        return AirportConnection(
+        # Fallback: when no STAR procedures exist but approach bridges do,
+        # create virtual STAR procedures from the approach bridges.
+        # Only apply this fallback when no filter is active (a filter that
+        # removes all matches should return empty, not fall back to approaches).
+        if not procedures and approach_bridges and filter_name is None:
+            for (runway, entry_name), bridge_points in approach_bridges.items():
+                proc = Procedure(
+                    name=f"APPR_{runway}",
+                    runway=runway,
+                    points=list(bridge_points),
+                    transitions=[],
+                )
+                if entry_name not in procedures:
+                    procedures[entry_name] = [proc]
+                else:
+                    procedures[entry_name].append(proc)
+                for i in range(len(bridge_points) - 1):
+                    from_node = self._resolve_node(bridge_points[i][0], bridge_points[i][1], bridge_points[i][2])
+                    to_node = self._resolve_node(bridge_points[i + 1][0], bridge_points[i + 1][1], bridge_points[i + 1][2])
+                    internal_edges.append(Edge(nfrom=from_node.iid, nend=to_node.iid, name="STAR"))
+            # Rebuild connections for the virtual procedures
+            for key, proc_list in procedures.items():
+                for proc in proc_list:
+                    if proc.points:
+                        last_name, last_lat, last_lon = proc.points[-1]
+                        if last_name and last_name not in added_entry_nodes:
+                            last_node = self._resolve_node(last_name, last_lat, last_lon)
+                            connections.append(Edge(nfrom=last_node.iid, nend=airport_node.iid, name="STAR"))
+                            added_entry_nodes.add(last_name)
+
+        result = AirportConnection(
             airport_node=airport_node,
             connections=connections,
             procedures=procedures,
@@ -991,6 +1110,19 @@ class FlatbuffersAirportConnector:
             temp_nodes=list(self._temp_nodes.values()),
             internal_edges=internal_edges,
         )
+        self._ensure_continuous_paths(result, "STAR")
+        self._add_network_bridges(result, 2)
+
+        # Deduplicate internal_edges
+        seen_edges = set()
+        deduped_internal = []
+        for e in result.internal_edges:
+            key = (e.nfrom, e.nend, e.name)
+            if key not in seen_edges:
+                seen_edges.add(key)
+                deduped_internal.append(e)
+        result.internal_edges = deduped_internal
+        return result
 
     def _flatten_transitions(self, transition_segments):
         """Flatten transition segments into (proc_name, trans_name, from_node, to_node, points) tuples."""

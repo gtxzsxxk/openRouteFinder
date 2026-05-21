@@ -45,6 +45,9 @@ class FlatbuffersAirportConnector:
 8. Key procedures by network-side exit point (`merged_points[-1][0]`)
 9. Register common procedures for runways covered by their transitions
 10. Deduplicate by `(name, runway)`, keeping the one with most points
+11. `_ensure_continuous_paths()` — add missing edges for consecutive points in merged procedures
+12. `_add_network_bridges()` — bridge isolated exit nodes to nearest airway-connected node
+13. Deduplicate `internal_edges`
 
 ### build_star() Flow
 
@@ -59,6 +62,10 @@ class FlatbuffersAirportConnector:
 9. Merge approach bridges into STAR procedures so full path to runway is available
 10. Build connections from each procedure's last point to airport
 11. Add internal edges for used approach bridges
+12. **Fallback**: when no STAR procedures exist (and no filter is active), create virtual STAR procedures from approach bridges
+13. `_ensure_continuous_paths()` — add missing edges for consecutive points in merged procedures
+14. `_add_network_bridges()` — bridge isolated entry nodes from nearest airway-connected node
+15. Deduplicate `internal_edges`
 
 ---
 
@@ -133,6 +140,31 @@ def _collect_approach_bridges(self, icao: str) -> Dict[str, List[Tuple[str, floa
 
 ---
 
+## Network Bridges
+
+Terminal waypoints (SID exits, STAR entries) are frequently not part of the airway network in Fenix data. Without a bridge, A* reaches the waypoint and then has no outgoing edges to continue.
+
+```python
+def _add_network_bridges(self, conn: AirportConnection, proc_type: int)
+```
+
+- **SID**: for each unique exit node, if it has zero outgoing edges, find the nearest navdata node with `next_list > 0` and add `exit -> connected_node`
+- **STAR**: for each unique entry node, if it has zero outgoing edges, add `connected_node -> entry`
+- Bridges are added to `internal_edges` and participate in A* adjacency like any other edge
+- Distance is calculated on-the-fly from coordinates; no explicit distance field on the edge
+
+## Continuous Path Guarantee
+
+When Fenix separators split a transition into disconnected segments, consecutive points in the merged procedure may lack an internal edge. `_ensure_continuous_paths()` walks every procedure's points (and transitions) and adds missing edges.
+
+```python
+def _ensure_continuous_paths(self, conn: AirportConnection, label: str)
+```
+
+- Checks every consecutive pair in `proc.points` and `proc.transitions`
+- Skips duplicates using an `(nfrom, nend)` set
+- Label is `"SID"` or `"STAR"`
+
 ## Temp Node Management
 
 ```python
@@ -148,8 +180,9 @@ Temp nodes are created for off-network waypoints that don't exist in the global 
 ## Known Edge Cases & Gotchas
 
 1. **Fenix duplicates waypoints**: Some waypoints appear twice consecutively — deduplicated in `_get_leg_points()`
-2. **internal_edges is pooled**: Edge counts must be deduplicated before per-procedure analysis
-3. **Runway "ALL"**: Procedures without specific runway assignment get `runway="ALL"`. These must still have >1 point.
-4. **Transition splitting creates single-point options**: Some split results are just a runway marker (e.g., `DE01L`). These can cause isolated nodes.
-5. **KLAX STAR GOATZ2**: Known to have 3 edges on a single node due to incorrect edge pooling from LEENA8 transition edges.
-6. **ZBAA DOTR5Y 36L**: Genuinely missing westward points — transition splitting bug.
+2. **internal_edges is pooled**: Edge counts must be deduplicated before per-procedure analysis. Both `build_sid` and `build_star` now deduplicate automatically.
+3. **Runway "ALL"**: Procedures without specific runway assignment get `runway="ALL"`. These must still have >1 point. Single-point common segments are now skipped in `_register_common_procedures()`.
+4. **Transition splitting creates single-point options**: Some split results are just a runway marker (e.g., `DE01L`). Single-point runway endpoints before `(0,0)` separators are now merged into the following segment so the full runway→network path is preserved.
+5. **Isolated terminal waypoints**: SID/STAR waypoints (e.g., KJFK's `CRI`, KLAX's `ANJLL`) often have no airway network connections. `_add_network_bridges()` finds the nearest connected node and creates a temporary bridge edge so A* can route through them.
+6. **Airports without STAR procedures**: Small airports like TNCM have approaches but no type=2 STARs. `build_star()` now falls back to approach bridges (when no filter is active) so routing can still terminate at the airport.
+7. **Split transition segments without connecting edges**: When Fenix separators break a transition into disconnected segments (e.g., `[PONAE]` and `[DEEZZ, HEERO]`), `_ensure_continuous_paths()` adds the missing connecting edges so every consecutive pair in procedure points has an internal edge.

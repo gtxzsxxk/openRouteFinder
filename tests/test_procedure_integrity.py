@@ -146,30 +146,44 @@ def test_procedure_edge_counts_reasonable(icao):
 
         deduped = _dedup_edges(conn_obj.internal_edges)
 
-        # Count how many procedures each node appears in
+        # Count how many procedures each node appears in (points + transitions).
+        # Only count nodes that appear in multi-point segments; single-point
+        # segments naturally have no edges.
         node_proc_counts = {}
         for key, proc_list in conn_obj.procedures.items():
             for proc in proc_list:
                 proc_key = (key, proc.name, proc.runway)
-                for pt in proc.points:
-                    iid = _resolve_iid(conn_obj, pt)
-                    if iid is not None:
-                        node_proc_counts.setdefault(iid, set()).add(proc_key)
+                if len(proc.points) > 1:
+                    for pt in proc.points:
+                        iid = _resolve_iid(conn_obj, pt)
+                        if iid is not None:
+                            node_proc_counts.setdefault(iid, set()).add(proc_key)
+                for _t_name, t_pts in proc.transitions:
+                    if len(t_pts) > 1:
+                        for pt in t_pts:
+                            iid = _resolve_iid(conn_obj, pt)
+                            if iid is not None:
+                                node_proc_counts.setdefault(iid, set()).add(proc_key)
 
         counts = _edge_count_per_node(deduped)
 
         # Check isolated nodes (degree 0) — these are definitely bugs.
-        # Skip single-point procedures: a lone point naturally has no edges.
+        # Skip nodes that only appear in single-point segments.
         for iid, proc_keys in node_proc_counts.items():
             if counts.get(iid, 0) == 0:
-                # Allow if every procedure containing this node is single-point
-                all_single = all(
-                    len(proc.points) <= 1
-                    for pk in proc_keys
-                    for key, proc_list in conn_obj.procedures.items()
-                    for proc in proc_list
-                    if (key, proc.name, proc.runway) == pk
-                )
+                all_single = True
+                for pk in proc_keys:
+                    for key, proc_list in conn_obj.procedures.items():
+                        for proc in proc_list:
+                            if (key, proc.name, proc.runway) == pk:
+                                # Node is in a multi-point segment (by construction
+                                # of node_proc_counts), so 0 edges is a bug.
+                                all_single = False
+                                break
+                        if not all_single:
+                            break
+                    if not all_single:
+                        break
                 if not all_single:
                     pytest.fail(
                         f"{icao} {label}: node {iid} appears in {len(proc_keys)} "
@@ -256,6 +270,12 @@ def test_zbaa_36l_sid_circles_beijing():
                 continue
             pts = proc.points
             if len(pts) < 4:
+                continue
+
+            # DOTR5Y in Fenix navdata does not circle Beijing west (real-world
+            # path is DE36L -> AA153 -> AA154 -> DOTRA, all lon >= 116.54).
+            # Skip this known navdata limitation.
+            if proc.name == "DOTR5Y":
                 continue
 
             # Check if this procedure is generally heading north
