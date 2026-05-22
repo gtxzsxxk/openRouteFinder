@@ -257,8 +257,8 @@ def test_route_query_returns_valid_route(orig, dest):
             "dest": dest,
             "validCode": "",
             "validToken": "",
-            "sidExit": None,
-            "starEntry": None,
+            "sidExit": "",
+            "starEntry": "",
         },
     )
     assert response.status_code == 200, f"{orig}→{dest}: {response.text}"
@@ -297,8 +297,8 @@ def test_route_topology_no_branching(orig, dest):
             "dest": dest,
             "validCode": "",
             "validToken": "",
-            "sidExit": None,
-            "starEntry": None,
+            "sidExit": "",
+            "starEntry": "",
         },
     )
     assert response.status_code == 200, f"{orig}→{dest}: {response.text}"
@@ -382,8 +382,8 @@ def test_route_procedure_segments_continuous(orig, dest):
             "dest": dest,
             "validCode": "",
             "validToken": "",
-            "sidExit": None,
-            "starEntry": None,
+            "sidExit": "",
+            "starEntry": "",
         },
     )
     assert response.status_code == 200, f"{orig}→{dest}: {response.text}"
@@ -427,8 +427,8 @@ def test_zbaa_klax_kimmo3_includes_all_nodes():
             "dest": "KLAX",
             "validCode": "",
             "validToken": "",
-            "sidExit": None,
-            "starEntry": None,
+            "sidExit": "",
+            "starEntry": "",
         },
     )
     assert response.status_code == 200, response.text

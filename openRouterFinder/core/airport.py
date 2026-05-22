@@ -1091,7 +1091,7 @@ class FlatbuffersAirportConnector:
         # create virtual STAR procedures from the approach bridges.
         # Only apply this fallback when no filter is active (a filter that
         # removes all matches should return empty, not fall back to approaches).
-        if not procedures and approach_bridges and filter_name is None:
+        if not procedures and approach_bridges and not filter_name:
             for (runway, entry_name), bridge_points in approach_bridges.items():
                 proc = Procedure(
                     name=f"APPR_{runway}",
