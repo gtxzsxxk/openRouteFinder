@@ -613,7 +613,9 @@ def _build_procedures_for_airport(
     return builder.EndVector()
 
 
-def _build_procedure_legs(builder, leg_rows: List, wp_names: Dict[int, str], is_main: bool = True) -> int:
+def _build_procedure_legs(
+    builder, leg_rows: List, wp_names: Dict[int, str], is_main: bool = True, transition_name: str = None
+) -> int:
     leg_offsets = []
     for row in leg_rows:
         trans = row["Transition"] or ""
@@ -625,6 +627,8 @@ def _build_procedure_legs(builder, leg_rows: List, wp_names: Dict[int, str], is_
         else:
             if not trans or trans == "ALL":
                 continue  # skip main legs
+            if transition_name and trans != transition_name:
+                continue  # skip legs belonging to other transitions
 
         # Waypoint name from WptID lookup only (NavID is an internal integer ID)
         wpt_id = row["WptID"]
@@ -678,7 +682,8 @@ def _build_procedure_transitions(
     for trans_name in trans_names:
         name = builder.CreateString(trans_name)
         legs = _build_procedure_legs(
-            builder, legs_by_terminal.get(terminal_id, []), wp_names, is_main=False
+            builder, legs_by_terminal.get(terminal_id, []), wp_names, is_main=False,
+            transition_name=trans_name,
         )
 
         ProcTransitionStart(builder)

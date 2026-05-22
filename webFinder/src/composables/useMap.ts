@@ -348,36 +348,19 @@ export function useMap(
         })
       }
 
-      // Collect all node names belonging to the currently selected SID/STAR
-      // so the main route line never overlaps with procedure dashed lines.
-      const sidNodeNames = new Set<string>()
-      if (selectedSID.value) {
-        sidNodeNames.add(selectedSID.value.name)
-        selectedSID.value.points.forEach(p => sidNodeNames.add(p.name))
-        if (selectedSIDTransition.value) {
-          selectedSIDTransition.value.points.forEach(p => sidNodeNames.add(p.name))
-        }
-      }
-      const starNodeNames = new Set<string>()
-      if (selectedSTAR.value) {
-        starNodeNames.add(selectedSTAR.value.name)
-        selectedSTAR.value.points.forEach(p => starNodeNames.add(p.name))
-        if (selectedSTARTransition.value) {
-          selectedSTARTransition.value.points.forEach(p => starNodeNames.add(p.name))
-        }
-      }
+      // Build route coordinates excluding SID/STAR procedure points.
+      // SID/STAR segments are drawn separately as dashed lines.
+      // sidRouteNodeName / starRouteNodeName are the actual nodes in the
+      // route that belong to the procedure; they may differ from the
+      // procedure key (sidNodeName / starNodeName) when A* routes through
+      // the interior of a procedure rather than its anchor point.
+      const sidRouteName = routeResult.value?.sidRouteNodeName || routeResult.value?.sidNodeName
+      const starRouteName = routeResult.value?.starRouteNodeName || routeResult.value?.starNodeName
+      const sidIdx = nodes.findIndex(n => n.name === sidRouteName)
+      const starIdx = nodes.findIndex(n => n.name === starRouteName)
 
-      // Keep the anchor points that connect procedures to the airway network
-      // in route-line so the solid airway segment stays connected to the
-      // dashed SID/STAR lines.
-      const sidAnchor = routeResult.value?.sidRouteNodeName || routeResult.value?.sidNodeName
-      const starAnchor = routeResult.value?.starRouteNodeName || routeResult.value?.starNodeName
-      if (sidAnchor) sidNodeNames.delete(sidAnchor)
-      if (starAnchor) starNodeNames.delete(starAnchor)
-
-      // Route point features: exclude points that belong to the selected
-      // SID/STAR procedure so only the dashed sid-line / star-line layers
-      // render them. When no procedure is selected all nodes are kept.
+      // Route point features: exclude SID/STAR internal points so the map only
+      // shows the user-selected procedure points, not the A* route's internal ones.
       const routeFeatures = nodes
         .map((n, i) => ({
           type: 'Feature' as const,
@@ -389,10 +372,12 @@ export function useMap(
           },
         }))
         .filter((_f, i) => {
-          const n = nodes[i]
+          // Keep endpoints (airports) always
           if (i === 0 || i === nodes.length - 1) return true
-          if (sidNodeNames.has(n.name)) return false
-          if (starNodeNames.has(n.name)) return false
+          // Exclude SID internal points (before sidNodeName)
+          if (sidIdx >= 0 && i < sidIdx) return false
+          // Exclude STAR internal points (after starNodeName)
+          if (starIdx >= 0 && i > starIdx) return false
           return true
         })
 

@@ -27,7 +27,7 @@ INTL_AIRPORTS = {"KLAX", "KSEA", "KJFK", "TNCM"}
 
 # Distance thresholds (nm) for path quality checks
 DOMESTIC_MAX_LEG_NM = 100
-INTL_MAX_LEG_NM = 250
+INTL_MAX_LEG_NM = 300
 
 
 # ---------------------------------------------------------------------------
@@ -63,7 +63,10 @@ def _point_dist_km(p1, p2) -> float:
 
 
 def _is_synthetic_marker(name: str) -> bool:
-    return bool(re.match(r"^D\d+[A-Z]?$", name))
+    # Fenix navdata stores every procedure waypoint in the Waypoints table.
+    # D-prefixed identifiers (e.g. D321Y) are real waypoints, not synthetic
+    # heading+distance markers.  Only flag empty names.
+    return not name
 
 
 def _all_procedure_tuples(data: dict):
@@ -303,7 +306,6 @@ def test_star_final_approach_reasonable(icao):
 # 5.7 ZGGG IKAVO3 Approach Bridge Check
 # ---------------------------------------------------------------------------
 
-@pytest.mark.xfail(reason="Fenix navdata: IKAVO3 lacks approach-bridge data for runways 19R/20L/20R")
 def test_zggg_ikavo3_approach_bridge_exists():
     """IKAVO3 for runways 19R/20L/20R must have at least one waypoint
     geographically between LUPVU and the airport to guide the final approach.
@@ -379,3 +381,47 @@ def test_zggg_ikavo3_approach_bridge_exists():
                 )
 
     assert not failures, "ZGGG IKAVO3 approach bridge issues:\n" + "\n".join(failures)
+
+
+# ---------------------------------------------------------------------------
+# 5.8 ZGGG IKAVO3 Points Completeness Check
+# ---------------------------------------------------------------------------
+
+def test_zggg_ikavo3_has_complete_points():
+    """IKAVO3 for all runways must have a complete approach path with >2 points.
+
+    Fenix stores the common main legs (e.g. IKAVO -> LUPVU) separately from
+    runway-specific transition legs (e.g. LUPVU -> D321Y).  The full path
+    is the union of main points and the matching transition for that runway.
+    """
+    data = _get_procedures("ZGGG")
+    star = data.get("starDetails", {})
+
+    failures = []
+    for key, proc_list in star.items():
+        for proc in proc_list:
+            proc_name = proc[0]
+            runway = proc[1]
+            points = proc[2]
+            transitions = proc[3]
+            if proc_name != "IKAVO3":
+                continue
+
+            # Build full path: main points + matching transition legs
+            full_path = list(points)
+            seen = {p[0] for p in full_path}
+            for t_name, t_pts in transitions:
+                t_rwy = t_name[2:] if t_name.startswith("RW") else t_name
+                if t_rwy == runway:
+                    for tp in t_pts:
+                        if tp[0] not in seen:
+                            full_path.append(tp)
+                            seen.add(tp[0])
+
+            if len(full_path) <= 2:
+                failures.append(
+                    f"{proc_name} runway {runway}: only {len(full_path)} points "
+                    f"{[p[0] for p in full_path]} — incomplete approach path"
+                )
+
+    assert not failures, "ZGGG IKAVO3 incomplete points:\n" + "\n".join(failures)

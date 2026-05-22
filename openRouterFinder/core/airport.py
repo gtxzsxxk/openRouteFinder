@@ -120,8 +120,9 @@ class FlatbuffersAirportConnector:
     def _leg_to_point(self, leg) -> Optional[Tuple[str, float, float]]:
         """Convert a FlatBuffers ProcLeg to (name, lat, lon).
 
-        Filters out synthetic heading+distance markers (e.g. D091M, D123)
-        that should be merged into real waypoints rather than standing alone.
+        Fenix navdata stores all procedure waypoints in the Waypoints table;
+        D-prefixed identifiers (e.g. D321Y) are real waypoints, not synthetic
+        heading+distance markers.  No name-based filtering is applied.
         """
         name = leg.Name()
         if name is None:
@@ -131,11 +132,6 @@ class FlatbuffersAirportConnector:
             return None
         if _RUNWAY_ENDPOINT_RE.match(name):
             return (name, float(leg.Lat()), float(leg.Lon()))
-        # Heading+distance markers like D091M, D123, D194Q
-        if len(name) >= 2 and name[0] == "D" and name[1:].isdigit():
-            return None
-        if len(name) >= 3 and name[0] == "D" and name[1:-1].isdigit() and name[-1].isalpha():
-            return None
         return (name, float(leg.Lat()), float(leg.Lon()))
 
     def _get_leg_points(self, procedure) -> List[Tuple[str, float, float]]:
@@ -989,16 +985,35 @@ class FlatbuffersAirportConnector:
 
             if proc_name in common_segments:
                 common_node, common_points, common_trans = common_segments[proc_name]
-                for cp in common_points:
-                    if cp[0] not in seen:
-                        merged_points.append(cp)
-                        seen.add(cp[0])
+                # Determine correct merge order for STAR:
+                # - Enroute transitions end at common path start
+                #   (e.g. PGS -> ... -> BASET, common = BASET -> DOWNE -> REEDR)
+                #   -> transition + common so flight direction is network -> airport.
+                # - Final approach transitions start at common path end
+                #   (e.g. RW06L = REEDR -> SMO, common = BASET -> DOWNE -> REEDR)
+                #   -> common + transition so flight direction is network -> airport.
+                if points and common_points and points[-1][0] == common_points[0][0]:
+                    merged_points = list(points)
+                    seen = {p[0] for p in merged_points}
+                    for cp in common_points:
+                        if cp[0] not in seen:
+                            merged_points.append(cp)
+                            seen.add(cp[0])
+                else:
+                    for cp in common_points:
+                        if cp[0] not in seen:
+                            merged_points.append(cp)
+                            seen.add(cp[0])
+                    for p in points:
+                        if p[0] not in seen:
+                            merged_points.append(p)
+                            seen.add(p[0])
                 for ct in common_trans:
                     ct_runway = ct[0][2:] if ct[0].startswith("RW") else ct[0]
                     if ct_runway == runway and ct not in merged_transitions:
                         merged_transitions.append(ct)
-            for p in points:
-                if p[0] not in seen:
+            else:
+                for p in points:
                     merged_points.append(p)
                     seen.add(p[0])
 
