@@ -40,6 +40,8 @@ def build_route_info(
     route_segments: list = None,
     sid_node_name: str = None,
     star_node_name: str = None,
+    sid_route_node_name: str = None,
+    star_route_node_name: str = None,
 ) -> str:
     result = {
         "data_version": data_version,
@@ -54,6 +56,8 @@ def build_route_info(
         "activeSTARTransition": active_star_transition,
         "sidNodeName": sid_node_name,
         "starNodeName": star_node_name,
+        "sidRouteNodeName": sid_route_node_name,
+        "starRouteNodeName": star_route_node_name,
     }
     if route_segments is not None:
         result["routeSegments"] = route_segments
@@ -193,17 +197,34 @@ class RouteEngine:
                 if active_star_transition:
                     break
 
-        # Find SID exit node name and STAR entry node name from route
+        # Find SID exit node name and STAR entry node name from route.
+        # sid_node_name is the procedure key; sid_route_node_name is the
+        # actual node in the route that belongs to the procedure (used by
+        # the frontend to locate the procedure in the route node list).
         sid_node_name = None
+        sid_route_node_name = None
         for _, node_name, _ in target.route_list:
             if node_name in sid_conn.procedures:
                 sid_node_name = node_name
+                sid_route_node_name = node_name
+                break
+            key = self._find_procedure_key_for_node(node_name, sid_conn)
+            if key:
+                sid_node_name = key
+                sid_route_node_name = node_name
                 break
 
         star_node_name = None
+        star_route_node_name = None
         for _, node_name, _ in reversed(target.route_list):
             if node_name in star_conn.procedures:
                 star_node_name = node_name
+                star_route_node_name = node_name
+                break
+            key = self._find_procedure_key_for_node(node_name, star_conn)
+            if key:
+                star_node_name = key
+                star_route_node_name = node_name
                 break
 
         return build_route_info(
@@ -220,6 +241,8 @@ class RouteEngine:
             route_segments,
             sid_node_name,
             star_node_name,
+            sid_route_node_name,
+            star_route_node_name,
         )
 
     def _build_adjacency(
@@ -288,6 +311,29 @@ class RouteEngine:
         for node in star_conn.temp_nodes:
             if node.iid == iid:
                 return node
+        return None
+
+    def _find_procedure_key_for_node(
+        self,
+        node_name: str,
+        conn: AirportConnection,
+    ) -> Optional[str]:
+        """Find the procedure key that contains node_name in its points or transitions.
+
+        When A* routes through the interior of a procedure (not its anchor
+        point), the node will not match any procedure key directly.  This
+        helper walks all procedures to find the key whose points or
+        transitions contain the node.
+        """
+        for key, proc_list in conn.procedures.items():
+            for proc in proc_list:
+                for pt in proc.points:
+                    if pt[0] == node_name:
+                        return key
+                for _, t_pts in proc.transitions:
+                    for pt in t_pts:
+                        if pt[0] == node_name:
+                            return key
         return None
 
     def _find_transition_name(

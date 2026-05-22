@@ -350,8 +350,14 @@ export function useMap(
 
       // Build route coordinates excluding SID/STAR procedure points.
       // SID/STAR segments are drawn separately as dashed lines.
-      const sidIdx = nodes.findIndex(n => n.name === routeResult.value?.sidNodeName)
-      const starIdx = nodes.findIndex(n => n.name === routeResult.value?.starNodeName)
+      // sidRouteNodeName / starRouteNodeName are the actual nodes in the
+      // route that belong to the procedure; they may differ from the
+      // procedure key (sidNodeName / starNodeName) when A* routes through
+      // the interior of a procedure rather than its anchor point.
+      const sidRouteName = routeResult.value?.sidRouteNodeName || routeResult.value?.sidNodeName
+      const starRouteName = routeResult.value?.starRouteNodeName || routeResult.value?.starNodeName
+      const sidIdx = nodes.findIndex(n => n.name === sidRouteName)
+      const starIdx = nodes.findIndex(n => n.name === starRouteName)
 
       // Route point features: exclude SID/STAR internal points so the map only
       // shows the user-selected procedure points, not the A* route's internal ones.

@@ -323,3 +323,55 @@ def test_star_final_approach_reasonable(icao):
             # actually provides them; otherwise we skip the topology check.
             if len(pts) < 2:
                 continue
+
+
+# ---------------------------------------------------------------------------
+# 5.7 ZGGG IKAVO3 Approach Bridge Check
+# ---------------------------------------------------------------------------
+
+@pytest.mark.xfail(reason="Fenix navdata: IKAVO3 lacks approach-bridge data for runways 19R/20L/20R")
+def test_zggg_ikavo3_approach_bridge_exists():
+    """IKAVO3 for runways 19R/20L/20R must have at least one waypoint
+    between LUPVU and the runway to guide the final approach.
+
+    Note: IKAVO8 covers these runways with full approach paths
+    (GG527->GG526->...->FI19R etc.), but IKAVO3 in Fenix 2604
+    navdata only provides ['IKAVO', 'LUPVU'] with no bridge to
+    the runway.  This is a navdata limitation, not a code bug.
+    """
+    _sid, star = _get_connector("ZGGG")
+    if star is None:
+        pytest.skip("ZGGG STAR not available")
+
+    failures = []
+    for key, proc_list in star.procedures.items():
+        for proc in proc_list:
+            if proc.name != "IKAVO3":
+                continue
+            if proc.runway not in ("19R", "20L", "20R"):
+                continue
+
+            pts = proc.points
+            # Find LUPVU in the main path
+            lupvu_idx = None
+            for i, pt in enumerate(pts):
+                if pt[0] == "LUPVU":
+                    lupvu_idx = i
+                    break
+
+            # After LUPVU in main path there must be at least one more point
+            if lupvu_idx is not None and lupvu_idx >= len(pts) - 1:
+                failures.append(
+                    f"{proc.name} runway {proc.runway}: "
+                    f"LUPVU is last in main path ({[p[0] for p in pts]})"
+                )
+
+            # Transitions must also have ≥2 points to provide guidance
+            for t_name, t_pts in proc.transitions:
+                if len(t_pts) < 2:
+                    failures.append(
+                        f"{proc.name} runway {proc.runway} "
+                        f"transition {t_name}: only {len(t_pts)} point(s)"
+                    )
+
+    assert not failures, "ZGGG IKAVO3 approach bridge issues:\n" + "\n".join(failures)
