@@ -44,10 +44,10 @@ def _get_procedures(icao: str):
     """Fetch /api/airports/{icao}/procedures?detail=true&cycle=2604 and return parsed JSON."""
     resp = client.get(f"/api/airports/{icao}/procedures?detail=true&cycle=2604")
     if resp.status_code != 200:
-        pytest.skip(f"{icao}: procedures endpoint returned {resp.status_code}")
+        pytest.fail(f"{icao}: procedures endpoint returned {resp.status_code}")
     data = resp.json()
     if data.get("icao") != icao:
-        pytest.skip(f"{icao}: unexpected response shape")
+        pytest.fail(f"{icao}: unexpected response shape")
     return data
 
 
@@ -266,10 +266,6 @@ def test_zbaa_36l_sid_circles_beijing():
             runway = proc[1]
             points = proc[2]
             if runway != "36L" or len(points) < 4:
-                continue
-
-            # DOTR5Y in Fenix navdata does not circle Beijing west
-            if proc_name == "DOTR5Y":
                 continue
 
             first_lat = points[0][1]
