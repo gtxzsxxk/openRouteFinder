@@ -43,7 +43,7 @@ class NavDataRegistry:
     def get(self, cycle: Optional[str] = None) -> Optional[MmappedNavData]:
         """Get navdata for a specific cycle, or the latest if None."""
         with self._lock:
-            if cycle is None:
+            if cycle is None or cycle == "":
                 if not self._versions:
                     return None
                 # Return highest cycle number

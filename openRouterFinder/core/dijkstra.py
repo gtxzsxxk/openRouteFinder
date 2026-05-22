@@ -351,21 +351,30 @@ class RouteEngine:
         sid_conn: AirportConnection,
         star_conn: AirportConnection,
     ) -> List[Tuple[str, str, int]]:
-        """Insert missing intermediate procedure nodes into route_list.
+        """Ensure SID/STAR segments follow complete single-procedure paths.
 
-        When pooled internal_edges contain shortcut edges from other
-        procedures, A* may skip intermediate nodes (e.g. KIMMO3's ARVIN
-        and AMONT are bypassed by WAYVE1's EHF->LOPES edge).  This
-        post-processor walks the route and fills in any gaps so the
-        returned route reflects the full procedure path.
+        When pooled internal_edges are shared across all procedures, A* may
+        mix segments from different procedures or skip intermediate nodes
+        (e.g. KIMMO3's ARVIN and AMONT are bypassed by WAYVE1's EHF->LOPES
+        edge, or XACN's XAC->UTIBO is combined with XAC1K's KAIHO->AZURE).
+
+        This post-processor replaces each maximal contiguous run of SID or
+        STAR edges with the full path through the single best-matching
+        procedure, ensuring the displayed route is a single straight line.
         """
 
-        def _proc_for_node(node_name: str, conn: AirportConnection):
+        def _best_proc_for_run(node_names: List[str], conn: AirportConnection):
+            """Find the procedure that contains the most nodes from the run."""
+            best_proc = None
+            best_score = 0
             for key, proc_list in conn.procedures.items():
                 for proc in proc_list:
-                    if any(p[0] == node_name for p in proc.points):
-                        return proc
-            return None
+                    proc_names = [p[0] for p in proc.points]
+                    score = sum(1 for name in node_names if name in proc_names)
+                    if score > best_score:
+                        best_score = score
+                        best_proc = proc
+            return best_proc, best_score
 
         def _fill_gaps_for_conn(
             route: List[Tuple[str, str, int]],
@@ -376,34 +385,90 @@ class RouteEngine:
             i = 0
             while i < len(route):
                 edge_name, node_name, iid = route[i]
-                result.append((edge_name, node_name, iid))
 
-                if edge_name == edge_label and i + 1 < len(route):
-                    next_edge, next_name, next_iid = route[i + 1]
-                    proc = _proc_for_node(node_name, conn)
-                    if proc is None:
-                        i += 1
-                        continue
+                if edge_name != edge_label:
+                    result.append((edge_name, node_name, iid))
+                    i += 1
+                    continue
 
-                    point_names = [p[0] for p in proc.points]
-                    if node_name not in point_names or next_name not in point_names:
-                        i += 1
-                        continue
+                # Collect the entire contiguous run of this edge_label
+                run: List[Tuple[str, str, int]] = [
+                    (edge_name, node_name, iid)
+                ]
+                j = i + 1
+                while j < len(route) and route[j][0] == edge_label:
+                    run.append(route[j])
+                    j += 1
 
-                    start_idx = point_names.index(node_name)
-                    end_idx = point_names.index(next_name)
-                    if end_idx <= start_idx + 1:
-                        i += 1
-                        continue
+                run_node_names = [n[1] for n in run]
 
-                    # Insert intermediate points
-                    for j in range(start_idx + 1, end_idx):
-                        pt = proc.points[j]
-                        mid_node = self._get_node_by_name(pt[0], sid_conn, star_conn)
-                        if mid_node is not None:
-                            result.append((edge_label, mid_node.name, mid_node.iid))
+                # Also consider the node immediately before the run, as it may
+                # be the procedure entry point reached via an airway edge.
+                prev_node = route[i - 1] if i > 0 else None
+                candidate_names = list(run_node_names)
+                if prev_node is not None:
+                    candidate_names.insert(0, prev_node[1])
 
-                i += 1
+                best_proc, score = _best_proc_for_run(candidate_names, conn)
+
+                if best_proc and score >= 2:
+                    proc_names = [p[0] for p in best_proc.points]
+
+                    # Find first and last matching node indices in best_proc
+                    match_indices = []
+                    for name in candidate_names:
+                        if name in proc_names:
+                            match_indices.append(proc_names.index(name))
+
+                    if len(match_indices) >= 2:
+                        first_idx = min(match_indices)
+                        last_idx = max(match_indices)
+
+                        # Build a lookup for nodes already in the run or prev_node
+                        known_iids = {n_name: n_iid for _, n_name, n_iid in run}
+                        if prev_node is not None:
+                            known_iids[prev_node[1]] = prev_node[2]
+
+                        # Determine where the procedure path should start.
+                        # If prev_node is the first match, don't duplicate it.
+                        prev_is_first = (
+                            prev_node is not None
+                            and prev_node[1] == proc_names[first_idx]
+                        )
+                        start_idx = first_idx + 1 if prev_is_first else first_idx
+
+                        # Build the full procedure path between start and last match
+                        proc_path: List[Tuple[str, str, int]] = []
+                        for k in range(start_idx, last_idx + 1):
+                            pt_name = proc_names[k]
+                            pt_iid = known_iids.get(pt_name)
+                            if pt_iid is None:
+                                mid_node = self._get_node_by_name(
+                                    pt_name, sid_conn, star_conn
+                                )
+                                if mid_node is not None:
+                                    pt_iid = mid_node.iid
+                            if pt_iid is not None:
+                                proc_path.append((edge_label, pt_name, pt_iid))
+
+                        # Keep run nodes that are NOT in the procedure but ARE
+                        # the airport (e.g. final connection to airport). Drop
+                        # all other "alien" nodes from mixed procedures.
+                        airport_name = conn.airport_node.name
+                        suffix: List[Tuple[str, str, int]] = []
+                        for e_name, n_name, n_iid in run:
+                            if n_name not in proc_names and n_name == airport_name:
+                                suffix.append((e_name, n_name, n_iid))
+
+                        result.extend(proc_path)
+                        result.extend(suffix)
+                    else:
+                        result.extend(run)
+                else:
+                    result.extend(run)
+
+                i = j
+
             return result
 
         route_list = _fill_gaps_for_conn(route_list, sid_conn, "SID")

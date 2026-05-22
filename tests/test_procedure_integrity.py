@@ -306,8 +306,14 @@ def test_star_final_approach_reasonable(icao):
 @pytest.mark.xfail(reason="Fenix navdata: IKAVO3 lacks approach-bridge data for runways 19R/20L/20R")
 def test_zggg_ikavo3_approach_bridge_exists():
     """IKAVO3 for runways 19R/20L/20R must have at least one waypoint
-    between LUPVU and the runway to guide the final approach.
+    geographically between LUPVU and the airport to guide the final approach.
     """
+    # Get airport coordinates
+    ap_resp = client.get("/api/airports/ZGGG")
+    assert ap_resp.status_code == 200
+    ap_data = ap_resp.json()
+    ap_lat, ap_lon = ap_data["lat"], ap_data["lon"]
+
     data = _get_procedures("ZGGG")
     star = data.get("starDetails", {})
 
@@ -316,27 +322,60 @@ def test_zggg_ikavo3_approach_bridge_exists():
         for proc in proc_list:
             if proc[0] != "IKAVO3":
                 continue
-            if proc[1] not in ("19R", "20L", "20R"):
+            runway = proc[1]
+            if runway not in ("19R", "20L", "20R"):
                 continue
 
             pts = proc[2]
+            transitions = proc[3]
+
+            # Find LUPVU in main points
             lupvu_idx = None
             for i, pt in enumerate(pts):
                 if pt[0] == "LUPVU":
                     lupvu_idx = i
                     break
 
-            if lupvu_idx is not None and lupvu_idx >= len(pts) - 1:
-                failures.append(
-                    f"{proc[0]} runway {proc[1]}: "
-                    f"LUPVU is last in main path ({[p[0] for p in pts]})"
-                )
+            if lupvu_idx is None:
+                failures.append(f"IKAVO3 runway {runway}: LUPVU not found in points")
+                continue
 
-            for t_name, t_pts in proc[3]:
-                if len(t_pts) < 2:
-                    failures.append(
-                        f"{proc[0]} runway {proc[1]} "
-                        f"transition {t_name}: only {len(t_pts)} point(s)"
-                    )
+            lupvu = pts[lupvu_idx]
+            d_lupvu_ap = _point_dist_km(lupvu, ("AP", ap_lat, ap_lon))
+
+            # Collect all waypoints after LUPVU in the full path
+            # (main points after LUPVU + all transition points)
+            candidates = []
+            for pt in pts[lupvu_idx + 1 :]:
+                candidates.append(pt)
+            for t_name, t_pts in transitions:
+                for pt in t_pts:
+                    candidates.append(pt)
+
+            if not candidates:
+                failures.append(
+                    f"IKAVO3 runway {runway}: no waypoint after LUPVU "
+                    f"({[p[0] for p in pts]} / transitions={len(transitions)})"
+                )
+                continue
+
+            # Check if any candidate is geographically between LUPVU and airport
+            has_bridge = False
+            for pt in candidates:
+                d_pt_ap = _point_dist_km(pt, ("AP", ap_lat, ap_lon))
+                d_lupvu_pt = _point_dist_km(lupvu, pt)
+                # Must be closer to airport than LUPVU
+                if d_pt_ap >= d_lupvu_ap:
+                    continue
+                # Must be roughly on the direct path (triangle inequality within 50%)
+                if d_lupvu_pt + d_pt_ap <= d_lupvu_ap * 1.5:
+                    has_bridge = True
+                    break
+
+            if not has_bridge:
+                failures.append(
+                    f"IKAVO3 runway {runway}: no waypoint between LUPVU "
+                    f"and airport among {[(p[0], round(_point_dist_km(lupvu, p), 1)) for p in candidates]}"
+                )
 
     assert not failures, "ZGGG IKAVO3 approach bridge issues:\n" + "\n".join(failures)
