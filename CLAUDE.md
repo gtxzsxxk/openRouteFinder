@@ -152,6 +152,16 @@ All built procedures should satisfy these invariants (enforced by `tests/test_pr
 
 36L northbound departures from Beijing Capital (ZBAA) **must circle the city to the west** (lon < 116.5°), never fly straight north through the city. This is a user-confirmed geographic invariant.
 
+### Test Failure = Our Bug, Not "Missing Data"
+
+**Never assume a test failure is caused by missing navdata, an unreachable airport pair in the real world, or a Fenix data gap.** Every airport pair in `AIRPORT_PAIRS` and every procedure in the test suite represents a real-world route that **must** be computable. If a test fails:
+
+1. **Find the root cause in our code or data pipeline** — builder logic, edge creation, approach bridge fallback, transition merging, etc.
+2. **Do not skip, silence, or work around the failure** — no `pytest.skip`, no `SKIP_PAIRS` additions, no "this airport doesn't have STAR so ignore it".
+3. **Do not blame the source navdata** — Fenix `nd.db3` is the source of truth; if it contains the data but our builder loses it, that's our bug.
+
+If a route query returns `"No result."`, HTTP 404, or an empty procedure list for a real-world airport, treat it as a **data-pipeline or algorithm bug** that must be fixed. Do not add skip logic or reduce test coverage to make tests pass.
+
 ### Documentation Sync Rule
 
 **Any code change that affects architecture, APIs, data formats, SID/STAR behavior, or testing invariants must also update the relevant `docs/claude/*.md` file and/or `CLAUDE.md`.** Do not leave documentation out of sync with code. When in doubt, update it.

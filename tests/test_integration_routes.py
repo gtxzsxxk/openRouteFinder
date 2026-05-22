@@ -41,29 +41,10 @@ AIRPORT_PAIRS = [
 TEST_AIRPORTS = sorted(set(icao for pair in AIRPORT_PAIRS for icao in pair))
 
 
-def _navdata_supports_route(orig: str, dest: str) -> bool:
-    """Check if navdata has both SID and STAR for the given pair.
-
-    Some cross-ocean pairs (e.g. KJFK→KLAX, ZBAA→TNCM) may lack airway
-    connectivity or STAR data in the current navdata cycle.  Skip those
-    gracefully rather than failing the whole suite.
-    """
-    resp_orig = client.get(f"/api/airports/{orig}/procedures?cycle=2604")
-    resp_dest = client.get(f"/api/airports/{dest}/procedures?cycle=2604")
-    if resp_orig.status_code != 200 or resp_dest.status_code != 200:
-        return False
-
-    orig_data = resp_orig.json()
-    dest_data = resp_dest.json()
-
-    orig_has_sid = len(orig_data.get("sid", {}).get("exits", [])) > 0
-    dest_has_star = len(dest_data.get("star", {}).get("entries", [])) > 0
-    return orig_has_sid and dest_has_star
-
-
-# Previously skipped pairs that required navdata fixes (now resolved):
-# - ("KJFK", "KLAX"): terminal waypoints bridged to airway network
-# - ("ZBAA", "TNCM"): TNCM has no STAR but approach bridges provide fallback
+# Per CLAUDE.md: Test Failure = Our Bug, Not "Missing Data".
+# Never skip a test because navdata appears missing. All AIRPORT_PAIRS
+# represent real-world routes that MUST be computable.
+# The old _navdata_supports_route() skip helper has been removed.
 SKIP_PAIRS = set()
 
 
@@ -169,13 +150,16 @@ def _extract_airway_nodes(segments: list, airway: str) -> list:
 
 
 def _find_best_procedure_key(nodes: list, procedures: dict) -> str | None:
-    """Find the procedure key whose points contain the most route nodes."""
+    """Find the procedure key whose points+transitions contain the most route nodes."""
     best_key = None
     best_score = 0
     for key, proc_list in procedures.items():
         for proc in proc_list:
-            pt_names = [p[0] for p in proc[2]]
-            score = sum(1 for n in nodes if n in pt_names)
+            all_names = set(p[0] for p in proc[2])
+            for _, t_pts in proc[3]:
+                for pt in t_pts:
+                    all_names.add(pt[0])
+            score = sum(1 for n in nodes if n in all_names)
             if score > best_score:
                 best_score = score
                 best_key = key
@@ -250,12 +234,6 @@ def _check_procedure_continuity(
 @pytest.mark.parametrize("orig,dest", AIRPORT_PAIRS)
 def test_route_query_returns_valid_route(orig, dest):
     """Each airport pair must return a valid route with auto-selected SID/STAR."""
-    if (orig, dest) in SKIP_PAIRS:
-        pytest.skip(f"Known navdata gap: {orig}→{dest}")
-
-    if not _navdata_supports_route(orig, dest):
-        pytest.skip(f"Navdata does not support {orig}→{dest} (missing SID/STAR or connectivity)")
-
     response = client.post(
         "/api/route",
         json={
@@ -291,12 +269,6 @@ def test_route_topology_no_branching(orig, dest):
     2. 每个 SID procedure 变体自身：检查 points 序列是否单一路径。
     3. 每个 STAR procedure 变体自身：检查 points 序列是否单一路径。
     """
-    if (orig, dest) in SKIP_PAIRS:
-        pytest.skip(f"Known navdata gap: {orig}→{dest}")
-
-    if not _navdata_supports_route(orig, dest):
-        pytest.skip(f"Navdata does not support {orig}→{dest}")
-
     response = client.post(
         "/api/route",
         json={
@@ -312,13 +284,11 @@ def test_route_topology_no_branching(orig, dest):
     assert response.status_code == 200, f"{orig}→{dest}: {response.text}"
     data = response.json()
     if data["route"] == "No result.":
-        pytest.skip(f"{orig}→{dest}: no route found")
+        pytest.fail(f"{orig}→{dest}: no route found — navdata or algorithm bug")
 
     route_segments = data.get("routeSegments", [])
     sid_data = data.get("SID", {})
     star_data = data.get("STAR", {})
-    sid_node_name = data.get("sidNodeName")
-    star_node_name = data.get("starNodeName")
 
     errors = []
 
@@ -377,12 +347,6 @@ def test_route_procedure_segments_continuous(orig, dest):
     in the route's SID/STAR segment is consecutive in the corresponding
     procedure definition.
     """
-    if (orig, dest) in SKIP_PAIRS:
-        pytest.skip(f"Known navdata gap: {orig}→{dest}")
-
-    if not _navdata_supports_route(orig, dest):
-        pytest.skip(f"Navdata does not support {orig}→{dest}")
-
     response = client.post(
         "/api/route",
         json={
@@ -398,7 +362,7 @@ def test_route_procedure_segments_continuous(orig, dest):
     assert response.status_code == 200, f"{orig}→{dest}: {response.text}"
     data = response.json()
     if data["route"] == "No result.":
-        pytest.skip(f"{orig}→{dest}: no route found")
+        pytest.fail(f"{orig}→{dest}: no route found — navdata or algorithm bug")
 
     for label, field_name in [("SID", "SID"), ("STAR", "STAR")]:
         nodes = _extract_airway_nodes(data.get("routeSegments", []), label)
@@ -419,7 +383,207 @@ def test_route_procedure_segments_continuous(orig, dest):
 
 
 # ---------------------------------------------------------------------------
-# 3.4 ZBAA → KLAX KIMMO3 regression test
+# 3.4 Exhaustive SID exits — every exit must produce a valid route
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("orig,dest", AIRPORT_PAIRS)
+def test_all_sid_exits_produce_valid_routes(orig, dest):
+    """穷举 orig 的所有 SID exit points，每个 exit 都应生成有效 route。
+
+    不局限于自动选中的 SID，而是遍历该机场所有 SID exit nodes，
+    对每个 exit 查询 route（STAR 自动选择），验证返回 route 的拓扑、
+    连续性及 procedure 覆盖完整性。
+    """
+    sid_exits = _get_sid_exits(orig)
+    if not sid_exits:
+        pytest.fail(f"{orig}→{dest}: no SID exits — navdata or algorithm bug")
+
+    failures = []
+    total = 0
+    for sid in sid_exits:
+        total += 1
+        response = client.post(
+            "/api/route",
+            json={
+                "orig": orig,
+                "dest": dest,
+                "validCode": "",
+                "validToken": "",
+                "sidExit": sid,
+                "starEntry": "",
+                "cycle": "2604",
+            },
+        )
+        if response.status_code == 500:
+            failures.append(f"SID={sid}: HTTP 500")
+            continue
+        if response.status_code == 404:
+            failures.append(f"SID={sid}: HTTP 404")
+            continue
+        if response.status_code != 200:
+            failures.append(f"SID={sid}: HTTP {response.status_code}")
+            continue
+
+        data = response.json()
+        if data.get("route") == "No result.":
+            failures.append(f"SID={sid}: no route found")
+            continue
+
+        # Validity checks
+        if len(data.get("nodes", [])) < 2:
+            failures.append(f"SID={sid}: insufficient nodes")
+        if data.get("distance") == "0.00 nm / 0.00 km":
+            failures.append(f"SID={sid}: zero distance")
+
+        # Topology check on routeSegments
+        route_segments = data.get("routeSegments", [])
+        seg_degree = _node_degrees(route_segments)
+        for node, deg in seg_degree.items():
+            if deg > 2:
+                failures.append(f"SID={sid}: node {node} degree {deg} > 2")
+        seg_endpoints = [n for n, d in seg_degree.items() if d == 1]
+        if len(seg_endpoints) != 2 and len(seg_endpoints) != 0:
+            failures.append(
+                f"SID={sid}: expected 2 endpoints, got {len(seg_endpoints)}"
+            )
+
+        # SID procedure continuity — exhaustively find best-matching procedure
+        sid_nodes = _extract_airway_nodes(route_segments, "SID")
+        if len(sid_nodes) >= 2:
+            sid_procedures = data.get("SID", {})
+            if sid_procedures:
+                proc_key = _find_best_procedure_key(sid_nodes, sid_procedures)
+                if proc_key:
+                    proc_list = sid_procedures[proc_key]
+                    try:
+                        _check_procedure_continuity(
+                            sid_nodes, proc_list, "SID", orig, dest
+                        )
+                    except AssertionError as e:
+                        failures.append(f"SID={sid}: {e}")
+
+        # STAR procedure continuity
+        star_nodes = _extract_airway_nodes(route_segments, "STAR")
+        if len(star_nodes) >= 2:
+            star_procedures = data.get("STAR", {})
+            if star_procedures:
+                proc_key = _find_best_procedure_key(star_nodes, star_procedures)
+                if proc_key:
+                    proc_list = star_procedures[proc_key]
+                    try:
+                        _check_procedure_continuity(
+                            star_nodes, proc_list, "STAR", orig, dest
+                        )
+                    except AssertionError as e:
+                        failures.append(f"SID={sid}: STAR continuity: {e}")
+
+    assert not failures, (
+        f"{orig}→{dest}: {len(failures)}/{total} SID exits failed:\n"
+        + "\n".join(failures[:20])
+        + (f"\n... and {len(failures) - 20} more" if len(failures) > 20 else "")
+    )
+
+
+# ---------------------------------------------------------------------------
+# 3.5 Exhaustive STAR entries — every entry must produce a valid route
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("orig,dest", AIRPORT_PAIRS)
+def test_all_star_entries_produce_valid_routes(orig, dest):
+    """穷举 dest 的所有 STAR entry points，每个 entry 都应生成有效 route。
+
+    不局限于自动选中的 STAR，而是遍历该机场所有 STAR entry nodes，
+    对每个 entry 查询 route（SID 自动选择），验证返回 route 的拓扑、
+    连续性及 procedure 覆盖完整性。
+    """
+    star_entries = _get_star_entries(dest)
+    if not star_entries:
+        pytest.fail(f"{orig}→{dest}: no STAR entries — navdata or algorithm bug")
+
+    failures = []
+    total = 0
+    for star in star_entries:
+        total += 1
+        response = client.post(
+            "/api/route",
+            json={
+                "orig": orig,
+                "dest": dest,
+                "validCode": "",
+                "validToken": "",
+                "sidExit": "",
+                "starEntry": star,
+                "cycle": "2604",
+            },
+        )
+        if response.status_code == 500:
+            failures.append(f"STAR={star}: HTTP 500")
+            continue
+        if response.status_code == 404:
+            failures.append(f"STAR={star}: HTTP 404")
+            continue
+        if response.status_code != 200:
+            failures.append(f"STAR={star}: HTTP {response.status_code}")
+            continue
+
+        data = response.json()
+        if data.get("route") == "No result.":
+            failures.append(f"STAR={star}: no route found")
+            continue
+
+        if len(data.get("nodes", [])) < 2:
+            failures.append(f"STAR={star}: insufficient nodes")
+        if data.get("distance") == "0.00 nm / 0.00 km":
+            failures.append(f"STAR={star}: zero distance")
+
+        route_segments = data.get("routeSegments", [])
+        seg_degree = _node_degrees(route_segments)
+        for node, deg in seg_degree.items():
+            if deg > 2:
+                failures.append(f"STAR={star}: node {node} degree {deg} > 2")
+        seg_endpoints = [n for n, d in seg_degree.items() if d == 1]
+        if len(seg_endpoints) != 2 and len(seg_endpoints) != 0:
+            failures.append(
+                f"STAR={star}: expected 2 endpoints, got {len(seg_endpoints)}"
+            )
+
+        sid_nodes = _extract_airway_nodes(route_segments, "SID")
+        if len(sid_nodes) >= 2:
+            sid_procedures = data.get("SID", {})
+            if sid_procedures:
+                proc_key = _find_best_procedure_key(sid_nodes, sid_procedures)
+                if proc_key:
+                    proc_list = sid_procedures[proc_key]
+                    try:
+                        _check_procedure_continuity(
+                            sid_nodes, proc_list, "SID", orig, dest
+                        )
+                    except AssertionError as e:
+                        failures.append(f"STAR={star}: SID continuity: {e}")
+
+        star_nodes = _extract_airway_nodes(route_segments, "STAR")
+        if len(star_nodes) >= 2:
+            star_procedures = data.get("STAR", {})
+            if star_procedures:
+                proc_key = _find_best_procedure_key(star_nodes, star_procedures)
+                if proc_key:
+                    proc_list = star_procedures[proc_key]
+                    try:
+                        _check_procedure_continuity(
+                            star_nodes, proc_list, "STAR", orig, dest
+                        )
+                    except AssertionError as e:
+                        failures.append(f"STAR={star}: {e}")
+
+    assert not failures, (
+        f"{orig}→{dest}: {len(failures)}/{total} STAR entries failed:\n"
+        + "\n".join(failures[:20])
+        + (f"\n... and {len(failures) - 20} more" if len(failures) > 20 else "")
+    )
+
+
+# ---------------------------------------------------------------------------
+# 3.6 ZBAA → KLAX KIMMO3 regression test
 # ---------------------------------------------------------------------------
 
 def test_zbaa_klax_kimmo3_includes_all_nodes():
@@ -463,7 +627,7 @@ def test_zbaa_klax_kimmo3_includes_all_nodes():
 
 
 # ---------------------------------------------------------------------------
-# 3.5 Airport procedures availability
+# 3.7 Airport procedures availability
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("icao", TEST_AIRPORTS)
@@ -479,7 +643,7 @@ def test_airport_procedures_available(icao):
 
 
 # ---------------------------------------------------------------------------
-# 3.6 Airport autocomplete
+# 3.8 Airport autocomplete
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("query,expected_icao", [
@@ -514,7 +678,7 @@ def test_airport_autocomplete_no_query():
 
 
 # ---------------------------------------------------------------------------
-# 3.7 Cycles endpoint
+# 3.9 Cycles endpoint
 # ---------------------------------------------------------------------------
 
 def test_cycles_endpoint():
@@ -530,7 +694,7 @@ def test_cycles_endpoint():
 
 
 # ---------------------------------------------------------------------------
-# 3.8 Exhaustive SID x STAR Cartesian product
+# 3.10 Exhaustive SID x STAR Cartesian product
 # ---------------------------------------------------------------------------
 
 def _get_sid_exits(icao: str) -> list:
