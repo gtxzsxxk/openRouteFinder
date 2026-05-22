@@ -189,7 +189,7 @@ def get_airport(icao: str, cycle: Optional[str] = None):
 
 
 @app.get("/api/airports/{icao}/procedures")
-def get_airport_procedures(icao: str, cycle: Optional[str] = None):
+def get_airport_procedures(icao: str, cycle: Optional[str] = None, detail: bool = False):
     icao = icao.upper()
 
     from openRouterFinder.core.airport import FlatbuffersAirportConnector
@@ -227,11 +227,34 @@ def get_airport_procedures(icao: str, cycle: Optional[str] = None):
                 "procedures": list(dict.fromkeys(p.name for p in proc_list)),
             })
 
-    return {
+    result = {
         "icao": icao,
         "sid": {"exits": sid_exits},
         "star": {"entries": star_entries},
     }
+
+    if detail and (sid_conn or star_conn):
+        # Return full procedure tuples (same shape as /api/route SID/STAR fields)
+        def _proc_tuple(proc):
+            return [
+                proc.name,
+                proc.runway,
+                [[p[0], p[1], p[2]] for p in proc.points],
+                [[t[0], [[p[0], p[1], p[2]] for p in t[1]]] for t in proc.transitions],
+            ]
+
+        if sid_conn and sid_conn.procedures:
+            result["sidDetails"] = {
+                key: [_proc_tuple(p) for p in proc_list]
+                for key, proc_list in sid_conn.procedures.items()
+            }
+        if star_conn and star_conn.procedures:
+            result["starDetails"] = {
+                key: [_proc_tuple(p) for p in proc_list]
+                for key, proc_list in star_conn.procedures.items()
+            }
+
+    return result
 
 
 @app.post("/api/route")

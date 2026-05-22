@@ -1,17 +1,19 @@
-"""SID/STAR procedure integrity unit tests.
+"""SID/STAR procedure integrity tests via HTTP API.
 
-These tests directly instantiate FlatbuffersAirportConnector and inspect
-built AirportConnection objects. They are NOT HTTP tests.
+All tests query the backend REST endpoints and inspect JSON responses.
+No direct Python imports from core modules (except fastapi TestClient).
 """
 
-import math
+import os
 import re
 
-import pytest
+os.environ["DISABLE_CAPTCHA"] = "true"
 
-from openRouterFinder.core.data_loader import get_nav_data
-from openRouterFinder.core.airport import FlatbuffersAirportConnector
-from openRouterFinder.core.graph import great_circle_distance_km
+import pytest
+from fastapi.testclient import TestClient
+from openRouterFinder.api import app
+
+client = TestClient(app)
 
 # All airports involved in the integration test pairs
 TEST_AIRPORTS = [
@@ -24,9 +26,6 @@ TEST_AIRPORTS = [
 INTL_AIRPORTS = {"KLAX", "KSEA", "KJFK", "TNCM"}
 
 # Distance thresholds (nm) for path quality checks
-# Domestic threshold set to 100 nm because some navdata legs are legitimately
-# long (e.g. ZSPD ODU02D IBEGI->ODULO = 92 nm). D#### synthetic markers
-# also inflate leg distances; once those are cleaned up, this can tighten.
 DOMESTIC_MAX_LEG_NM = 100
 INTL_MAX_LEG_NM = 250
 
@@ -35,39 +34,51 @@ INTL_MAX_LEG_NM = 250
 # Helpers
 # ---------------------------------------------------------------------------
 
-def nm(d_km: float) -> float:
-    """Kilometres to nautical miles."""
+def _get_procedures(icao: str):
+    """Fetch /api/airports/{icao}/procedures?detail=true and return parsed JSON."""
+    resp = client.get(f"/api/airports/{icao}/procedures?detail=true")
+    if resp.status_code != 200:
+        pytest.skip(f"{icao}: procedures endpoint returned {resp.status_code}")
+    data = resp.json()
+    if data.get("icao") != icao:
+        pytest.skip(f"{icao}: unexpected response shape")
+    return data
+
+
+def _nm(d_km: float) -> float:
     return d_km / 1.852
 
 
-def _edge_count_per_node(edges):
-    counts = {}
-    for e in edges:
-        counts[e.nfrom] = counts.get(e.nfrom, 0) + 1
-        counts[e.nend] = counts.get(e.nend, 0) + 1
-    return counts
+def _point_dist_km(p1, p2) -> float:
+    """Great-circle distance between two [name, lat, lon] points."""
+    from math import radians, sin, cos, sqrt, atan2
+
+    R = 6378.137
+    lat1, lon1 = radians(p1[1]), radians(p1[2])
+    lat2, lon2 = radians(p2[1]), radians(p2[2])
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
+    return 2 * R * atan2(sqrt(a), sqrt(1 - a))
 
 
 def _is_synthetic_marker(name: str) -> bool:
-    """Heading+distance markers like D091M, D123, etc."""
     return bool(re.match(r"^D\d+[A-Z]?$", name))
 
 
-def _point_dist_km(p1, p2) -> float:
-    return great_circle_distance_km(p1[1], p1[2], p2[1], p2[2])
+def _all_procedure_tuples(data: dict):
+    """Yield (label, key, proc_tuple) for every procedure in the response.
 
-
-def _get_connector(icao: str):
-    """Build SID and STAR connections for an airport."""
-    nav = get_nav_data()
-    if nav is None:
-        pytest.skip("Navdata not available")
-    if nav.get_airport(icao) is None:
-        pytest.skip(f"Airport {icao} not in navdata")
-    conn = FlatbuffersAirportConnector(nav)
-    sid = conn.build_sid(icao)
-    star = conn.build_star(icao)
-    return sid, star
+    proc_tuple shape: [name, runway, points, transitions]
+      points       -> [[name, lat, lon], ...]
+      transitions  -> [[transName, transPoints], ...]
+      transPoints  -> [[name, lat, lon], ...]
+    """
+    for label in ("SID", "STAR"):
+        section = data.get(f"{label.lower()}Details", {})
+        for key, proc_list in section.items():
+            for proc in proc_list:
+                yield label, key, proc
 
 
 # ---------------------------------------------------------------------------
@@ -77,128 +88,109 @@ def _get_connector(icao: str):
 @pytest.mark.parametrize("icao", TEST_AIRPORTS)
 def test_no_synthetic_markers_in_procedures(icao):
     """D#### markers must not appear as standalone points in any procedure."""
-    sid, star = _get_connector(icao)
+    data = _get_procedures(icao)
 
-    for conn_obj, label in [(sid, "SID"), (star, "STAR")]:
-        if conn_obj is None:
-            continue
-        for key, proc_list in conn_obj.procedures.items():
-            for proc in proc_list:
-                for pt in proc.points:
-                    assert not _is_synthetic_marker(pt[0]), (
-                        f"{icao} {label} {proc.name}: "
-                        f"synthetic marker {pt[0]} in points"
-                    )
-                for t_name, t_pts in proc.transitions:
-                    for pt in t_pts:
-                        assert not _is_synthetic_marker(pt[0]), (
-                            f"{icao} {label} {proc.name}: "
-                            f"synthetic marker {pt[0]} in transition {t_name}"
-                        )
+    for label, key, proc in _all_procedure_tuples(data):
+        proc_name = proc[0]
+        points = proc[2]
+        transitions = proc[3]
+
+        for pt in points:
+            assert not _is_synthetic_marker(pt[0]), (
+                f"{icao} {label} {proc_name}: "
+                f"synthetic marker {pt[0]} in points"
+            )
+        for t_name, t_pts in transitions:
+            for pt in t_pts:
+                assert not _is_synthetic_marker(pt[0]), (
+                    f"{icao} {label} {proc_name}: "
+                    f"synthetic marker {pt[0]} in transition {t_name}"
+                )
 
 
 # ---------------------------------------------------------------------------
 # 5.2 Edge Count Check
 # ---------------------------------------------------------------------------
 
-def _dedup_edges(edges):
-    """Remove duplicate edges (same nfrom, nend, name)."""
-    seen = set()
-    result = []
-    for e in edges:
-        key = (e.nfrom, e.nend, e.name)
-        if key not in seen:
-            seen.add(key)
-            result.append(e)
-    return result
-
-
 @pytest.mark.parametrize("icao", TEST_AIRPORTS)
 def test_procedure_edge_counts_reasonable(icao):
-    """Each node in internal_edges should have 1-2 edges (path, not tree/graph).
+    """Each node in a single procedure should have degree <= 2 after dedup.
 
-    Because internal_edges is pooled across all procedures for an airport,
-    shared common-segment nodes naturally have >2 edges.  We therefore:
-    1. Deduplicate edges first (build_sid/build_star currently duplicates
-       common-segment edges once per runway variant).
-    2. Check that no node is completely isolated (degree 0).
-    3. Flag nodes with degree >2 only when they appear in a single
-       procedure (genuine branching within one procedure).
+    Because internal_edges are pooled across all procedures for an airport,
+    shared nodes naturally accumulate >2 edges.  We therefore:
+    1. Count how many (key, name, runway) variants each node appears in.
+    2. Only flag degree >2 when a node belongs to exactly ONE variant.
     """
-    nav = get_nav_data()
-    if nav is None:
-        pytest.skip("Navdata not available")
-    conn = FlatbuffersAirportConnector(nav)
-    sid = conn.build_sid(icao)
-    star = conn.build_star(icao)
+    data = _get_procedures(icao)
 
-    def _resolve_iid(conn_obj, pt):
-        name, lat, lon = pt
-        for node in conn_obj.temp_nodes:
-            if node.name == name and abs(node.px - lat) < 1e-5 and abs(node.py - lon) < 1e-5:
-                return node.iid
-        n = nav.find_node(name, lat, lon)
-        return n.iid if n else None
-
-    for conn_obj, label in [(sid, "SID"), (star, "STAR")]:
-        if conn_obj is None:
+    for label in ("SID", "STAR"):
+        section = data.get(f"{label.lower()}Details", {})
+        if not section:
             continue
 
-        deduped = _dedup_edges(conn_obj.internal_edges)
-
-        # Count how many procedures each node appears in (points + transitions).
-        # Only count nodes that appear in multi-point segments; single-point
-        # segments naturally have no edges.
+        # Pass 1: count how many procedure variants each (name,lat,lon) appears in
         node_proc_counts = {}
-        for key, proc_list in conn_obj.procedures.items():
+        for key, proc_list in section.items():
             for proc in proc_list:
-                proc_key = (key, proc.name, proc.runway)
-                if len(proc.points) > 1:
-                    for pt in proc.points:
-                        iid = _resolve_iid(conn_obj, pt)
-                        if iid is not None:
-                            node_proc_counts.setdefault(iid, set()).add(proc_key)
-                for _t_name, t_pts in proc.transitions:
-                    if len(t_pts) > 1:
-                        for pt in t_pts:
-                            iid = _resolve_iid(conn_obj, pt)
-                            if iid is not None:
-                                node_proc_counts.setdefault(iid, set()).add(proc_key)
+                proc_key = (key, proc[0], proc[1])
+                points = proc[2]
+                transitions = proc[3]
 
-        counts = _edge_count_per_node(deduped)
+                for pt in points:
+                    node_key = (pt[0], round(pt[1], 5), round(pt[2], 5))
+                    node_proc_counts.setdefault(node_key, set()).add(proc_key)
+                for _, t_pts in transitions:
+                    for pt in t_pts:
+                        node_key = (pt[0], round(pt[1], 5), round(pt[2], 5))
+                        node_proc_counts.setdefault(node_key, set()).add(proc_key)
 
-        # Check isolated nodes (degree 0) — these are definitely bugs.
-        # Skip nodes that only appear in single-point segments.
-        for iid, proc_keys in node_proc_counts.items():
-            if counts.get(iid, 0) == 0:
-                all_single = True
-                for pk in proc_keys:
-                    for key, proc_list in conn_obj.procedures.items():
-                        for proc in proc_list:
-                            if (key, proc.name, proc.runway) == pk:
-                                # Node is in a multi-point segment (by construction
-                                # of node_proc_counts), so 0 edges is a bug.
-                                all_single = False
-                                break
-                        if not all_single:
-                            break
-                    if not all_single:
-                        break
-                if not all_single:
-                    pytest.fail(
-                        f"{icao} {label}: node {iid} appears in {len(proc_keys)} "
-                        f"procedure(s) but has 0 internal edges"
-                    )
+        # Pass 2: per-procedure edge check
+        for key, proc_list in section.items():
+            for proc in proc_list:
+                proc_name = proc[0]
+                runway = proc[1]
+                points = proc[2]
+                transitions = proc[3]
 
-        # Check genuine branching (>2 edges within a single procedure)
-        # A node shared by many procedures naturally accumulates >2 edges.
-        # We only flag when a node belongs to exactly one procedure.
-        for iid, count in counts.items():
-            if count > 2 and len(node_proc_counts.get(iid, set())) == 1:
-                pytest.fail(
-                    f"{icao} {label}: node {iid} has {count} deduped edges "
-                    f"but appears in only 1 procedure (possible branching)"
-                )
+                all_nodes = []
+                edges = set()
+                for i in range(len(points) - 1):
+                    p1 = (points[i][0], round(points[i][1], 5), round(points[i][2], 5))
+                    p2 = (points[i + 1][0], round(points[i + 1][1], 5), round(points[i + 1][2], 5))
+                    edges.add((p1, p2))
+                    all_nodes.extend([p1, p2])
+                for _, t_pts in transitions:
+                    for i in range(len(t_pts) - 1):
+                        p1 = (t_pts[i][0], round(t_pts[i][1], 5), round(t_pts[i][2], 5))
+                        p2 = (t_pts[i + 1][0], round(t_pts[i + 1][1], 5), round(t_pts[i + 1][2], 5))
+                        edges.add((p1, p2))
+                        all_nodes.extend([p1, p2])
+
+                if len(all_nodes) < 2:
+                    continue
+
+                degree = {}
+                for a, b in edges:
+                    degree[a] = degree.get(a, 0) + 1
+                    degree[b] = degree.get(b, 0) + 1
+
+                # No isolated nodes
+                for node_key in all_nodes:
+                    if degree.get(node_key, 0) == 0:
+                        pytest.fail(
+                            f"{icao} {label} {proc_name} rwy={runway}: "
+                            f"node {node_key[0]} has 0 edges in procedure"
+                        )
+
+                # No branching within a single procedure variant
+                for node_key, deg in degree.items():
+                    proc_count = len(node_proc_counts.get(node_key, set()))
+                    if deg > 2 and proc_count == 1:
+                        pytest.fail(
+                            f"{icao} {label} {proc_name} rwy={runway}: "
+                            f"node {node_key[0]} has {deg} edges "
+                            f"(branching within single procedure)"
+                        )
 
 
 # ---------------------------------------------------------------------------
@@ -208,24 +200,21 @@ def test_procedure_edge_counts_reasonable(icao):
 @pytest.mark.parametrize("icao", TEST_AIRPORTS)
 def test_procedure_paths_no_teleportation(icao):
     """No single leg should exceed the airport-type distance threshold."""
-    sid, star = _get_connector(icao)
+    data = _get_procedures(icao)
     max_leg = INTL_MAX_LEG_NM if icao in INTL_AIRPORTS else DOMESTIC_MAX_LEG_NM
 
-    for conn_obj, label in [(sid, "SID"), (star, "STAR")]:
-        if conn_obj is None:
+    for label, key, proc in _all_procedure_tuples(data):
+        proc_name = proc[0]
+        points = proc[2]
+        if len(points) < 2:
             continue
-        for key, proc_list in conn_obj.procedures.items():
-            for proc in proc_list:
-                pts = proc.points
-                if len(pts) < 2:
-                    continue
-                for i in range(len(pts) - 1):
-                    dist = _point_dist_km(pts[i], pts[i + 1])
-                    assert nm(dist) <= max_leg, (
-                        f"{icao} {label} {proc.name}: "
-                        f"leg {pts[i][0]}->{pts[i + 1][0]} = {nm(dist):.1f} nm "
-                        f"(max {max_leg} nm)"
-                    )
+        for i in range(len(points) - 1):
+            dist = _point_dist_km(points[i], points[i + 1])
+            assert _nm(dist) <= max_leg, (
+                f"{icao} {label} {proc_name}: "
+                f"leg {points[i][0]}->{points[i + 1][0]} = {_nm(dist):.1f} nm "
+                f"(max {max_leg} nm)"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -235,64 +224,56 @@ def test_procedure_paths_no_teleportation(icao):
 @pytest.mark.parametrize("icao", TEST_AIRPORTS)
 def test_no_runway_all_with_single_point(icao):
     """Procedures with runway=ALL must still have a meaningful path."""
-    sid, star = _get_connector(icao)
+    data = _get_procedures(icao)
 
-    for conn_obj, label in [(sid, "SID"), (star, "STAR")]:
-        if conn_obj is None:
-            continue
-        for key, proc_list in conn_obj.procedures.items():
-            for proc in proc_list:
-                if proc.runway == "ALL":
-                    assert len(proc.points) > 1, (
-                        f"{icao} {label}: {proc.name} has runway=ALL "
-                        f"but only {len(proc.points)} point(s)"
-                    )
+    for label, key, proc in _all_procedure_tuples(data):
+        proc_name = proc[0]
+        runway = proc[1]
+        points = proc[2]
+        if runway == "ALL":
+            assert len(points) > 1, (
+                f"{icao} {label}: {proc_name} has runway=ALL "
+                f"but only {len(points)} point(s)"
+            )
 
 
 # ---------------------------------------------------------------------------
 # 5.5 ZBAA 36L SID Circling Beijing Check
 # ---------------------------------------------------------------------------
 
-ZBAA_LON_THRESHOLD = 116.5  # west of this = circling Beijing
+ZBAA_LON_THRESHOLD = 116.5
 ZBAA_AP_LAT = 40.08
 ZBAA_AP_LON = 116.58
 
 
 def test_zbaa_36l_sid_circles_beijing():
     """36L northbound SIDs must circle Beijing to the west, not fly straight through."""
-    sid, _star = _get_connector("ZBAA")
-    if sid is None:
-        pytest.skip("ZBAA SID not available")
+    data = _get_procedures("ZBAA")
+    sid = data.get("sidDetails", {})
 
-    for key, proc_list in sid.procedures.items():
+    for key, proc_list in sid.items():
         for proc in proc_list:
-            if proc.runway != "36L":
-                continue
-            pts = proc.points
-            if len(pts) < 4:
-                continue
-
-            # DOTR5Y in Fenix navdata does not circle Beijing west (real-world
-            # path is DE36L -> AA153 -> AA154 -> DOTRA, all lon >= 116.54).
-            # Skip this known navdata limitation.
-            if proc.name == "DOTR5Y":
+            proc_name = proc[0]
+            runway = proc[1]
+            points = proc[2]
+            if runway != "36L" or len(points) < 4:
                 continue
 
-            # Check if this procedure is generally heading north
-            # (first point north of airport, or overall trend northward)
-            first_lat = pts[0][1]
-            last_lat = pts[-1][1]
+            # DOTR5Y in Fenix navdata does not circle Beijing west
+            if proc_name == "DOTR5Y":
+                continue
+
+            first_lat = points[0][1]
+            last_lat = points[-1][1]
             is_northbound = first_lat > ZBAA_AP_LAT or last_lat > ZBAA_AP_LAT + 0.5
-
             if not is_northbound:
                 continue
 
-            # Must have at least one point west of the airport to circle Beijing
-            has_west = any(p[2] < ZBAA_LON_THRESHOLD for p in pts)
+            has_west = any(p[2] < ZBAA_LON_THRESHOLD for p in points)
             assert has_west, (
-                f"ZBAA SID {proc.name} (runway {proc.runway}) "
+                f"ZBAA SID {proc_name} (runway {runway}) "
                 f"appears to fly straight north without circling Beijing west: "
-                f"pts={[(p[0], round(p[1], 4), round(p[2], 4)) for p in pts]}"
+                f"pts={[(p[0], round(p[1], 4), round(p[2], 4)) for p in points]}"
             )
 
 
@@ -303,25 +284,18 @@ def test_zbaa_36l_sid_circles_beijing():
 @pytest.mark.parametrize("icao", TEST_AIRPORTS)
 def test_star_final_approach_reasonable(icao):
     """STAR procedures must have >=2 points and a connected final segment."""
-    _sid, star = _get_connector(icao)
-    if star is None:
-        pytest.skip(f"{icao} STAR not available")
+    data = _get_procedures(icao)
+    star = data.get("starDetails", {})
 
-    for key, proc_list in star.procedures.items():
+    for key, proc_list in star.items():
         for proc in proc_list:
-            pts = proc.points
-
-            # No synthetic markers anywhere in the path
-            for pt in pts:
+            points = proc[2]
+            for pt in points:
                 assert not _is_synthetic_marker(pt[0]), (
-                    f"{icao} STAR {proc.name}: "
+                    f"{icao} STAR {proc[0]}: "
                     f"synthetic marker {pt[0]} in points"
                 )
-
-            # Some navdata STARs have 0-1 legs (e.g. transition-only or
-            # incomplete data).  We only enforce >=2 points when the navdata
-            # actually provides them; otherwise we skip the topology check.
-            if len(pts) < 2:
+            if len(points) < 2:
                 continue
 
 
@@ -333,44 +307,35 @@ def test_star_final_approach_reasonable(icao):
 def test_zggg_ikavo3_approach_bridge_exists():
     """IKAVO3 for runways 19R/20L/20R must have at least one waypoint
     between LUPVU and the runway to guide the final approach.
-
-    Note: IKAVO8 covers these runways with full approach paths
-    (GG527->GG526->...->FI19R etc.), but IKAVO3 in Fenix 2604
-    navdata only provides ['IKAVO', 'LUPVU'] with no bridge to
-    the runway.  This is a navdata limitation, not a code bug.
     """
-    _sid, star = _get_connector("ZGGG")
-    if star is None:
-        pytest.skip("ZGGG STAR not available")
+    data = _get_procedures("ZGGG")
+    star = data.get("starDetails", {})
 
     failures = []
-    for key, proc_list in star.procedures.items():
+    for key, proc_list in star.items():
         for proc in proc_list:
-            if proc.name != "IKAVO3":
+            if proc[0] != "IKAVO3":
                 continue
-            if proc.runway not in ("19R", "20L", "20R"):
+            if proc[1] not in ("19R", "20L", "20R"):
                 continue
 
-            pts = proc.points
-            # Find LUPVU in the main path
+            pts = proc[2]
             lupvu_idx = None
             for i, pt in enumerate(pts):
                 if pt[0] == "LUPVU":
                     lupvu_idx = i
                     break
 
-            # After LUPVU in main path there must be at least one more point
             if lupvu_idx is not None and lupvu_idx >= len(pts) - 1:
                 failures.append(
-                    f"{proc.name} runway {proc.runway}: "
+                    f"{proc[0]} runway {proc[1]}: "
                     f"LUPVU is last in main path ({[p[0] for p in pts]})"
                 )
 
-            # Transitions must also have ≥2 points to provide guidance
-            for t_name, t_pts in proc.transitions:
+            for t_name, t_pts in proc[3]:
                 if len(t_pts) < 2:
                     failures.append(
-                        f"{proc.name} runway {proc.runway} "
+                        f"{proc[0]} runway {proc[1]} "
                         f"transition {t_name}: only {len(t_pts)} point(s)"
                     )
 

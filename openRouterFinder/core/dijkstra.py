@@ -166,6 +166,15 @@ class RouteEngine:
                 None, {}, {}, [],
             )
 
+        # Post-process: ensure route follows complete procedure paths.
+        # A* may skip intermediate procedure nodes when pooled internal_edges
+        # contain shortcuts from other procedures (e.g. WAYVE1's EHF->LOPES
+        # bypasses KIMMO3's ARVIN/AMONT).  Insert missing nodes so the
+        # route reflects the intended procedure topology.
+        target.route_list = self._fill_procedure_gaps(
+            target.route_list, sid_conn, star_conn
+        )
+
         dist_km = target.dist
         dist_nm = dist_km / 1.852
         dist_str = "%.2f nm / %.2f km" % (dist_nm, dist_km)
@@ -334,6 +343,91 @@ class RouteEngine:
                     for pt in t_pts:
                         if pt[0] == node_name:
                             return key
+        return None
+
+    def _fill_procedure_gaps(
+        self,
+        route_list: List[Tuple[str, str, int]],
+        sid_conn: AirportConnection,
+        star_conn: AirportConnection,
+    ) -> List[Tuple[str, str, int]]:
+        """Insert missing intermediate procedure nodes into route_list.
+
+        When pooled internal_edges contain shortcut edges from other
+        procedures, A* may skip intermediate nodes (e.g. KIMMO3's ARVIN
+        and AMONT are bypassed by WAYVE1's EHF->LOPES edge).  This
+        post-processor walks the route and fills in any gaps so the
+        returned route reflects the full procedure path.
+        """
+
+        def _proc_for_node(node_name: str, conn: AirportConnection):
+            for key, proc_list in conn.procedures.items():
+                for proc in proc_list:
+                    if any(p[0] == node_name for p in proc.points):
+                        return proc
+            return None
+
+        def _fill_gaps_for_conn(
+            route: List[Tuple[str, str, int]],
+            conn: AirportConnection,
+            edge_label: str,
+        ):
+            result: List[Tuple[str, str, int]] = []
+            i = 0
+            while i < len(route):
+                edge_name, node_name, iid = route[i]
+                result.append((edge_name, node_name, iid))
+
+                if edge_name == edge_label and i + 1 < len(route):
+                    next_edge, next_name, next_iid = route[i + 1]
+                    proc = _proc_for_node(node_name, conn)
+                    if proc is None:
+                        i += 1
+                        continue
+
+                    point_names = [p[0] for p in proc.points]
+                    if node_name not in point_names or next_name not in point_names:
+                        i += 1
+                        continue
+
+                    start_idx = point_names.index(node_name)
+                    end_idx = point_names.index(next_name)
+                    if end_idx <= start_idx + 1:
+                        i += 1
+                        continue
+
+                    # Insert intermediate points
+                    for j in range(start_idx + 1, end_idx):
+                        pt = proc.points[j]
+                        mid_node = self._get_node_by_name(pt[0], sid_conn, star_conn)
+                        if mid_node is not None:
+                            result.append((edge_label, mid_node.name, mid_node.iid))
+
+                i += 1
+            return result
+
+        route_list = _fill_gaps_for_conn(route_list, sid_conn, "SID")
+        route_list = _fill_gaps_for_conn(route_list, star_conn, "STAR")
+        return route_list
+
+    def _get_node_by_name(
+        self,
+        name: str,
+        sid_conn: AirportConnection,
+        star_conn: AirportConnection,
+    ) -> Optional[Node]:
+        """Find node by name across all known nodes."""
+        # Check temp nodes first
+        for node in sid_conn.temp_nodes:
+            if node.name == name:
+                return node
+        for node in star_conn.temp_nodes:
+            if node.name == name:
+                return node
+        # Check global node list
+        for node in self.node_list:
+            if node is not None and node.name == name:
+                return node
         return None
 
     def _find_transition_name(
