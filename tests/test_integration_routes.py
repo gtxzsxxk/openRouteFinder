@@ -8,6 +8,12 @@ import pytest
 from fastapi.testclient import TestClient
 from openRouterFinder.api import app
 
+def setup_module(module):
+    """Trigger FastAPI startup events to build airport index."""
+    with TestClient(app):
+        pass
+
+
 client = TestClient(app)
 
 # Airport pairs to test (orig → dest)
@@ -42,8 +48,8 @@ def _navdata_supports_route(orig: str, dest: str) -> bool:
     connectivity or STAR data in the current navdata cycle.  Skip those
     gracefully rather than failing the whole suite.
     """
-    resp_orig = client.get(f"/api/airports/{orig}/procedures")
-    resp_dest = client.get(f"/api/airports/{dest}/procedures")
+    resp_orig = client.get(f"/api/airports/{orig}/procedures?cycle=2604")
+    resp_dest = client.get(f"/api/airports/{dest}/procedures?cycle=2604")
     if resp_orig.status_code != 200 or resp_dest.status_code != 200:
         return False
 
@@ -259,6 +265,7 @@ def test_route_query_returns_valid_route(orig, dest):
             "validToken": "",
             "sidExit": "",
             "starEntry": "",
+            "cycle": "2604",
         },
     )
     assert response.status_code == 200, f"{orig}→{dest}: {response.text}"
@@ -299,6 +306,7 @@ def test_route_topology_no_branching(orig, dest):
             "validToken": "",
             "sidExit": "",
             "starEntry": "",
+            "cycle": "2604",
         },
     )
     assert response.status_code == 200, f"{orig}→{dest}: {response.text}"
@@ -384,6 +392,7 @@ def test_route_procedure_segments_continuous(orig, dest):
             "validToken": "",
             "sidExit": "",
             "starEntry": "",
+            "cycle": "2604",
         },
     )
     assert response.status_code == 200, f"{orig}→{dest}: {response.text}"
@@ -429,6 +438,7 @@ def test_zbaa_klax_kimmo3_includes_all_nodes():
             "validToken": "",
             "sidExit": "",
             "starEntry": "",
+            "cycle": "2604",
         },
     )
     assert response.status_code == 200, response.text
@@ -459,10 +469,129 @@ def test_zbaa_klax_kimmo3_includes_all_nodes():
 @pytest.mark.parametrize("icao", TEST_AIRPORTS)
 def test_airport_procedures_available(icao):
     """Each test airport must have SID/STAR procedures available."""
-    response = client.get(f"/api/airports/{icao}/procedures")
+    response = client.get(f"/api/airports/{icao}/procedures?cycle=2604")
     assert response.status_code == 200, f"{icao}: {response.text}"
     data = response.json()
     # At least one of SID or STAR should be non-empty for major airports
     sid_count = len(data.get("sid", {}).get("exits", []))
     star_count = len(data.get("star", {}).get("entries", []))
     assert sid_count > 0 or star_count > 0, f"{icao}: no procedures found"
+
+
+# ---------------------------------------------------------------------------
+# 3.6 Airport autocomplete
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("query,expected_icao", [
+    ("ZB", "ZBAA"),          # ICAO prefix match
+    ("Incheon", "RKSI"),     # Name substring match
+    ("RJTT", "RJTT"),        # Exact ICAO match
+])
+def test_airport_autocomplete(query, expected_icao):
+    """GET /api/airports?q= must return matching airports."""
+    response = client.get(f"/api/airports?q={query}")
+    assert response.status_code == 200
+    data = response.json()
+    assert "airports" in data
+    icaos = [ap["icao"] for ap in data["airports"]]
+    assert expected_icao in icaos, f"Expected {expected_icao} in {icaos}"
+
+
+def test_airport_autocomplete_empty_query():
+    """Empty query must return the first 50 airports."""
+    response = client.get("/api/airports?q=")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["airports"]) > 0
+
+
+def test_airport_autocomplete_no_query():
+    """No query param must return the first 50 airports."""
+    response = client.get("/api/airports")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["airports"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# 3.7 Cycles endpoint
+# ---------------------------------------------------------------------------
+
+def test_cycles_endpoint():
+    """GET /api/cycles must return cycle list and default cycle."""
+    response = client.get("/api/cycles")
+    assert response.status_code == 200
+    data = response.json()
+    assert "cycles" in data
+    assert "default" in data
+    assert "disableCaptcha" in data
+    assert len(data["cycles"]) > 0
+    assert data["default"] is not None
+
+
+# ---------------------------------------------------------------------------
+# 3.8 Exhaustive SID x STAR Cartesian product
+# ---------------------------------------------------------------------------
+
+def _get_sid_exits(icao: str) -> list:
+    """Fetch SID exit names for an airport."""
+    resp = client.get(f"/api/airports/{icao}/procedures?cycle=2604")
+    if resp.status_code != 200:
+        return []
+    data = resp.json()
+    return [e["name"] for e in data.get("sid", {}).get("exits", [])]
+
+
+def _get_star_entries(icao: str) -> list:
+    """Fetch STAR entry names for an airport."""
+    resp = client.get(f"/api/airports/{icao}/procedures?cycle=2604")
+    if resp.status_code != 200:
+        return []
+    data = resp.json()
+    return [e["name"] for e in data.get("star", {}).get("entries", [])]
+
+
+@pytest.mark.parametrize("orig,dest", AIRPORT_PAIRS)
+def test_exhaustive_sid_star_combinations(orig, dest):
+    """For each airport pair, test every SID x STAR combination.
+
+    Not all combinations produce a valid route (incompatible SID/STAR pairs
+    or missing airway connectivity), but none should crash with 500.
+    """
+    sid_exits = _get_sid_exits(orig)
+    star_entries = _get_star_entries(dest)
+
+    if not sid_exits or not star_entries:
+        pytest.skip(f"{orig}→{dest}: no SID/STAR to combine")
+
+    failures = []
+    total = 0
+    for sid in sid_exits:
+        for star in star_entries:
+            total += 1
+            response = client.post(
+                "/api/route",
+                json={
+                    "orig": orig,
+                    "dest": dest,
+                    "validCode": "",
+                    "validToken": "",
+                    "sidExit": sid,
+                    "starEntry": star,
+                    "cycle": "2604",
+                },
+            )
+            if response.status_code == 500:
+                failures.append(
+                    f"{orig}→{dest} SID={sid} STAR={star}: HTTP 500"
+                )
+            elif response.status_code not in (200, 404):
+                failures.append(
+                    f"{orig}→{dest} SID={sid} STAR={star}: HTTP {response.status_code}"
+                )
+
+    assert not failures, (
+        f"{orig}→{dest}: {len(failures)}/{total} SID×STAR combinations failed:\n"
+        + "\n".join(failures[:20])
+        + (f"\n... and {len(failures) - 20} more" if len(failures) > 20 else "")
+    )

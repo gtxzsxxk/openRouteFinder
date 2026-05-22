@@ -13,6 +13,12 @@ import pytest
 from fastapi.testclient import TestClient
 from openRouterFinder.api import app
 
+def setup_module(module):
+    """Trigger FastAPI startup events to build airport index."""
+    with TestClient(app):
+        pass
+
+
 client = TestClient(app)
 
 # All airports involved in the integration test pairs
@@ -35,8 +41,8 @@ INTL_MAX_LEG_NM = 300
 # ---------------------------------------------------------------------------
 
 def _get_procedures(icao: str):
-    """Fetch /api/airports/{icao}/procedures?detail=true and return parsed JSON."""
-    resp = client.get(f"/api/airports/{icao}/procedures?detail=true")
+    """Fetch /api/airports/{icao}/procedures?detail=true&cycle=2604 and return parsed JSON."""
+    resp = client.get(f"/api/airports/{icao}/procedures?detail=true&cycle=2604")
     if resp.status_code != 200:
         pytest.skip(f"{icao}: procedures endpoint returned {resp.status_code}")
     data = resp.json()
