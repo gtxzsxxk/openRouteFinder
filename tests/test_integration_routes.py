@@ -75,6 +75,82 @@ def _node_degrees(segments: list) -> dict:
     return degree
 
 
+def _build_frontend_edges(
+    route_segments: list,
+    sid_proc,
+    star_proc,
+) -> list:
+    """从原始 procedure + airway segments 构建完整航路边列表。
+
+    routeSegments 中 SID/STAR 和 airway 已通过 airway 字段区分：
+    - airway == "SID" 属于 SID
+    - airway == "STAR" 属于 STAR
+    - 其他属于 airway
+
+    用原始 procedure 的 points 替换 routeSegments 中的 SID/STAR 部分，
+    保留 airway 部分，拼接成完整路径后转为边列表。
+    """
+    # 从 routeSegments 提取 airway 节点序列
+    airway_nodes = []
+    for seg in route_segments:
+        if seg["airway"] not in ("SID", "STAR"):
+            if not airway_nodes or airway_nodes[-1] != seg["from"]:
+                airway_nodes.append(seg["from"])
+            airway_nodes.append(seg["to"])
+
+    # SID/STAR procedure points: [[name, lat, lon], ...]
+    sid_pts = [p[0] for p in (sid_proc[2] if sid_proc else [])]
+    star_pts = [p[0] for p in (star_proc[2] if star_proc else [])]
+
+    # 拼接完整节点序列：SID + airway + STAR，去重连接点
+    complete = []
+    for name in sid_pts:
+        if not complete or complete[-1] != name:
+            complete.append(name)
+    for name in airway_nodes:
+        if not complete or complete[-1] != name:
+            complete.append(name)
+    for name in star_pts:
+        if not complete or complete[-1] != name:
+            complete.append(name)
+
+    # 转为边列表
+    edges = []
+    for i in range(len(complete) - 1):
+        if complete[i] != complete[i + 1]:
+            edges.append((complete[i], complete[i + 1]))
+
+    return edges
+
+
+def _check_topology(edges: list, label: str = "") -> list:
+    """检查边列表是否构成一条无分叉的单一路径。
+
+    返回错误消息列表（空列表表示无错误）。
+    """
+    if not edges:
+        return []
+
+    degree = {}
+    for a, b in edges:
+        degree[a] = degree.get(a, 0) + 1
+        degree[b] = degree.get(b, 0) + 1
+
+    errors = []
+
+    for node, deg in degree.items():
+        if deg > 2:
+            errors.append(f"{label}: node {node} has degree {deg} > 2 (branching)")
+
+    endpoints = [n for n, d in degree.items() if d == 1]
+    if len(endpoints) != 2:
+        errors.append(
+            f"{label}: expected exactly 2 degree-1 nodes, got {len(endpoints)}: {endpoints}"
+        )
+
+    return errors
+
+
 def _extract_airway_nodes(segments: list, airway: str) -> list:
     """Extract ordered node list for a given airway label from segments."""
     nodes = []
@@ -199,12 +275,14 @@ def test_route_query_returns_valid_route(orig, dest):
 
 @pytest.mark.parametrize("orig,dest", AIRPORT_PAIRS)
 def test_route_topology_no_branching(orig, dest):
-    """Each node in the returned route must have at most 2 edges.
+    """完整航路拓扑检查：模拟前端拼接 SID + 主航路 + STAR，验证无分支。
 
-    A valid route is a single path: each interior node has exactly one
-    incoming and one outgoing edge (degree 2), and the two airports have
-    degree 1.  Degree > 2 indicates branching (a node is used as a junction
-    by multiple segments), which must never happen.
+    分三部分检查：
+    1. 自动选中的 SID/STAR 组合：按前端逻辑拼出完整航路，检查拓扑。
+       主航路 nodes 是 A* 基于特定 SID/STAR 计算的，只有匹配的组合
+       才能拼成连续路径。
+    2. 每个 SID procedure 变体自身：检查 points 序列是否单一路径。
+    3. 每个 STAR procedure 变体自身：检查 points 序列是否单一路径。
     """
     if (orig, dest) in SKIP_PAIRS:
         pytest.skip(f"Known navdata gap: {orig}→{dest}")
@@ -228,21 +306,52 @@ def test_route_topology_no_branching(orig, dest):
     if data["route"] == "No result.":
         pytest.skip(f"{orig}→{dest}: no route found")
 
-    segments = data.get("routeSegments", [])
-    degree = _node_degrees(segments)
+    route_segments = data.get("routeSegments", [])
+    sid_data = data.get("SID", {})
+    star_data = data.get("STAR", {})
+    sid_node_name = data.get("sidNodeName")
+    star_node_name = data.get("starNodeName")
 
-    for node, deg in degree.items():
-        assert deg <= 2, (
-            f"{orig}→{dest}: node {node} has degree {deg} > 2 "
-            f"(branching detected in route)"
+    errors = []
+
+    # ------------------------------------------------------------------
+    # Part 1: 实线主航路（routeSegments）自身必须无分支
+    # ------------------------------------------------------------------
+    seg_degree = _node_degrees(route_segments)
+    for node, deg in seg_degree.items():
+        if deg > 2:
+            errors.append(
+                f"{orig}→{dest} routeSegments: node {node} has degree {deg} > 2"
+            )
+    seg_endpoints = [n for n, d in seg_degree.items() if d == 1]
+    if len(seg_endpoints) != 2:
+        errors.append(
+            f"{orig}→{dest} routeSegments: expected 2 endpoints, got {len(seg_endpoints)}: {seg_endpoints}"
         )
 
-    # Exactly two nodes (orig and dest airports) should have degree 1.
-    single_deg = [n for n, d in degree.items() if d == 1]
-    assert len(single_deg) == 2, (
-        f"{orig}→{dest}: expected exactly 2 degree-1 nodes (airports), "
-        f"got {single_deg}"
-    )
+    # ------------------------------------------------------------------
+    # Part 2: 每条虚线 SID 自身必须无分支
+    # ------------------------------------------------------------------
+    for key, proc_list in sid_data.items():
+        for proc in proc_list:
+            pts = [p[0] for p in proc[2]]
+            proc_edges = [(pts[i], pts[i + 1]) for i in range(len(pts) - 1) if pts[i] != pts[i + 1]]
+            label = f"{orig} SID={key} rwy={proc[1]}"
+            errs = _check_topology(proc_edges, label)
+            errors.extend(errs)
+
+    # ------------------------------------------------------------------
+    # Part 3: 每条虚线 STAR 自身必须无分支
+    # ------------------------------------------------------------------
+    for key, proc_list in star_data.items():
+        for proc in proc_list:
+            pts = [p[0] for p in proc[2]]
+            proc_edges = [(pts[i], pts[i + 1]) for i in range(len(pts) - 1) if pts[i] != pts[i + 1]]
+            label = f"{dest} STAR={key} rwy={proc[1]}"
+            errs = _check_topology(proc_edges, label)
+            errors.extend(errs)
+
+    assert not errors, "Route topology errors:\n" + "\n".join(errors)
 
 
 # ---------------------------------------------------------------------------
