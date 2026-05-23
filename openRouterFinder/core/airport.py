@@ -52,12 +52,14 @@ class FlatbuffersAirportConnector:
             self._next_temp_iid -= 1
         return self._temp_nodes[name]
 
-    def _find_nearest_connected_node(self, lat: float, lon: float) -> Optional[Node]:
+    def _find_nearest_connected_node(self, lat: float, lon: float, exclude_iid: Optional[int] = None) -> Optional[Node]:
         """Find the nearest navdata node that has at least one outgoing edge."""
         nearest = None
         min_dist = float("inf")
         for node in self.nav_data.node_list:
             if node is None or not node.next_list:
+                continue
+            if exclude_iid is not None and node.iid == exclude_iid:
                 continue
             d = great_circle_distance_km(node.px, node.py, lat, lon)
             if d < min_dist:
@@ -83,7 +85,20 @@ class FlatbuffersAirportConnector:
 
         For SID: bridges go FROM isolated exit nodes TO nearest connected node.
         For STAR: bridges go FROM nearest connected node TO isolated entry nodes.
+
+        A node is "isolated" for SID if it has no outbound edges (can't leave).
+        A node is "isolated" for STAR if it has no inbound edges (can't reach).
+        Some nodes (e.g. SULPU) have outbound edges but no inbound edges, making
+        them unreachable as STAR entry points.
         """
+        # Build set of nodes that have inbound edges (for STAR check)
+        nodes_with_inbound: set = set()
+        for node in self.nav_data.node_list:
+            if node is None:
+                continue
+            for e in node.next_list:
+                nodes_with_inbound.add(e.nend)
+
         if proc_type == 1:  # SID
             # Collect unique exit nodes from procedures
             exit_nodes: Dict[int, Node] = {}
@@ -95,7 +110,7 @@ class FlatbuffersAirportConnector:
                         exit_nodes[node.iid] = node
             for node in exit_nodes.values():
                 if not node.next_list:
-                    bridge = self._find_nearest_connected_node(node.px, node.py)
+                    bridge = self._find_nearest_connected_node(node.px, node.py, exclude_iid=node.iid)
                     if bridge:
                         conn.internal_edges.append(
                             Edge(nfrom=node.iid, nend=bridge.iid, name="SID")
@@ -110,8 +125,9 @@ class FlatbuffersAirportConnector:
                         node = self._resolve_node(first_pt[0], first_pt[1], first_pt[2])
                         entry_nodes[node.iid] = node
             for node in entry_nodes.values():
-                if not node.next_list:
-                    bridge = self._find_nearest_connected_node(node.px, node.py)
+                needs_bridge = not node.next_list or node.iid not in nodes_with_inbound
+                if needs_bridge:
+                    bridge = self._find_nearest_connected_node(node.px, node.py, exclude_iid=node.iid)
                     if bridge:
                         conn.internal_edges.append(
                             Edge(nfrom=bridge.iid, nend=node.iid, name="STAR")
@@ -1089,10 +1105,20 @@ class FlatbuffersAirportConnector:
 
         # Fallback: when no STAR procedures exist but approach bridges do,
         # create virtual STAR procedures from the approach bridges.
-        # Only apply this fallback when no filter is active (a filter that
-        # removes all matches should return empty, not fall back to approaches).
-        if not procedures and approach_bridges and not filter_name:
+        # Apply this fallback when no filter is active, OR when the filter
+        # matches an approach bridge entry (so explicit starEntry still works
+        # for airports with only approach data).
+        filter_matches_bridge = False
+        if filter_name and approach_bridges:
+            filter_matches_bridge = any(
+                entry_name == filter_name
+                for (runway, entry_name), _ in approach_bridges.items()
+            )
+
+        if not procedures and approach_bridges and (not filter_name or filter_matches_bridge):
             for (runway, entry_name), bridge_points in approach_bridges.items():
+                if filter_name and entry_name != filter_name:
+                    continue
                 proc = Procedure(
                     name=f"APPR_{runway}",
                     runway=runway,
