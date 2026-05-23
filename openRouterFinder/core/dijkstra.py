@@ -217,10 +217,11 @@ class RouteEngine:
         sid_used = used_procs.get("SID")
         if sid_used:
             sid_node_name = sid_used[0]
-            # Find the first route node that belongs to this procedure
-            for _, node_name, _ in target.route_list:
-                key = self._find_procedure_key_for_node(node_name, sid_conn)
-                if key == sid_node_name:
+            # Find the last route node that belongs to this procedure.
+            # The frontend excludes nodes *before* sidRouteNodeName, so this
+            # must be the boundary between SID and airway (last SID node).
+            for _, node_name, _ in reversed(target.route_list):
+                if self._node_in_procedure_key(node_name, sid_node_name, sid_conn):
                     sid_route_node_name = node_name
                     break
         else:
@@ -240,9 +241,11 @@ class RouteEngine:
         star_used = used_procs.get("STAR")
         if star_used:
             star_node_name = star_used[0]
-            for _, node_name, _ in reversed(target.route_list):
-                key = self._find_procedure_key_for_node(node_name, star_conn)
-                if key == star_node_name:
+            # Find the first route node that belongs to this procedure.
+            # The frontend excludes nodes *after* starRouteNodeName, so this
+            # must be the boundary between airway and STAR (first STAR node).
+            for _, node_name, _ in target.route_list:
+                if self._node_in_procedure_key(node_name, star_node_name, star_conn):
                     star_route_node_name = node_name
                     break
         else:
@@ -350,6 +353,23 @@ class RouteEngine:
             if node.iid == iid:
                 return node
         return None
+
+    def _node_in_procedure_key(
+        self,
+        node_name: str,
+        key: str,
+        conn: AirportConnection,
+    ) -> bool:
+        """Return True if node_name appears in any procedure under the given key."""
+        for proc in conn.procedures.get(key, []):
+            for pt in proc.points:
+                if pt[0] == node_name:
+                    return True
+            for _, t_pts in proc.transitions:
+                for pt in t_pts:
+                    if pt[0] == node_name:
+                        return True
+        return False
 
     def _find_procedure_key_for_node(
         self,

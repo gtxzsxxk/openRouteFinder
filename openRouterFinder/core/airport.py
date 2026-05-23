@@ -294,14 +294,20 @@ class FlatbuffersAirportConnector:
             segments.append(self._dedup_consecutive(current))
         return segments
 
+    RUNWAY_RE = re.compile(r'^\d+[LRC]?$')
+
     @staticmethod
     def _infer_runway_from_points(points: List[Tuple[str, float, float]], default: str = "") -> str:
         """Infer runway from DERxx / DExx markers in segment points."""
         for name, _, _ in points:
             if name.startswith("DER"):
-                return name[3:]
-            if name.startswith("DE"):
-                return name[2:]
+                rwy = name[3:]
+                if FlatbuffersAirportConnector.RUNWAY_RE.match(rwy):
+                    return rwy
+            elif name.startswith("DE"):
+                rwy = name[2:]
+                if FlatbuffersAirportConnector.RUNWAY_RE.match(rwy):
+                    return rwy
         return default
 
     def _resolve_node(self, name: str, lat: float, lon: float) -> Node:
@@ -472,7 +478,7 @@ class FlatbuffersAirportConnector:
                     if not trans_points:
                         continue
                     # Infer runway from segment content (DERxx/DExx markers);
-                    # fallback to transition name for normal transitions.
+                    # fallback to transition name for grouping (validated later).
                     default_runway = trans_name[2:] if trans_name.startswith("RW") else trans_name
                     runway_name = self._infer_runway_from_points(trans_points, default_runway)
                     if proc_type == 1:
@@ -500,6 +506,7 @@ class FlatbuffersAirportConnector:
                 for trans_name, trans_points in transitions:
                     if not trans_points:
                         continue
+                    # Fallback to transition name for grouping (runway is validated at display time).
                     runway_name = trans_name[2:] if trans_name.startswith("RW") else trans_name
                     if proc_type == 1:
                         # SID transitions are stored airport->network.
@@ -617,9 +624,10 @@ class FlatbuffersAirportConnector:
 
             rwy_names_from_trans = set()
             for trans_name, _ in transitions:
-                rwy_name = trans_name[2:] if trans_name.startswith("RW") else trans_name
-                if rwy_name:
-                    rwy_names_from_trans.add(rwy_name)
+                if trans_name.startswith("RW"):
+                    rwy_name = trans_name[2:]
+                    if rwy_name:
+                        rwy_names_from_trans.add(rwy_name)
 
             if rwy_names_from_trans:
                 for rwy_name in sorted(rwy_names_from_trans):
@@ -758,19 +766,6 @@ class FlatbuffersAirportConnector:
                 connections.append(Edge(nfrom=airport_node.iid, nend=conn_target.iid, name="SID"))
                 added_exit_nodes.add(conn_target.name)
 
-        # Create internal edges along main legs for SID.
-        # Fenix stores SID legs airport->network; points are already in that order.
-        for proc_name, runway, exit_node, points, transitions, is_main in runway_segments:
-            for i in range(len(points) - 1):
-                from_node = self._resolve_node(points[i][0], points[i][1], points[i][2])
-                to_node = self._resolve_node(points[i + 1][0], points[i + 1][1], points[i + 1][2])
-                internal_edges.append(Edge(nfrom=from_node.iid, nend=to_node.iid, name="SID"))
-        for proc_name, (exit_node, points, transitions) in common_segments.items():
-            for i in range(len(points) - 1):
-                from_node = self._resolve_node(points[i][0], points[i][1], points[i][2])
-                to_node = self._resolve_node(points[i + 1][0], points[i + 1][1], points[i + 1][2])
-                internal_edges.append(Edge(nfrom=from_node.iid, nend=to_node.iid, name="SID"))
-
         # Fallback: connect airport to common/transition points when no runway segments
         if not runway_segments:
             for proc_name, (exit_node, points, transitions) in common_segments.items():
@@ -860,7 +855,8 @@ class FlatbuffersAirportConnector:
                         t_name = opt_points[0][0] if opt_points else runway
                         merged_transitions.append((t_name, list(opt_points)))
 
-            proc = Procedure(name=proc_name, runway=runway, points=merged_points, transitions=merged_transitions)
+            display_runway = runway if self.RUNWAY_RE.match(runway) else "ALL"
+            proc = Procedure(name=proc_name, runway=display_runway, points=merged_points, transitions=merged_transitions)
             # SID points are airport->network; key by merged network-side exit point
             key = merged_points[-1][0] if merged_points else exit_node.name
             if key not in procedures:
@@ -1050,20 +1046,7 @@ class FlatbuffersAirportConnector:
         transition_edges = []
         internal_edges = []
 
-        # Create internal edges along main legs and transition options for STAR.
-        # Fenix stores STAR legs network->airport; iterate forward to match flight direction.
-        for proc_name, runway, entry_node, points, transitions, is_main in runway_segments:
-            for i in range(len(points) - 1):
-                from_node = self._resolve_node(points[i][0], points[i][1], points[i][2])
-                to_node = self._resolve_node(points[i + 1][0], points[i + 1][1], points[i + 1][2])
-                internal_edges.append(Edge(nfrom=from_node.iid, nend=to_node.iid, name="STAR"))
-        for proc_name, (entry_node, points, transitions) in common_segments.items():
-            for i in range(len(points) - 1):
-                from_node = self._resolve_node(points[i][0], points[i][1], points[i][2])
-                to_node = self._resolve_node(points[i + 1][0], points[i + 1][1], points[i + 1][2])
-                internal_edges.append(Edge(nfrom=from_node.iid, nend=to_node.iid, name="STAR"))
-
-        # Note: internal edges from common_segments and runway_segments already
+        # Note: internal edges are built from the final procedures by _ensure_continuous_paths
         # form continuous paths because the segments share endpoints. Explicit
         # connecting edges are unnecessary and can create duplicates/cycles.
 
@@ -1144,7 +1127,8 @@ class FlatbuffersAirportConnector:
                         t_name = opt_points[-1][0] if opt_points else runway
                         merged_transitions.append((t_name, list(opt_points)))
 
-            proc = Procedure(name=proc_name, runway=runway, points=merged_points, transitions=merged_transitions)
+            display_runway = runway if self.RUNWAY_RE.match(runway) else "ALL"
+            proc = Procedure(name=proc_name, runway=display_runway, points=merged_points, transitions=merged_transitions)
             # STAR main-legs are network->airport; key by merged network-side entry point.
             if merged_points:
                 key = merged_points[0][0]

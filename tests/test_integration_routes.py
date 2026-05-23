@@ -1,6 +1,7 @@
 """HTTP API integration tests that mimic frontend calls."""
 
 import os
+import re
 
 os.environ["DISABLE_CAPTCHA"] = "true"
 
@@ -992,3 +993,361 @@ def test_exhaustive_sid_star_combinations(orig, dest):
         + "\n".join(failures[:20])
         + (f"\n... and {len(failures) - 20} more" if len(failures) > 20 else "")
     )
+
+
+# ---------------------------------------------------------------------------
+# 3.11 Complete API response structure validation
+# ---------------------------------------------------------------------------
+
+RUNWAY_RE = re.compile(r'^\d+[LRC]?$')
+
+
+def _assert_api_response_structure(data: dict, orig: str, dest: str):
+    """Assert that the /api/route response contains all expected fields with valid types/values.
+
+    This is a comprehensive structural check that every field the frontend depends on
+    is present and well-formed.  It catches regressions in any output field, not just
+    the ones covered by behavioural tests above.
+    """
+    errors = []
+
+    # --- Top-level required fields ---
+    required_top = [
+        "data_version", "total_time", "route", "distance",
+        "SID", "STAR", "airportName",
+        "sidNodeName", "starNodeName",
+        "sidRouteNodeName", "starRouteNodeName",
+        "routeSegments", "nodes",
+        "weather", "airportDetails", "parsedWeather",
+        "origRunways", "destRunways",
+    ]
+    for key in required_top:
+        if key not in data:
+            errors.append(f"missing top-level key: {key}")
+
+    if errors:
+        return errors
+
+    # --- Scalar fields ---
+    if not isinstance(data["data_version"], str) or not data["data_version"]:
+        errors.append(f"data_version={data['data_version']!r} is not a non-empty string")
+    if not isinstance(data["total_time"], str):
+        errors.append(f"total_time type={type(data['total_time']).__name__} != str")
+    if not isinstance(data["route"], str) or not data["route"]:
+        errors.append(f"route={data['route']!r} is empty")
+    if not isinstance(data["distance"], str) or "nm" not in data["distance"]:
+        errors.append(f"distance={data['distance']!r} missing 'nm'")
+
+    # --- airportName ---
+    ap_name = data.get("airportName", [])
+    if not isinstance(ap_name, list) or len(ap_name) < 2:
+        errors.append(f"airportName={ap_name!r} is not a list of length >= 2")
+
+    # --- SID / STAR ---
+    for label in ("SID", "STAR"):
+        procs = data.get(label, {})
+        if not isinstance(procs, dict):
+            errors.append(f"{label} type={type(procs).__name__} != dict")
+            continue
+        for key, proc_list in procs.items():
+            if not isinstance(proc_list, list):
+                errors.append(f"{label}[{key!r}] is not a list")
+                continue
+            for proc in proc_list:
+                # proc tuple: [name, runway, points, transitions]
+                if not isinstance(proc, list) or len(proc) != 4:
+                    errors.append(f"{label}[{key!r}] procedure shape {type(proc).__name__} len={len(proc) if isinstance(proc, list) else 'N/A'}")
+                    continue
+                pname, prunway, ppoints, ptrans = proc
+                if not isinstance(pname, str):
+                    errors.append(f"{label}[{key!r}] name type={type(pname).__name__}")
+                if not isinstance(prunway, str):
+                    errors.append(f"{label}[{key!r}] runway type={type(prunway).__name__}")
+                elif prunway not in ("ALL", "") and not RUNWAY_RE.match(prunway):
+                    errors.append(f"{label}[{key!r}] {pname}: runway={prunway!r} is not a valid runway designator")
+                # points
+                if not isinstance(ppoints, list):
+                    errors.append(f"{label}[{key!r}] {pname}: points type={type(ppoints).__name__}")
+                else:
+                    for pt in ppoints:
+                        if not isinstance(pt, list) or len(pt) != 3:
+                            errors.append(f"{label}[{key!r}] {pname}: point shape {pt!r}")
+                            break
+                        if not isinstance(pt[0], str):
+                            errors.append(f"{label}[{key!r}] {pname}: point name type={type(pt[0]).__name__}")
+                            break
+                # transitions
+                if not isinstance(ptrans, list):
+                    errors.append(f"{label}[{key!r}] {pname}: transitions type={type(ptrans).__name__}")
+                else:
+                    for t in ptrans:
+                        if not isinstance(t, list) or len(t) != 2:
+                            errors.append(f"{label}[{key!r}] {pname}: transition shape {t!r}")
+                            break
+                        tname, tpts = t
+                        if not isinstance(tname, str):
+                            errors.append(f"{label}[{key!r}] {pname}: transition name type={type(tname).__name__}")
+                            break
+                        if not isinstance(tpts, list):
+                            errors.append(f"{label}[{key!r}] {pname}: transition points type={type(tpts).__name__}")
+                            break
+                        for pt in tpts:
+                            if not isinstance(pt, list) or len(pt) != 3:
+                                errors.append(f"{label}[{key!r}] {pname}: transition point shape {pt!r}")
+                                break
+
+    # --- routeSegments ---
+    segs = data.get("routeSegments", [])
+    if not isinstance(segs, list):
+        errors.append(f"routeSegments type={type(segs).__name__} != list")
+    else:
+        for i, seg in enumerate(segs):
+            if not isinstance(seg, dict):
+                errors.append(f"routeSegments[{i}] type={type(seg).__name__}")
+                continue
+            for k in ("from", "to", "airway"):
+                if k not in seg:
+                    errors.append(f"routeSegments[{i}] missing key '{k}'")
+                    break
+            if "from" in seg and not isinstance(seg["from"], str):
+                errors.append(f"routeSegments[{i}]['from'] type={type(seg['from']).__name__}")
+            if "to" in seg and not isinstance(seg["to"], str):
+                errors.append(f"routeSegments[{i}]['to'] type={type(seg['to']).__name__}")
+            if "airway" in seg and not isinstance(seg["airway"], str):
+                errors.append(f"routeSegments[{i}]['airway'] type={type(seg['airway']).__name__}")
+
+    # --- nodes ---
+    nodes = data.get("nodes", [])
+    if not isinstance(nodes, list):
+        errors.append(f"nodes type={type(nodes).__name__} != list")
+    elif len(nodes) < 2:
+        errors.append(f"nodes length={len(nodes)} < 2")
+    else:
+        for i, n in enumerate(nodes):
+            if not isinstance(n, dict):
+                errors.append(f"nodes[{i}] type={type(n).__name__}")
+                continue
+            for k in ("name", "lat", "lon"):
+                if k not in n:
+                    errors.append(f"nodes[{i}] missing key '{k}'")
+                    break
+            if "name" in n and not isinstance(n["name"], str):
+                errors.append(f"nodes[{i}]['name'] type={type(n['name']).__name__}")
+            if "lat" in n and not isinstance(n["lat"], (int, float)):
+                errors.append(f"nodes[{i}]['lat'] type={type(n['lat']).__name__}")
+            if "lon" in n and not isinstance(n["lon"], (int, float)):
+                errors.append(f"nodes[{i}]['lon'] type={type(n['lon']).__name__}")
+
+    # --- weather ---
+    weather = data.get("weather", [])
+    if not isinstance(weather, list) or len(weather) != 2:
+        errors.append(f"weather={weather!r} is not a list of length 2")
+    else:
+        for i, w in enumerate(weather):
+            if not isinstance(w, str):
+                errors.append(f"weather[{i}] type={type(w).__name__} != str")
+
+    # --- airportDetails ---
+    apd = data.get("airportDetails", {})
+    if not isinstance(apd, dict):
+        errors.append(f"airportDetails type={type(apd).__name__} != dict")
+    else:
+        for k in ("orig", "dest"):
+            if k not in apd:
+                errors.append(f"airportDetails missing key '{k}'")
+
+    # --- parsedWeather ---
+    pw = data.get("parsedWeather", [])
+    if not isinstance(pw, list) or len(pw) != 2:
+        errors.append(f"parsedWeather={pw!r} is not a list of length 2")
+    else:
+        for i, p in enumerate(pw):
+            if not isinstance(p, dict):
+                errors.append(f"parsedWeather[{i}] type={type(p).__name__} != dict")
+                continue
+            for k in ("raw", "station", "windDirection", "windSpeed",
+                      "visibility", "clouds", "temperature", "dewpoint", "qnh"):
+                if k not in p:
+                    errors.append(f"parsedWeather[{i}] missing key '{k}'")
+                    break
+            if "clouds" in p and not isinstance(p["clouds"], list):
+                errors.append(f"parsedWeather[{i}]['clouds'] type={type(p['clouds']).__name__}")
+
+    # --- origRunways / destRunways ---
+    for label in ("origRunways", "destRunways"):
+        rwys = data.get(label, [])
+        if not isinstance(rwys, list):
+            errors.append(f"{label} type={type(rwys).__name__} != list")
+        else:
+            for i, rw in enumerate(rwys):
+                if not isinstance(rw, dict):
+                    errors.append(f"{label}[{i}] type={type(rw).__name__} != dict")
+                    continue
+                for k in ("name", "thresholds"):
+                    if k not in rw:
+                        errors.append(f"{label}[{i}] missing key '{k}'")
+                        break
+                if "thresholds" in rw and not isinstance(rw["thresholds"], list):
+                    errors.append(f"{label}[{i}]['thresholds'] type={type(rw['thresholds']).__name__}")
+
+    # --- active transitions ---
+    for key in ("activeSIDTransition", "activeSTARTransition"):
+        val = data.get(key)
+        if val is not None and not isinstance(val, str):
+            errors.append(f"{key}={val!r} type={type(val).__name__} != str")
+
+    # --- Node name references must be non-empty strings ---
+    for key in ("sidNodeName", "starNodeName", "sidRouteNodeName", "starRouteNodeName"):
+        val = data.get(key)
+        if val is not None and (not isinstance(val, str) or not val):
+            errors.append(f"{key}={val!r} is empty or not a string")
+
+    return errors
+
+
+@pytest.mark.parametrize("orig,dest", AIRPORT_PAIRS)
+def test_route_response_structure_complete(orig, dest):
+    """Every /api/route response field must be present and well-formed.
+
+    This catches regressions in any output field, including ones not exercised
+    by behavioural tests (e.g. airportDetails, parsedWeather, runway arrays).
+    """
+    response = client.post(
+        "/api/route",
+        json={
+            "orig": orig,
+            "dest": dest,
+            "validCode": "",
+            "validToken": "",
+            "sidExit": "",
+            "starEntry": "",
+            "cycle": "2604",
+        },
+    )
+    assert response.status_code == 200, f"{orig}→{dest}: {response.text}"
+    data = response.json()
+    if data.get("route") == "No result.":
+        pytest.fail(f"{orig}→{dest}: no route found — navdata or algorithm bug")
+
+    errors = _assert_api_response_structure(data, orig, dest)
+    assert not errors, "\n".join(errors)
+
+
+# ---------------------------------------------------------------------------
+# 3.12 Boundary node correctness — sidRouteNodeName / starRouteNodeName
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("orig,dest", AIRPORT_PAIRS)
+def test_route_boundary_nodes_are_semantically_correct(orig, dest):
+    """sidRouteNodeName and starRouteNodeName must be boundary nodes that
+    actually belong to the reported procedure and sit at the SID/airway
+    and airway/STAR boundaries.
+
+    This catches bugs like the ZBAA→ZGGG STAR switch issue where
+    starRouteNodeName pointed to a node from the wrong procedure
+    (ENVIP3's FI21 instead of IKAVO3's IKAVO), causing old STAR
+    waypoints to persist on the frontend map.
+    """
+    response = client.post(
+        "/api/route",
+        json={
+            "orig": orig,
+            "dest": dest,
+            "validCode": "",
+            "validToken": "",
+            "sidExit": "",
+            "starEntry": "",
+            "cycle": "2604",
+        },
+    )
+    assert response.status_code == 200, f"{orig}→{dest}: {response.text}"
+    data = response.json()
+    if data.get("route") == "No result.":
+        pytest.fail(f"{orig}→{dest}: no route found — navdata or algorithm bug")
+
+    nodes = [n["name"] for n in data.get("nodes", [])]
+    route_segments = data.get("routeSegments", [])
+
+    # --- SID boundary ---
+    sid_route_node = data.get("sidRouteNodeName")
+    sid_key = data.get("sidNodeName")
+    if sid_route_node and sid_key:
+        # 1. Must be in the actual route nodes
+        assert sid_route_node in nodes, (
+            f"{orig}→{dest} SID: sidRouteNodeName={sid_route_node!r} "
+            f"not found in route nodes: {nodes}"
+        )
+
+        # 2. Must be in the reported procedure's points or transitions
+        sid_procs = data.get("SID", {})
+        assert sid_key in sid_procs, (
+            f"{orig}→{dest} SID: sidNodeName={sid_key!r} not in SID procedures"
+        )
+        found_in_proc = False
+        for proc in sid_procs[sid_key]:
+            proc_node_names = [p[0] for p in proc[2]]
+            trans_node_names = []
+            for _, tpts in proc[3]:
+                trans_node_names.extend([p[0] for p in tpts])
+            if sid_route_node in proc_node_names or sid_route_node in trans_node_names:
+                found_in_proc = True
+                break
+        assert found_in_proc, (
+            f"{orig}→{dest} SID: sidRouteNodeName={sid_route_node!r} "
+            f"not found in any variant of procedure {sid_key!r}. "
+            f"This means the boundary node does not belong to the reported procedure."
+        )
+
+        # 3. Must be the last node of the SID segment in routeSegments.
+        # SID segments start at the airport and end at the boundary; there
+        # are no bridge/transition nodes after the procedure exit point.
+        sid_seg_nodes = _extract_airway_nodes(route_segments, "SID")
+        if sid_seg_nodes:
+            assert sid_route_node == sid_seg_nodes[-1], (
+                f"{orig}→{dest} SID: sidRouteNodeName={sid_route_node!r} "
+                f"is not the last node of SID segment {sid_seg_nodes}. "
+                f"Expected {sid_seg_nodes[-1]!r}."
+            )
+
+    # --- STAR boundary ---
+    star_route_node = data.get("starRouteNodeName")
+    star_key = data.get("starNodeName")
+    if star_route_node and star_key:
+        # 1. Must be in the actual route nodes
+        assert star_route_node in nodes, (
+            f"{orig}→{dest} STAR: starRouteNodeName={star_route_node!r} "
+            f"not found in route nodes: {nodes}"
+        )
+
+        # 2. Must be in the reported procedure's points or transitions.
+        # This catches the ZBAA→ZGGG bug where starRouteNodeName was FI21
+        # (from ENVIP3) but the route actually used IKAVO3.
+        star_procs = data.get("STAR", {})
+        assert star_key in star_procs, (
+            f"{orig}→{dest} STAR: starNodeName={star_key!r} not in STAR procedures"
+        )
+        found_in_proc = False
+        for proc in star_procs[star_key]:
+            proc_node_names = [p[0] for p in proc[2]]
+            trans_node_names = []
+            for _, tpts in proc[3]:
+                trans_node_names.extend([p[0] for p in tpts])
+            if star_route_node in proc_node_names or star_route_node in trans_node_names:
+                found_in_proc = True
+                break
+        assert found_in_proc, (
+            f"{orig}→{dest} STAR: starRouteNodeName={star_route_node!r} "
+            f"not found in any variant of procedure {star_key!r}. "
+            f"This means the boundary node does not belong to the reported procedure."
+        )
+
+        # 3. Must appear in the STAR segment of routeSegments.
+        # It need not be the first node: the segment may start with a
+        # bridge/transition node (e.g. PGS) that is not part of the
+        # procedure itself (e.g. BOGET2 starts at BUGGA).
+        star_seg_nodes = _extract_airway_nodes(route_segments, "STAR")
+        if star_seg_nodes:
+            assert star_route_node in star_seg_nodes, (
+                f"{orig}→{dest} STAR: starRouteNodeName={star_route_node!r} "
+                f"not found in STAR segment {star_seg_nodes}."
+            )

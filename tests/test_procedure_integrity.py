@@ -572,3 +572,35 @@ def test_procedure_internal_edges_no_hub_nodes(icao, navdata_fb):
                 )
 
     assert not failures, "Hub nodes in internal_edges:\n" + "\n".join(failures)
+
+
+# ---------------------------------------------------------------------------
+# 5.10 Runway Field Sanity Check
+# ---------------------------------------------------------------------------
+
+RUNWAY_RE = re.compile(r'^\d+[LRC]?$')
+
+
+@pytest.mark.parametrize("icao", TEST_AIRPORTS)
+def test_runway_field_is_valid(icao):
+    """Runway must be a real runway designator (e.g. 16L, 34R, 07) or ALL.
+
+    Transition names that are not prefixed with 'RW' (e.g. VIXOR, EHF, PDT)
+    are entry/exit points, not runways.  They must never appear in the
+    runway field.
+    """
+    data = _get_procedures(icao)
+    failures = []
+
+    for label, key, proc in _all_procedure_tuples(data):
+        proc_name = proc[0]
+        runway = proc[1]
+        if runway == "ALL" or runway == "":
+            continue
+        if not RUNWAY_RE.match(runway):
+            failures.append(
+                f"{icao} {label} key={key} {proc_name}: "
+                f"runway={runway!r} is not a valid runway designator"
+            )
+
+    assert not failures, "Invalid runway values:\n" + "\n".join(failures)
