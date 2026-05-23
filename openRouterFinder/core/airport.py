@@ -636,6 +636,47 @@ class FlatbuffersAirportConnector:
             filter_name, runway_segments, common_segments, transition_segments, 1
         )
 
+        # --- Prepend runway endpoints to SID segments that lack them ---
+        # Fenix sometimes stores SID legs (main or transition) without the
+        # runway endpoint marker (DERxx / DExx) as the first point.  When
+        # multiple procedures share the same runway, the pooled internal_edges
+        # then show branching at the first transition point instead of at the
+        # runway end.  We scan all segments to find each runway's endpoint
+        # and prepend it to any segment that lacks it.
+        runway_endpoints: Dict[str, Tuple[str, float, float]] = {}
+        for _proc_name, runway, _exit_node, points, _transitions, _is_main in runway_segments:
+            if not runway or not points:
+                continue
+            for name, lat, lon in points:
+                if name == f"DER{runway}":
+                    runway_endpoints[runway] = (name, lat, lon)
+                    break
+                elif name == f"DE{runway}":
+                    if runway not in runway_endpoints:
+                        runway_endpoints[runway] = (name, lat, lon)
+            # If we found DER, stop scanning this runway (DER preferred over DE)
+            if runway in runway_endpoints and runway_endpoints[runway][0] == f"DER{runway}":
+                continue
+
+        fixed_runway_segments = []
+        for proc_name, runway, anchor_node, points, transitions, is_main in runway_segments:
+            if runway in runway_endpoints:
+                re_name, re_lat, re_lon = runway_endpoints[runway]
+                if not points or points[0][0] not in (f"DER{runway}", f"DE{runway}"):
+                    new_points = [(re_name, re_lat, re_lon)] + list(points)
+                    fixed_runway_segments.append(
+                        (proc_name, runway, anchor_node, new_points, transitions, is_main)
+                    )
+                else:
+                    fixed_runway_segments.append(
+                        (proc_name, runway, anchor_node, points, transitions, is_main)
+                    )
+            else:
+                fixed_runway_segments.append(
+                    (proc_name, runway, anchor_node, points, transitions, is_main)
+                )
+        runway_segments = fixed_runway_segments
+
         connections = []
         transition_edges = []
         internal_edges = []

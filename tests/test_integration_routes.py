@@ -150,20 +150,25 @@ def _extract_airway_nodes(segments: list, airway: str) -> list:
 
 
 def _find_best_procedure_key(nodes: list, procedures: dict) -> str | None:
-    """Find the procedure key whose points+transitions contain the most route nodes."""
+    """Find the procedure key whose main points contain the most route nodes.
+
+    We intentionally ignore transitions here to match the scoring logic in
+    _best_proc_for_run() (dijkstra.py), which only considers proc.points.
+    Including transitions would incorrectly inflate scores for procedures
+    that list unrelated transitions (e.g. KJFK DEEZZ6 under the HEERO key
+    carries the CANDR/TOWIN transitions, making it indistinguishable from
+    the DEEZZ key).
+    """
     best_key = None
     best_score = 0
     for key, proc_list in procedures.items():
         for proc in proc_list:
-            all_names = set(p[0] for p in proc[2])
-            for _, t_pts in proc[3]:
-                for pt in t_pts:
-                    all_names.add(pt[0])
-            score = sum(1 for n in nodes if n in all_names)
+            proc_names = [p[0] for p in proc[2]]
+            score = sum(1 for n in nodes if n in proc_names)
             if score > best_score:
                 best_score = score
                 best_key = key
-    return best_key
+    return best_key if best_score >= 2 else None
 
 
 def _check_procedure_continuity(
@@ -383,7 +388,235 @@ def test_route_procedure_segments_continuous(orig, dest):
 
 
 # ---------------------------------------------------------------------------
-# 3.4 Exhaustive SID exits — every exit must produce a valid route
+# 3.4 SID/STAR node name consistency
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("orig,dest", AIRPORT_PAIRS)
+def test_route_sid_star_node_name_matches_procedure(orig, dest):
+    """sidNodeName / starNodeName must point to the procedure actually used.
+
+    When pooled internal_edges share nodes across procedures, the old
+    _find_procedure_key_for_node() could return the wrong procedure key
+    (e.g. BOTP7X instead of DOTR5Y for ZBAA 36R).  The frontend then
+    displays the wrong procedure even though the route itself is correct.
+
+    This test verifies that the reported sidNodeName/starNodeName key
+    corresponds to a procedure whose points overlap the actual route nodes.
+    """
+    response = client.post(
+        "/api/route",
+        json={
+            "orig": orig,
+            "dest": dest,
+            "validCode": "",
+            "validToken": "",
+            "sidExit": "",
+            "starEntry": "",
+            "cycle": "2604",
+        },
+    )
+    assert response.status_code == 200, f"{orig}→{dest}: {response.text}"
+    data = response.json()
+    if data.get("route") == "No result.":
+        pytest.fail(f"{orig}→{dest}: no route found — navdata or algorithm bug")
+
+    nodes = [n["name"] for n in data.get("nodes", [])]
+    if len(nodes) < 2:
+        pytest.fail(f"{orig}→{dest}: insufficient nodes")
+
+    for label, field_name, node_name_field in [
+        ("SID", "SID", "sidNodeName"),
+        ("STAR", "STAR", "starNodeName"),
+    ]:
+        proc_key = data.get(node_name_field)
+        if not proc_key:
+            continue
+
+        procedures = data.get(field_name, {})
+        if proc_key not in procedures:
+            pytest.fail(
+                f"{orig}→{dest} {label}: {node_name_field}={proc_key!r} "
+                f"but no such key in {label} procedures. "
+                f"Available keys: {list(procedures.keys())}"
+            )
+
+        proc_list = procedures[proc_key]
+        if not proc_list:
+            pytest.fail(
+                f"{orig}→{dest} {label}: {node_name_field}={proc_key!r} "
+                f"but procedure list is empty."
+            )
+
+        # Extract the airway nodes for this label from routeSegments.
+        # When a route actually follows a procedure, the segment nodes
+        # should match one of the procedures under the reported key.
+        # If they don't, _find_procedure_key_for_node picked the wrong key.
+        seg_nodes = _extract_airway_nodes(data.get("routeSegments", []), label)
+        if len(seg_nodes) < 2:
+            continue
+
+        best_key = _find_best_procedure_key(seg_nodes, procedures)
+        if best_key is None:
+            continue
+
+        assert proc_key == best_key, (
+            f"{orig}→{dest} {label}: {node_name_field}={proc_key!r} "
+            f"but the actual route segment best matches key={best_key!r}. "
+            f"This means the wrong procedure key was reported. "
+            f"Route {label} nodes: {seg_nodes}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 3.4.1 Frontend procedure selection simulation
+# ---------------------------------------------------------------------------
+
+def _simulate_frontend_procedure_selection(seg_nodes: list, proc_list: list):
+    """模拟前端 _matchProcedureIndex + _matchTransitionIndex 的选择逻辑。
+
+    返回 (selected_proc, selected_transition_points, full_point_names)
+    其中 full_point_names 是前端最终用来画线的点名称序列。
+    """
+    route_node_names = set(seg_nodes)
+
+    # _matchProcedureIndex
+    best_proc_idx = 0
+    best_score = -1
+    for i, proc in enumerate(proc_list):
+        point_names = set(p[0] for p in proc[2])
+        score = sum(1 for name in point_names if name in route_node_names)
+        # Also consider transitions
+        for t in proc[3]:
+            t_point_names = set(p[0] for p in t[1])
+            t_score = sum(1 for name in t_point_names if name in route_node_names)
+            if t_score > score:
+                score = t_score
+        score = score * 1000 + len(proc[2])
+        if score > best_score:
+            best_score = score
+            best_proc_idx = i
+
+    selected_proc = proc_list[best_proc_idx]
+    transitions = selected_proc[3] or []
+
+    # _matchTransitionIndex
+    best_trans_idx = -1
+    best_trans_score = -1
+    for i, t in enumerate(transitions):
+        t_points = t[1]
+        t_point_names = set(p[0] for p in t_points)
+        score = sum(1 for name in t_point_names if name in route_node_names)
+        score = score * 1000 + len(t_points)
+        if score > best_trans_score:
+            best_trans_score = score
+            best_trans_idx = i
+
+    # Build full points sequence like the frontend does
+    main_points = [p[0] for p in selected_proc[2]]
+    full_points = list(main_points)
+    if best_trans_idx >= 0:
+        trans_points = [p[0] for p in transitions[best_trans_idx][1]]
+        main_names = set(main_points)
+        # Frontend logic: if transition's first point is not in main points,
+        # replace the entire path with the transition path.
+        if trans_points and trans_points[0] not in main_names:
+            full_points = list(trans_points)
+        else:
+            # Normal case: append non-overlapping transition points after main
+            for tp in trans_points:
+                if tp not in main_names:
+                    full_points.append(tp)
+
+    return selected_proc, best_trans_idx, full_points
+
+
+@pytest.mark.parametrize("orig,dest", AIRPORT_PAIRS)
+def test_frontend_procedure_selection_matches_route(orig, dest):
+    """模拟前端选择 SID/STAR procedure 的逻辑，验证选中结果与航路一致。
+
+    前端根据 sidNodeName 获取 procedure 列表，然后用 _matchProcedureIndex
+    和 _matchTransitionIndex 选择最匹配的 variant 和 transition。本测试在
+    后端模拟这一过程，然后验证选中的 procedure+transition 的 points 序列
+    包含航路 segment 作为连续子序列。如果前端会选中错误的 procedure（例如
+    航路实际走 DOTR5Y 但前端选中 BOTP7X），测试就会失败。
+    """
+    response = client.post(
+        "/api/route",
+        json={
+            "orig": orig,
+            "dest": dest,
+            "validCode": "",
+            "validToken": "",
+            "sidExit": "",
+            "starEntry": "",
+            "cycle": "2604",
+        },
+    )
+    assert response.status_code == 200, f"{orig}→{dest}: {response.text}"
+    data = response.json()
+    if data.get("route") == "No result.":
+        pytest.fail(f"{orig}→{dest}: no route found — navdata or algorithm bug")
+
+    for label, field_name, node_name_field in [
+        ("SID", "SID", "sidNodeName"),
+        ("STAR", "STAR", "starNodeName"),
+    ]:
+        seg_nodes = _extract_airway_nodes(data.get("routeSegments", []), label)
+        if len(seg_nodes) < 2:
+            continue
+
+        proc_key = data.get(node_name_field)
+        if not proc_key:
+            continue
+
+        procedures = data.get(field_name, {})
+        if proc_key not in procedures:
+            continue
+
+        proc_list = procedures[proc_key]
+        if not proc_list:
+            continue
+
+        selected_proc, _trans_idx, full_points = _simulate_frontend_procedure_selection(
+            seg_nodes, proc_list
+        )
+
+        # Strip airport nodes (first/last) from the segment because procedure
+        # points start at the runway endpoint, not the airport itself.
+        check_nodes = list(seg_nodes)
+        if check_nodes and check_nodes[0] not in full_points:
+            check_nodes = check_nodes[1:]
+        if check_nodes and check_nodes[-1] not in full_points:
+            check_nodes = check_nodes[:-1]
+
+        if len(check_nodes) < 2:
+            continue
+
+        # Verify every adjacent pair in check_nodes is consecutive in the
+        # selected procedure+transition points.  If any pair is not, the
+        # frontend would draw a line that doesn't match the actual route.
+        errors = []
+        for i in range(len(check_nodes) - 1):
+            a, b = check_nodes[i], check_nodes[i + 1]
+            if a in full_points and b in full_points:
+                a_idx = full_points.index(a)
+                if a_idx + 1 < len(full_points) and full_points[a_idx + 1] == b:
+                    continue
+            errors.append(f"{a}→{b}")
+
+        if errors:
+            pytest.fail(
+                f"{orig}→{dest} {label}: frontend would select "
+                f"{selected_proc[0]!r} rwy={selected_proc[1]!r} "
+                f"but route segment {check_nodes} contains non-consecutive "
+                f"pairs {errors} in the selected procedure+transition "
+                f"points {full_points}. "
+                f"This means the frontend would display the wrong procedure."
+            )
+
+
+# ---------------------------------------------------------------------------
+# 3.5 Exhaustive SID exits — every exit must produce a valid route
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("orig,dest", AIRPORT_PAIRS)

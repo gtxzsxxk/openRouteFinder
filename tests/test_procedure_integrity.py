@@ -1,17 +1,21 @@
 """SID/STAR procedure integrity tests via HTTP API.
 
-All tests query the backend REST endpoints and inspect JSON responses.
-No direct Python imports from core modules (except fastapi TestClient).
+Most tests query the backend REST endpoints and inspect JSON responses.
+The hub-node test (5.9) imports core modules directly to validate pooled
+internal_edges against procedure point sequences.
 """
 
 import os
 import re
+from pathlib import Path
 
 os.environ["DISABLE_CAPTCHA"] = "true"
 
 import pytest
 from fastapi.testclient import TestClient
 from openRouterFinder.api import app
+from openRouterFinder.core.airport import FlatbuffersAirportConnector
+from openRouterFinder.core.storage.reader import MmappedNavData
 
 def setup_module(module):
     """Trigger FastAPI startup events to build airport index."""
@@ -247,7 +251,56 @@ def test_no_runway_all_with_single_point(icao):
 
 
 # ---------------------------------------------------------------------------
-# 5.5 ZBAA 36L SID Circling Beijing Check
+# 5.5 SID Runway Endpoint Consistency
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("icao", TEST_AIRPORTS)
+def test_sid_runway_endpoint_consistent(icao):
+    """If any SID for a runway starts with DERxx/DExx, all SIDs for that
+    runway must start with the runway endpoint marker.
+
+    When one procedure lacks the runway endpoint, its first point becomes
+    an intermediate node in other procedures' paths.  In the pooled
+    internal_edges graph this creates unexpected branching (e.g. AA131
+    with 3 edges in ZBAA BOTP7X / DOTR5Y / ELKU5Y).
+    """
+    data = _get_procedures(icao)
+    sid = data.get("sidDetails", {})
+    if not sid:
+        return
+
+    runway_has_endpoint: dict = {}
+    runway_procs: dict = {}
+    for key, proc_list in sid.items():
+        for proc in proc_list:
+            proc_name = proc[0]
+            runway = proc[1]
+            points = proc[2]
+            if runway == "ALL" or not points:
+                continue
+            first = points[0][0]
+            is_endpoint = first in (f"DER{runway}", f"DE{runway}")
+            runway_has_endpoint.setdefault(runway, False)
+            runway_procs.setdefault(runway, [])
+            runway_procs[runway].append((proc_name, first, is_endpoint))
+            if is_endpoint:
+                runway_has_endpoint[runway] = True
+
+    for runway, has_endpoint in runway_has_endpoint.items():
+        if not has_endpoint:
+            continue
+        for proc_name, first, is_endpoint in runway_procs[runway]:
+            assert is_endpoint, (
+                f"{icao} SID {proc_name} via {runway}: "
+                f"first point is {first!r}, but runway {runway} "
+                f"has procedures that start with DER{runway}/DE{runway}. "
+                f"All procedures for the same runway must share the same "
+                f"runway endpoint to avoid pooled-edge branching."
+            )
+
+
+# ---------------------------------------------------------------------------
+# 5.6 ZBAA 36L SID Circling Beijing Check
 # ---------------------------------------------------------------------------
 
 ZBAA_LON_THRESHOLD = 116.5
@@ -427,3 +480,95 @@ def test_zggg_ikavo3_has_complete_points():
                 )
 
     assert not failures, "ZGGG IKAVO3 incomplete points:\n" + "\n".join(failures)
+
+
+# ---------------------------------------------------------------------------
+# 5.9 No Hub Nodes in Pooled internal_edges
+# ---------------------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def navdata_fb():
+    """Load cycle 2604 FlatBuffers navdata once for all direct tests."""
+    data_path = Path(__file__).parent.parent / "data" / "navdata_2604.fb.zst"
+    nav = MmappedNavData(data_path)
+    yield nav
+    nav.close()
+
+
+@pytest.mark.parametrize("icao", TEST_AIRPORTS)
+def test_procedure_internal_edges_no_hub_nodes(icao, navdata_fb):
+    """Every edge in pooled internal_edges must belong to at least one
+    procedure's consecutive point pair.
+
+    _add_network_bridges adds bridge edges from a connected network node to
+    isolated entry/exit nodes.  When that connected node is also a procedure
+    node (e.g. TNCM STAR PJM), the bridge edges become extra outgoing edges
+    in the pooled graph, causing the frontend to draw wrong procedure lines.
+    """
+    connector = FlatbuffersAirportConnector(navdata_fb)
+    failures = []
+
+    for label, build_func in (("SID", connector.build_sid), ("STAR", connector.build_star)):
+        conn = build_func(icao)
+        if conn is None or not conn.procedures:
+            continue
+
+        # 1. Collect expected edges from all procedure points + transitions
+        expected_edges = set()
+        iid_to_name = {}
+        for key, proc_list in conn.procedures.items():
+            for proc in proc_list:
+                pts = proc.points
+                for i in range(len(pts) - 1):
+                    from_node = connector._resolve_node(pts[i][0], pts[i][1], pts[i][2])
+                    to_node = connector._resolve_node(pts[i + 1][0], pts[i + 1][1], pts[i + 1][2])
+                    expected_edges.add((from_node.iid, to_node.iid))
+                    iid_to_name[from_node.iid] = from_node.name
+                    iid_to_name[to_node.iid] = to_node.name
+
+                for t_name, t_pts in proc.transitions:
+                    for i in range(len(t_pts) - 1):
+                        from_node = connector._resolve_node(t_pts[i][0], t_pts[i][1], t_pts[i][2])
+                        to_node = connector._resolve_node(t_pts[i + 1][0], t_pts[i + 1][1], t_pts[i + 1][2])
+                        expected_edges.add((from_node.iid, to_node.iid))
+                        iid_to_name[from_node.iid] = from_node.name
+                        iid_to_name[to_node.iid] = to_node.name
+
+        # 2. Collect sensitive nodes: nodes that appear in procedures
+        #    and are NOT the last point (so they may have outgoing edges).
+        #    The last point connects to the airport/network, not internally.
+        sensitive_nodes = set()
+        for key, proc_list in conn.procedures.items():
+            for proc in proc_list:
+                pts = proc.points
+                for i in range(len(pts) - 1):
+                    node = connector._resolve_node(pts[i][0], pts[i][1], pts[i][2])
+                    sensitive_nodes.add(node.iid)
+                for t_name, t_pts in proc.transitions:
+                    for i in range(len(t_pts) - 1):
+                        node = connector._resolve_node(t_pts[i][0], t_pts[i][1], t_pts[i][2])
+                        sensitive_nodes.add(node.iid)
+
+        # 3. Check internal_edges
+        for edge in conn.internal_edges:
+            if (edge.nfrom, edge.nend) in expected_edges:
+                continue
+            if edge.nfrom in sensitive_nodes:
+                from_name = iid_to_name.get(edge.nfrom, "?")
+                # Fallback to temp_nodes or nav node_list
+                if from_name == "?":
+                    for n in conn.temp_nodes:
+                        if n.iid == edge.nfrom:
+                            from_name = n.name
+                            break
+                if from_name == "?":
+                    nl = navdata_fb.node_list
+                    if edge.nfrom < len(nl) and nl[edge.nfrom] is not None:
+                        from_name = nl[edge.nfrom].name
+                failures.append(
+                    f"{icao} {label}: node {from_name} (iid={edge.nfrom}) "
+                    f"has unexpected edge to iid={edge.nend} — "
+                    f"no procedure defines this consecutive pair"
+                )
+
+    assert not failures, "Hub nodes in internal_edges:\n" + "\n".join(failures)

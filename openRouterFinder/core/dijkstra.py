@@ -12,7 +12,7 @@ from openRouterFinder.core.graph import (
     great_circle_distance_km,
     heuristic_km,
 )
-from openRouterFinder.core.airport import AirportConnection
+from openRouterFinder.core.airport import AirportConnection, Procedure
 
 
 def _procs_to_dict(procs: dict) -> dict:
@@ -171,7 +171,7 @@ class RouteEngine:
         # contain shortcuts from other procedures (e.g. WAYVE1's EHF->LOPES
         # bypasses KIMMO3's ARVIN/AMONT).  Insert missing nodes so the
         # route reflects the intended procedure topology.
-        target.route_list = self._fill_procedure_gaps(
+        target.route_list, used_procs = self._fill_procedure_gaps(
             target.route_list, sid_conn, star_conn
         )
 
@@ -210,31 +210,52 @@ class RouteEngine:
         # sid_node_name is the procedure key; sid_route_node_name is the
         # actual node in the route that belongs to the procedure (used by
         # the frontend to locate the procedure in the route node list).
+        # Prefer the procedure recorded by _fill_procedure_gaps, which knows
+        # exactly which procedure the route actually followed.
         sid_node_name = None
         sid_route_node_name = None
-        for _, node_name, _ in target.route_list:
-            if node_name in sid_conn.procedures:
-                sid_node_name = node_name
-                sid_route_node_name = node_name
-                break
-            key = self._find_procedure_key_for_node(node_name, sid_conn)
-            if key:
-                sid_node_name = key
-                sid_route_node_name = node_name
-                break
+        sid_used = used_procs.get("SID")
+        if sid_used:
+            sid_node_name = sid_used[0]
+            # Find the first route node that belongs to this procedure
+            for _, node_name, _ in target.route_list:
+                key = self._find_procedure_key_for_node(node_name, sid_conn)
+                if key == sid_node_name:
+                    sid_route_node_name = node_name
+                    break
+        else:
+            for _, node_name, _ in target.route_list:
+                if node_name in sid_conn.procedures:
+                    sid_node_name = node_name
+                    sid_route_node_name = node_name
+                    break
+                key = self._find_procedure_key_for_node(node_name, sid_conn)
+                if key:
+                    sid_node_name = key
+                    sid_route_node_name = node_name
+                    break
 
         star_node_name = None
         star_route_node_name = None
-        for _, node_name, _ in reversed(target.route_list):
-            if node_name in star_conn.procedures:
-                star_node_name = node_name
-                star_route_node_name = node_name
-                break
-            key = self._find_procedure_key_for_node(node_name, star_conn)
-            if key:
-                star_node_name = key
-                star_route_node_name = node_name
-                break
+        star_used = used_procs.get("STAR")
+        if star_used:
+            star_node_name = star_used[0]
+            for _, node_name, _ in reversed(target.route_list):
+                key = self._find_procedure_key_for_node(node_name, star_conn)
+                if key == star_node_name:
+                    star_route_node_name = node_name
+                    break
+        else:
+            for _, node_name, _ in reversed(target.route_list):
+                if node_name in star_conn.procedures:
+                    star_node_name = node_name
+                    star_route_node_name = node_name
+                    break
+                key = self._find_procedure_key_for_node(node_name, star_conn)
+                if key:
+                    star_node_name = key
+                    star_route_node_name = node_name
+                    break
 
         return build_route_info(
             self.data_version,
@@ -350,7 +371,7 @@ class RouteEngine:
         route_list: List[Tuple[str, str, int]],
         sid_conn: AirportConnection,
         star_conn: AirportConnection,
-    ) -> List[Tuple[str, str, int]]:
+    ) -> Tuple[List[Tuple[str, str, int]], Dict[str, Tuple[str, "Procedure"]]]:
         """Ensure SID/STAR segments follow complete single-procedure paths.
 
         When pooled internal_edges are shared across all procedures, A* may
@@ -366,6 +387,7 @@ class RouteEngine:
         def _best_proc_for_run(node_names: List[str], conn: AirportConnection):
             """Find the procedure that contains the most nodes from the run."""
             best_proc = None
+            best_key = None
             best_score = 0
             for key, proc_list in conn.procedures.items():
                 for proc in proc_list:
@@ -374,13 +396,17 @@ class RouteEngine:
                     if score > best_score:
                         best_score = score
                         best_proc = proc
-            return best_proc, best_score
+                        best_key = key
+            return best_proc, best_key, best_score
+
+        used_procs: Dict[str, Tuple[str, Procedure]] = {}
 
         def _fill_gaps_for_conn(
             route: List[Tuple[str, str, int]],
             conn: AirportConnection,
             edge_label: str,
         ):
+            nonlocal used_procs
             result: List[Tuple[str, str, int]] = []
             i = 0
             while i < len(route):
@@ -409,7 +435,7 @@ class RouteEngine:
                 if prev_node is not None:
                     candidate_names.insert(0, prev_node[1])
 
-                best_proc, score = _best_proc_for_run(candidate_names, conn)
+                best_proc, best_key, score = _best_proc_for_run(candidate_names, conn)
 
                 if best_proc and score >= 2:
                     proc_names = [p[0] for p in best_proc.points]
@@ -423,6 +449,11 @@ class RouteEngine:
                     if len(match_indices) >= 2:
                         first_idx = min(match_indices)
                         last_idx = max(match_indices)
+
+                        # Record the procedure actually used for this run so
+                        # the caller can report the correct procedure key
+                        # instead of guessing via _find_procedure_key_for_node.
+                        used_procs[edge_label] = (best_key, best_proc)
 
                         # Build a lookup for nodes already in the run or prev_node
                         known_iids = {n_name: n_iid for _, n_name, n_iid in run}
@@ -473,7 +504,7 @@ class RouteEngine:
 
         route_list = _fill_gaps_for_conn(route_list, sid_conn, "SID")
         route_list = _fill_gaps_for_conn(route_list, star_conn, "STAR")
-        return route_list
+        return route_list, used_procs
 
     def _get_node_by_name(
         self,
