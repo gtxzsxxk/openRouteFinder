@@ -304,6 +304,10 @@ class RouteEngine:
             if edge.nfrom not in adj:
                 adj[edge.nfrom] = []
             adj[edge.nfrom].append(edge)
+        for edge in sid_conn.bridge_edges:
+            if edge.nfrom not in adj:
+                adj[edge.nfrom] = []
+            adj[edge.nfrom].append(edge)
 
         # Add STAR edges (network -> procedure -> airport)
         for edge in star_conn.connections:
@@ -315,6 +319,10 @@ class RouteEngine:
                 adj[edge.nfrom] = []
             adj[edge.nfrom].append(edge)
         for edge in star_conn.transition_edges:
+            if edge.nfrom not in adj:
+                adj[edge.nfrom] = []
+            adj[edge.nfrom].append(edge)
+        for edge in star_conn.bridge_edges:
             if edge.nfrom not in adj:
                 adj[edge.nfrom] = []
             adj[edge.nfrom].append(edge)

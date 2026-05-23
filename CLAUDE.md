@@ -147,7 +147,7 @@ All built procedures should satisfy these invariants (enforced by `tests/test_pr
 - **No branching within a single procedure**: After deduplicating `internal_edges`, no node belonging to exactly one procedure should have more than 2 edges.
 - **No teleportation**: Consecutive waypoints in a procedure should be geographically reasonable (domestic ≤ ~100 nm, international ≤ ~300 nm per leg).
 - **Runway "ALL" must have a path**: Procedures with `runway="ALL"` must contain more than one point.
-- **No hub nodes in pooled internal_edges**: Every edge in `internal_edges` must belong to at least one procedure's consecutive point pair. Bridge edges from `_add_network_bridges` that originate from a procedure node create extra outgoing edges in the pooled graph, causing the frontend to draw wrong procedure lines.
+- **No hub nodes in pooled internal_edges**: Every edge in `internal_edges` must belong to at least one procedure's consecutive point pair. Bridge edges for isolated nodes belong in `bridge_edges`, not `internal_edges`, so they do not pollute the pooled procedure graph.
 
 ### ZBAA 36L Northbound SIDs
 

@@ -28,6 +28,7 @@ class AirportConnection:
     transition_edges: List[Edge] = field(default_factory=list)
     temp_nodes: List[Node] = field(default_factory=list)  # temp nodes for waypoints not in nav network
     internal_edges: List[Edge] = field(default_factory=list)  # edges within procedures
+    bridge_edges: List[Edge] = field(default_factory=list)  # bridge edges from isolated nodes to network
 
 
 class FlatbuffersAirportConnector:
@@ -52,7 +53,13 @@ class FlatbuffersAirportConnector:
             self._next_temp_iid -= 1
         return self._temp_nodes[name]
 
-    def _find_nearest_connected_node(self, lat: float, lon: float, exclude_iid: Optional[int] = None) -> Optional[Node]:
+    def _find_nearest_connected_node(
+        self,
+        lat: float,
+        lon: float,
+        exclude_iid: Optional[int] = None,
+        exclude_iids: Optional[set] = None,
+    ) -> Optional[Node]:
         """Find the nearest navdata node that has at least one outgoing edge."""
         nearest = None
         min_dist = float("inf")
@@ -60,6 +67,8 @@ class FlatbuffersAirportConnector:
             if node is None or not node.next_list:
                 continue
             if exclude_iid is not None and node.iid == exclude_iid:
+                continue
+            if exclude_iids is not None and node.iid in exclude_iids:
                 continue
             d = great_circle_distance_km(node.px, node.py, lat, lon)
             if d < min_dist:
@@ -80,7 +89,7 @@ class FlatbuffersAirportConnector:
                         conn.internal_edges.append(Edge(nfrom=from_node.iid, nend=to_node.iid, name=label))
                         existing.add((from_node.iid, to_node.iid))
 
-    def _add_network_bridges(self, conn: AirportConnection, proc_type: int):
+    def _add_network_bridges(self, conn: AirportConnection, proc_type: int, icao: str):
         """Add bridge edges from isolated procedure nodes to the nearest connected network node.
 
         For SID: bridges go FROM isolated exit nodes TO nearest connected node.
@@ -90,6 +99,11 @@ class FlatbuffersAirportConnector:
         A node is "isolated" for STAR if it has no inbound edges (can't reach).
         Some nodes (e.g. SULPU) have outbound edges but no inbound edges, making
         them unreachable as STAR entry points.
+
+        Bridge edges are stored in ``conn.bridge_edges`` (not ``internal_edges``)
+        so they do not pollute the pooled procedure graph that the frontend
+        renders.  The A* engine adds ``bridge_edges`` to its adjacency list
+        separately.
         """
         # Build set of nodes that have inbound edges (for STAR check)
         nodes_with_inbound: set = set()
@@ -98,6 +112,47 @@ class FlatbuffersAirportConnector:
                 continue
             for e in node.next_list:
                 nodes_with_inbound.add(e.nend)
+
+        # Collect all procedure node iids for the CURRENT label
+        proc_node_iids: set = set()
+        for key, proc_list in conn.procedures.items():
+            for proc in proc_list:
+                for pt in proc.points:
+                    node = self._resolve_node(pt[0], pt[1], pt[2])
+                    proc_node_iids.add(node.iid)
+                for t_name, t_pts in proc.transitions:
+                    for pt in t_pts:
+                        node = self._resolve_node(pt[0], pt[1], pt[2])
+                        proc_node_iids.add(node.iid)
+
+        # Also collect procedure nodes from the OTHER label so bridges don't
+        # create cross-label hub effects (e.g. SID exit node -> STAR entry node).
+        other_type = 2 if proc_type == 1 else 1
+        other_runway, other_common, other_trans = self._collect_procedures(icao, other_type)
+        for _proc_name, _runway, _anchor_node, points, transitions, _is_main in other_runway:
+            for pt in points:
+                node = self._resolve_node(pt[0], pt[1], pt[2])
+                proc_node_iids.add(node.iid)
+            for t_name, t_pts in transitions:
+                for pt in t_pts:
+                    node = self._resolve_node(pt[0], pt[1], pt[2])
+                    proc_node_iids.add(node.iid)
+        for _proc_name, (_anchor_node, points, transitions) in other_common.items():
+            for pt in points:
+                node = self._resolve_node(pt[0], pt[1], pt[2])
+                proc_node_iids.add(node.iid)
+            for t_name, t_pts in transitions:
+                for pt in t_pts:
+                    node = self._resolve_node(pt[0], pt[1], pt[2])
+                    proc_node_iids.add(node.iid)
+        for _proc_name, _runway, _anchor_node, points, transitions, _is_main in other_trans:
+            for pt in points:
+                node = self._resolve_node(pt[0], pt[1], pt[2])
+                proc_node_iids.add(node.iid)
+            for t_name, t_pts in transitions:
+                for pt in t_pts:
+                    node = self._resolve_node(pt[0], pt[1], pt[2])
+                    proc_node_iids.add(node.iid)
 
         if proc_type == 1:  # SID
             # Collect unique exit nodes from procedures
@@ -110,9 +165,11 @@ class FlatbuffersAirportConnector:
                         exit_nodes[node.iid] = node
             for node in exit_nodes.values():
                 if not node.next_list:
-                    bridge = self._find_nearest_connected_node(node.px, node.py, exclude_iid=node.iid)
+                    bridge = self._find_nearest_connected_node(
+                        node.px, node.py, exclude_iid=node.iid, exclude_iids=proc_node_iids
+                    )
                     if bridge:
-                        conn.internal_edges.append(
+                        conn.bridge_edges.append(
                             Edge(nfrom=node.iid, nend=bridge.iid, name="SID")
                         )
         else:  # STAR
@@ -127,9 +184,11 @@ class FlatbuffersAirportConnector:
             for node in entry_nodes.values():
                 needs_bridge = not node.next_list or node.iid not in nodes_with_inbound
                 if needs_bridge:
-                    bridge = self._find_nearest_connected_node(node.px, node.py, exclude_iid=node.iid)
+                    bridge = self._find_nearest_connected_node(
+                        node.px, node.py, exclude_iid=node.iid, exclude_iids=proc_node_iids
+                    )
                     if bridge:
-                        conn.internal_edges.append(
+                        conn.bridge_edges.append(
                             Edge(nfrom=bridge.iid, nend=node.iid, name="STAR")
                         )
 
@@ -824,7 +883,7 @@ class FlatbuffersAirportConnector:
             internal_edges=internal_edges,
         )
         self._ensure_continuous_paths(result, "SID")
-        self._add_network_bridges(result, 1)
+        self._add_network_bridges(result, 1, icao)
 
         # Deduplicate internal_edges (common-segment edges are duplicated once
         # per runway variant)
@@ -1193,7 +1252,7 @@ class FlatbuffersAirportConnector:
             internal_edges=internal_edges,
         )
         self._ensure_continuous_paths(result, "STAR")
-        self._add_network_bridges(result, 2)
+        self._add_network_bridges(result, 2, icao)
 
         # Deduplicate internal_edges
         seen_edges = set()
