@@ -182,21 +182,34 @@ def test_procedure_edge_counts_reasonable(icao):
                 if len(all_nodes) < 2:
                     continue
 
-                degree = {}
+                # No isolated nodes (check points + transitions)
+                all_degree = {}
                 for a, b in edges:
-                    degree[a] = degree.get(a, 0) + 1
-                    degree[b] = degree.get(b, 0) + 1
-
-                # No isolated nodes
+                    all_degree[a] = all_degree.get(a, 0) + 1
+                    all_degree[b] = all_degree.get(b, 0) + 1
                 for node_key in all_nodes:
-                    if degree.get(node_key, 0) == 0:
+                    if all_degree.get(node_key, 0) == 0:
                         pytest.fail(
                             f"{icao} {label} {proc_name} rwy={runway}: "
                             f"node {node_key[0]} has 0 edges in procedure"
                         )
 
-                # No branching within a single procedure variant
-                for node_key, deg in degree.items():
+                # No branching within a single procedure's MAIN PATH.
+                # Transitions are alternative selectable routes and may converge
+                # at shared nodes (e.g. multiple entry transitions ending at the
+                # same fix).  We therefore only check proc.points for branching.
+                main_edges = set()
+                for i in range(len(points) - 1):
+                    p1 = (points[i][0], round(points[i][1], 5), round(points[i][2], 5))
+                    p2 = (points[i + 1][0], round(points[i + 1][1], 5), round(points[i + 1][2], 5))
+                    main_edges.add((p1, p2))
+
+                main_degree = {}
+                for a, b in main_edges:
+                    main_degree[a] = main_degree.get(a, 0) + 1
+                    main_degree[b] = main_degree.get(b, 0) + 1
+
+                for node_key, deg in main_degree.items():
                     proc_count = len(node_proc_counts.get(node_key, set()))
                     if deg > 2 and proc_count == 1:
                         pytest.fail(
@@ -204,6 +217,22 @@ def test_procedure_edge_counts_reasonable(icao):
                             f"node {node_key[0]} has {deg} edges "
                             f"(branching within single procedure)"
                         )
+
+                # Each individual transition must also be a straight line.
+                for t_name, t_pts in transitions:
+                    t_degree = {}
+                    for i in range(len(t_pts) - 1):
+                        p1 = (t_pts[i][0], round(t_pts[i][1], 5), round(t_pts[i][2], 5))
+                        p2 = (t_pts[i + 1][0], round(t_pts[i + 1][1], 5), round(t_pts[i + 1][2], 5))
+                        t_degree[p1] = t_degree.get(p1, 0) + 1
+                        t_degree[p2] = t_degree.get(p2, 0) + 1
+                    for node_key, deg in t_degree.items():
+                        if deg > 2:
+                            pytest.fail(
+                                f"{icao} {label} {proc_name} rwy={runway}: "
+                                f"node {node_key[0]} has {deg} edges "
+                                f"(branching within transition {t_name})"
+                            )
 
 
 # ---------------------------------------------------------------------------
@@ -248,6 +277,41 @@ def test_no_runway_all_with_single_point(icao):
                 f"{icao} {label}: {proc_name} has runway=ALL "
                 f"but only {len(points)} point(s)"
             )
+
+
+@pytest.mark.parametrize("icao", TEST_AIRPORTS)
+def test_no_runway_all_when_specific_exists(icao):
+    """No procedure name may have both runway=ALL and runway-specific variants.
+
+    When a procedure has RW-prefixed transitions, non-RW transitions must be
+    folded into the RW variants as selectable transitions, not exposed as
+    standalone runway=ALL procedures.  This prevents the frontend from
+    showing duplicate entries (Cartesian product of ALL × runways).
+    """
+    data = _get_procedures(icao)
+
+    for label in ("SID", "STAR"):
+        section = data.get(f"{label.lower()}Details", {})
+        if not section:
+            continue
+
+        # Group by procedure name -> set of runways
+        name_runways: dict = {}
+        for key, proc_list in section.items():
+            for proc in proc_list:
+                proc_name = proc[0]
+                runway = proc[1]
+                name_runways.setdefault(proc_name, set()).add(runway)
+
+        failures = []
+        for proc_name, runways in name_runways.items():
+            if "ALL" in runways and len(runways) > 1:
+                failures.append(
+                    f"{icao} {label}: {proc_name} has both runway='ALL' "
+                    f"and specific runways {sorted(r for r in runways if r != 'ALL')}"
+                )
+
+        assert not failures, "Procedures with conflicting runway values:\n" + "\n".join(failures)
 
 
 # ---------------------------------------------------------------------------

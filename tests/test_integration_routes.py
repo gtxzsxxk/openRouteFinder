@@ -472,7 +472,7 @@ def test_route_sid_star_node_name_matches_procedure(orig, dest):
 # 3.4.1 Frontend procedure selection simulation
 # ---------------------------------------------------------------------------
 
-def _simulate_frontend_procedure_selection(seg_nodes: list, proc_list: list):
+def _simulate_frontend_procedure_selection(seg_nodes: list, proc_list: list, label: str = "SID"):
     """模拟前端 _matchProcedureIndex + _matchTransitionIndex 的选择逻辑。
 
     返回 (selected_proc, selected_transition_points, full_point_names)
@@ -518,15 +518,25 @@ def _simulate_frontend_procedure_selection(seg_nodes: list, proc_list: list):
     if best_trans_idx >= 0:
         trans_points = [p[0] for p in transitions[best_trans_idx][1]]
         main_names = set(main_points)
-        # Frontend logic: if transition's first point is not in main points,
-        # replace the entire path with the transition path.
-        if trans_points and trans_points[0] not in main_names:
-            full_points = list(trans_points)
+        if label == "STAR":
+            # STAR: transition comes before main points.
+            # If transition's last point is not in main, it's a replacement.
+            if trans_points and trans_points[-1] not in main_names:
+                full_points = list(trans_points)
+            else:
+                # Prepend non-overlapping transition points before main
+                prepended = [tp for tp in trans_points if tp not in main_names]
+                full_points = prepended + full_points
         else:
-            # Normal case: append non-overlapping transition points after main
-            for tp in trans_points:
-                if tp not in main_names:
-                    full_points.append(tp)
+            # SID: main points come before transition.
+            # If transition's first point is not in main, it's a replacement.
+            if trans_points and trans_points[0] not in main_names:
+                full_points = list(trans_points)
+            else:
+                # Append non-overlapping transition points after main
+                for tp in trans_points:
+                    if tp not in main_names:
+                        full_points.append(tp)
 
     return selected_proc, best_trans_idx, full_points
 
@@ -579,7 +589,7 @@ def test_frontend_procedure_selection_matches_route(orig, dest):
             continue
 
         selected_proc, _trans_idx, full_points = _simulate_frontend_procedure_selection(
-            seg_nodes, proc_list
+            seg_nodes, proc_list, label
         )
 
         # Strip airport nodes (first/last) from the segment because procedure

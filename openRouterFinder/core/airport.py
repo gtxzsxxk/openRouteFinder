@@ -584,6 +584,30 @@ class FlatbuffersAirportConnector:
                 result[key] = list(seen.values())
         return result
 
+    @staticmethod
+    def _filter_runway_all_conflicts(procedures: Dict[str, List[Procedure]]) -> Dict[str, List[Procedure]]:
+        """Remove runway='ALL' variants when specific runway variants exist for the same name.
+
+        Prevents the frontend from showing duplicate entries (Cartesian product of
+        procedure x runway) when the same procedure name has both an 'ALL' variant
+        and runway-specific variants.
+        """
+        name_runways: Dict[str, Set[str]] = {}
+        for proc_list in procedures.values():
+            for proc in proc_list:
+                name_runways.setdefault(proc.name, set()).add(proc.runway)
+
+        for key, proc_list in list(procedures.items()):
+            filtered = [
+                p for p in proc_list
+                if not (p.runway == "ALL" and len(name_runways.get(p.name, set())) > 1)
+            ]
+            if filtered:
+                procedures[key] = filtered
+            else:
+                del procedures[key]
+        return procedures
+
     def _base_name(self, proc_name: str) -> str:
         """Extract alphabetic prefix for matching common/runway procedure variants.
 

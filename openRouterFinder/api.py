@@ -35,6 +35,61 @@ from openRouterFinder.utils.metar import read_metar, start_metar_updater
 from openRouterFinder.utils.validcode import generate_captcha_b64
 from openRouterFinder.core.storage.builder import build_from_fenix
 
+
+# --- Procedure response filtering ---
+
+def _filter_runway_all_from_response(data: dict) -> dict:
+    """Remove runway='ALL' variants when specific runway variants exist for the same name.
+
+    Prevents the frontend from showing duplicate entries (Cartesian product of
+    procedure x runway) when the same procedure name has both an 'ALL' variant
+    and runway-specific variants.
+
+    Operates on API response dicts where procedures are either Procedure objects
+    or serialized tuples [name, runway, points, transitions].
+    """
+    for label in ("SID", "STAR"):
+        if label not in data:
+            continue
+        procs = data[label]
+        if not isinstance(procs, dict):
+            continue
+
+        # Collect all (name, runway) pairs
+        name_runways: dict = {}
+        for proc_list in procs.values():
+            for proc in proc_list:
+                if hasattr(proc, "name"):
+                    proc_name = proc.name
+                    proc_runway = proc.runway
+                else:
+                    proc_name = proc[0]
+                    proc_runway = proc[1]
+                name_runways.setdefault(proc_name, set()).add(proc_runway)
+
+        # Filter out ALL variants
+        filtered: dict = {}
+        for key, proc_list in procs.items():
+            filtered_list = []
+            for proc in proc_list:
+                if hasattr(proc, "name"):
+                    proc_name = proc.name
+                    proc_runway = proc.runway
+                else:
+                    proc_name = proc[0]
+                    proc_runway = proc[1]
+                if not (
+                    proc_runway == "ALL"
+                    and len(name_runways.get(proc_name, set())) > 1
+                ):
+                    filtered_list.append(proc)
+            if filtered_list:
+                filtered[key] = filtered_list
+        data[label] = filtered
+
+    return data
+
+
 # --- Concurrency controls ---
 _dijkstra_pool = ThreadPoolExecutor(max_workers=4)
 _route_semaphore = asyncio.Semaphore(8)
@@ -253,6 +308,16 @@ def get_airport_procedures(icao: str, cycle: Optional[str] = None, detail: bool 
                 key: [_proc_tuple(p) for p in proc_list]
                 for key, proc_list in star_conn.procedures.items()
             }
+
+    if detail:
+        if "sidDetails" in result:
+            result["sidDetails"] = _filter_runway_all_from_response(
+                {"SID": result["sidDetails"]}
+            ).get("SID", {})
+        if "starDetails" in result:
+            result["starDetails"] = _filter_runway_all_from_response(
+                {"STAR": result["starDetails"]}
+            ).get("STAR", {})
 
     return result
 
