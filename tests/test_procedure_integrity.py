@@ -725,3 +725,37 @@ def test_runway_field_is_valid(icao):
             )
 
     assert not failures, "Invalid runway values:\n" + "\n".join(failures)
+
+
+# ---------------------------------------------------------------------------
+# 5.9 No runway='ALL' in frontend procedure lists
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("icao", TEST_AIRPORTS)
+def test_no_runway_all_in_procedure_lists(icao):
+    """Frontend procedure dropdowns must never show runway='ALL'.
+
+    A procedure with runway='ALL' means the data pipeline failed to
+    associate the procedure with a real runway.  This happens when:
+    1. Fenix raw data has no runway info and no approach bridge exists.
+    2. The builder failed to merge approach bridges into transition variants.
+
+    Both are data-pipeline or algorithm bugs that must be fixed, not
+    worked around with frontend filters.
+    """
+    data = _get_procedures(icao)
+    failures = []
+
+    for label, details in (("SID", data.get("sidDetails", {})),
+                           ("STAR", data.get("starDetails", {}))):
+        for key, proc_list in details.items():
+            for proc in proc_list:
+                proc_name = proc[0]
+                runway = proc[1]
+                if runway == "ALL":
+                    failures.append(
+                        f"{icao} {label} {proc_name}: runway='ALL' "
+                        f"(key={key}, points={[p[0] for p in proc[2]]})"
+                    )
+
+    assert not failures, "Procedures with runway='ALL' found:\n" + "\n".join(failures)

@@ -864,9 +864,14 @@ class FlatbuffersAirportConnector:
                         merged_points.append(cp)
                         seen.add(cp[0])
                 for ct in common_trans:
-                    ct_runway = ct[0][2:] if ct[0].startswith("RW") else ct[0]
-                    if ct_runway == runway and ct not in merged_transitions:
-                        merged_transitions.append(ct)
+                    if ct[0].startswith("RW"):
+                        ct_runway = ct[0][2:]
+                        if ct_runway == runway and ct not in merged_transitions:
+                            merged_transitions.append(ct)
+                    else:
+                        # Non-RW transitions (enroute transitions) apply to all runways
+                        if ct not in merged_transitions:
+                            merged_transitions.append(ct)
 
             # Transition-only: collect remaining options as transitions
             all_trans_only = all(not m for _, _, _, m in group)
@@ -1132,9 +1137,14 @@ class FlatbuffersAirportConnector:
                             merged_points.append(p)
                             seen.add(p[0])
                 for ct in common_trans:
-                    ct_runway = ct[0][2:] if ct[0].startswith("RW") else ct[0]
-                    if ct_runway == runway and ct not in merged_transitions:
-                        merged_transitions.append(ct)
+                    if ct[0].startswith("RW"):
+                        ct_runway = ct[0][2:]
+                        if ct_runway == runway and ct not in merged_transitions:
+                            merged_transitions.append(ct)
+                    else:
+                        # Non-RW transitions (enroute transitions) apply to all runways
+                        if ct not in merged_transitions:
+                            merged_transitions.append(ct)
             else:
                 for p in points:
                     merged_points.append(p)
