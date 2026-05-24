@@ -314,6 +314,63 @@ def test_no_runway_all_when_specific_exists(icao):
         assert not failures, "Procedures with conflicting runway values:\n" + "\n".join(failures)
 
 
+# Representative routes that cover airports with known ALL+specific conflicts.
+_RUNWAY_ALL_CHECK_PAIRS = [
+    ("ZBAA", "KLAX"),   # KIMMO3: ALL + 24R
+    ("ZBAA", "KSEA"),   # BASET5 / BIGBR3: ALL + multiple runways
+    ("KJFK", "KLAX"),   # ANJLL4 / DIRBY2: ALL + multiple runways
+]
+
+
+@pytest.mark.parametrize("orig,dest", _RUNWAY_ALL_CHECK_PAIRS)
+def test_post_route_no_runway_all_when_specific_exists(orig, dest):
+    """POST /api/route must not return runway='ALL' alongside specific runways.
+
+    Regression: the old code filtered ALL only in get_airport_procedures,
+    so post_route still exposed KIMMO3 - ALL in the STAR field.
+    """
+    resp = client.post(
+        "/api/route",
+        json={
+            "orig": orig,
+            "dest": dest,
+            "validCode": "",
+            "validToken": "",
+            "sidExit": "",
+            "starEntry": "",
+            "cycle": "2604",
+        },
+    )
+    if resp.status_code != 200:
+        pytest.skip(f"{orig}→{dest}: route endpoint returned {resp.status_code}")
+    data = resp.json()
+    if data.get("route") == "No result.":
+        pytest.skip(f"{orig}→{dest}: no route found")
+
+    for label, field_name in (("SID", "SID"), ("STAR", "STAR")):
+        procs = data.get(field_name, {})
+        if not procs:
+            continue
+
+        name_runways: dict = {}
+        for proc_list in procs.values():
+            for proc in proc_list:
+                name_runways.setdefault(proc[0], set()).add(proc[1])
+
+        failures = []
+        for proc_name, runways in name_runways.items():
+            specific = runways - {"ALL"}
+            # Only single-runway ALL variants must be renamed; multi-runway
+            # ALL variants are kept because their entry-point keys are needed.
+            if "ALL" in runways and len(specific) == 1:
+                failures.append(
+                    f"{orig}→{dest} {label}: {proc_name} has runway='ALL' "
+                    f"but only one specific runway {sorted(specific)} — should be renamed"
+                )
+
+        assert not failures, "Procedures with conflicting runway values:\n" + "\n".join(failures)
+
+
 # ---------------------------------------------------------------------------
 # 5.5 SID Runway Endpoint Consistency
 # ---------------------------------------------------------------------------

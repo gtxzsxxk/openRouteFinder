@@ -39,11 +39,17 @@ from openRouterFinder.core.storage.builder import build_from_fenix
 # --- Procedure response filtering ---
 
 def _filter_runway_all_from_response(data: dict) -> dict:
-    """Remove runway='ALL' variants when specific runway variants exist for the same name.
+    """Remove or rename runway='ALL' variants when specific runway variants exist.
 
-    Prevents the frontend from showing duplicate entries (Cartesian product of
-    procedure x runway) when the same procedure name has both an 'ALL' variant
-    and runway-specific variants.
+    When a procedure name has both an 'ALL' variant and exactly one specific
+    runway variant (e.g. KIMMO3 has only 24R), the ALL variant is renamed to
+    that specific runway.  This preserves the common-segment points (needed
+    for _fill_procedure_gaps and route-segment tests) while showing the correct
+    runway label in the frontend.
+
+    When multiple specific runways exist (e.g. ANJLL4 has 24L/24R/25L/25R),
+    the ALL variant is dropped — the runway-specific procedures already carry
+    the full path via their transitions.
 
     Operates on API response dicts where procedures are either Procedure objects
     or serialized tuples [name, runway, points, transitions].
@@ -67,7 +73,7 @@ def _filter_runway_all_from_response(data: dict) -> dict:
                     proc_runway = proc[1]
                 name_runways.setdefault(proc_name, set()).add(proc_runway)
 
-        # Filter out ALL variants
+        # Rename ALL to the single specific runway; drop ALL when ambiguous.
         filtered: dict = {}
         for key, proc_list in procs.items():
             filtered_list = []
@@ -78,14 +84,79 @@ def _filter_runway_all_from_response(data: dict) -> dict:
                 else:
                     proc_name = proc[0]
                     proc_runway = proc[1]
-                if not (
-                    proc_runway == "ALL"
-                    and len(name_runways.get(proc_name, set())) > 1
-                ):
+
+                specific_runways = name_runways.get(proc_name, set()) - {"ALL"}
+                if proc_runway == "ALL" and specific_runways:
+                    if len(specific_runways) == 1:
+                        rw = next(iter(specific_runways))
+                        if hasattr(proc, "name"):
+                            proc.runway = rw
+                            filtered_list.append(proc)
+                        else:
+                            new_proc = list(proc)
+                            new_proc[1] = rw
+                            filtered_list.append(tuple(new_proc))
+                    # Multiple specific runways: drop the ambiguous ALL variant.
+                else:
                     filtered_list.append(proc)
             if filtered_list:
                 filtered[key] = filtered_list
         data[label] = filtered
+
+    return data
+
+
+def _rename_single_runway_all(data: dict) -> dict:
+    """Rename runway='ALL' to the single specific runway; keep ALL when ambiguous.
+
+    Unlike _filter_runway_all_from_response, this preserves ALL variants when
+    multiple specific runways exist (e.g. MARNR8 with 6 runways).  The entry
+    points (VIXOR, TOU, etc.) are needed so starNodeName remains a valid key.
+
+    Operates on API response dicts where procedures are either Procedure objects
+    or serialized tuples [name, runway, points, transitions].
+    """
+    for label in ("SID", "STAR"):
+        if label not in data:
+            continue
+        procs = data[label]
+        if not isinstance(procs, dict):
+            continue
+
+        name_runways: dict = {}
+        for proc_list in procs.values():
+            for proc in proc_list:
+                if hasattr(proc, "name"):
+                    proc_name = proc.name
+                    proc_runway = proc.runway
+                else:
+                    proc_name = proc[0]
+                    proc_runway = proc[1]
+                name_runways.setdefault(proc_name, set()).add(proc_runway)
+
+        for key, proc_list in procs.items():
+            new_list = []
+            for proc in proc_list:
+                if hasattr(proc, "name"):
+                    proc_name = proc.name
+                    proc_runway = proc.runway
+                else:
+                    proc_name = proc[0]
+                    proc_runway = proc[1]
+
+                specific_runways = name_runways.get(proc_name, set()) - {"ALL"}
+                if proc_runway == "ALL" and len(specific_runways) == 1:
+                    rw = next(iter(specific_runways))
+                    if hasattr(proc, "name"):
+                        proc.runway = rw
+                        new_list.append(proc)
+                    else:
+                        new_proc = list(proc)
+                        new_proc[1] = rw
+                        new_list.append(tuple(new_proc))
+                else:
+                    new_list.append(proc)
+            procs[key] = new_list
 
     return data
 
@@ -418,6 +489,11 @@ async def post_route(req: RouteRequest):
         _metar_to_dict(parse_metar(read_metar(req.orig))),
         _metar_to_dict(parse_metar(read_metar(req.dest))),
     ]
+
+    # Rename single-runway ALL variants (e.g. KIMMO3 ALL → 24R) so the
+    # frontend shows the correct runway.  Multi-runway ALL variants are
+    # kept because their entry-point keys are needed for starNodeName.
+    result = _rename_single_runway_all(result)
 
     return result
 
