@@ -588,13 +588,12 @@ export function useMap(
           ? [starEnd.lon, starEnd.lat]
           : [nodes[nodes.length - 1].lon, nodes[nodes.length - 1].lat]
 
-        let starRawCoords: number[][] = []
-
         // Main STAR points (network->airport order)
         const mainNames = new Set(starPoints.map(p => p.name))
-        starRawCoords.push(...starPoints.map(p => [p.lon, p.lat]))
+        const routeNodeNames = new Set(nodes.map(n => n.name))
 
         // Transition segment points (network->airport order)
+        let starRawCoords: number[][] = []
         if (selectedSTARTransition.value) {
           const transPoints = selectedSTARTransition.value.points
           // For transition-only procedures, the transition's last point is not
@@ -603,13 +602,27 @@ export function useMap(
           if (transPoints.length > 0 && !mainNames.has(transPoints[transPoints.length - 1].name)) {
             starRawCoords = [...transPoints.map(p => [p.lon, p.lat])]
           } else {
-            // Normal case: append non-overlapping transition points after main points
-            for (const tp of transPoints) {
-              if (!mainNames.has(tp.name)) {
-                starRawCoords.push([tp.lon, tp.lat])
+            // Normal case: prepend non-overlapping transition points before main points,
+            // but only from the first point that also appears in the route.
+            // This prevents visual forks when the route takes an airway shortcut
+            // into the transition at a midpoint (e.g., EHF->LHS instead of EHF->ARVIN).
+            let startIdx = 0
+            for (let i = 0; i < transPoints.length; i++) {
+              if (routeNodeNames.has(transPoints[i].name)) {
+                startIdx = i
+                break
               }
             }
+            const transitionCoords: number[][] = []
+            for (let i = startIdx; i < transPoints.length; i++) {
+              if (!mainNames.has(transPoints[i].name)) {
+                transitionCoords.push([transPoints[i].lon, transPoints[i].lat])
+              }
+            }
+            starRawCoords = [...transitionCoords, ...starPoints.map(p => [p.lon, p.lat])]
           }
+        } else {
+          starRawCoords = [...starPoints.map(p => [p.lon, p.lat])]
         }
 
         // Connect directly to runway end
@@ -666,6 +679,21 @@ export function useMap(
           const mainNames = new Set(starPoints.map(p => p.name))
           if (transPoints.length > 0 && !mainNames.has(transPoints[transPoints.length - 1].name)) {
             displayedStarPoints = transPoints
+          } else {
+            let startIdx = 0
+            for (let i = 0; i < transPoints.length; i++) {
+              if (routeNodeNames.has(transPoints[i].name)) {
+                startIdx = i
+                break
+              }
+            }
+            const visibleTransPoints = []
+            for (let i = startIdx; i < transPoints.length; i++) {
+              if (!mainNames.has(transPoints[i].name)) {
+                visibleTransPoints.push(transPoints[i])
+              }
+            }
+            displayedStarPoints = [...visibleTransPoints, ...starPoints]
           }
         }
 
