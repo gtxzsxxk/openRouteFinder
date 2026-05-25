@@ -1702,3 +1702,68 @@ def test_route_boundary_nodes_are_semantically_correct(orig, dest):
                 f"{orig}→{dest} STAR: starRouteNodeName={star_route_node!r} "
                 f"not found in STAR segment {star_seg_nodes}."
             )
+
+
+# ---------------------------------------------------------------------------
+# 3.16 Transition continuity — STAR transition points must not be skipped
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("orig,dest", AIRPORT_PAIRS)
+def test_star_transition_points_are_not_skipped_by_airway(orig, dest):
+    """When A* enters a STAR via a transition, the route must contain every
+    transition point.  If A* takes an airway shortcut (e.g. EHF → LHS
+    instead of EHF → LOPES → PAIDD → JEFFY → LHS), the skipped
+    transition points cause the frontend star-line to fork from the route
+    line at the transition start, producing the visual 'three edges' bug.
+    """
+    response = client.post(
+        "/api/route",
+        json={
+            "orig": orig,
+            "dest": dest,
+            "validCode": "",
+            "validToken": "",
+            "sidExit": "",
+            "starEntry": "",
+            "cycle": "2604",
+        },
+    )
+    if response.status_code != 200:
+        return
+    data = response.json()
+    if data.get("route") == "No result.":
+        return
+
+    active_trans = data.get("activeSTARTransition")
+    star_key = data.get("starNodeName")
+    if not active_trans or not star_key:
+        return
+
+    nodes = [n["name"] for n in data.get("nodes", [])]
+    star_procs = data.get("STAR", {})
+
+    failures = []
+    for proc in star_procs.get(star_key, []):
+        for t_name, t_pts in proc[3]:
+            if t_name != active_trans:
+                continue
+            trans_names = [p[0] for p in t_pts]
+            if not trans_names:
+                continue
+
+            # The transition start must be present in the route; if it is not,
+            # A* entered via a different point and this transition is irrelevant.
+            start_name = trans_names[0]
+            if start_name not in nodes:
+                continue
+
+            # Every transition point must appear in the route.  Missing points
+            # mean A* bypassed them via an airway shortcut.
+            missing = [n for n in trans_names if n not in nodes]
+            if missing:
+                failures.append(
+                    f"{orig}→{dest} STAR={star_key} transition={active_trans}: "
+                    f"skipped transition points {missing}"
+                )
+
+    assert not failures, "\n".join(failures)
