@@ -60,6 +60,7 @@ class FlatbuffersAirportConnector:
         lon: float,
         exclude_iid: Optional[int] = None,
         exclude_iids: Optional[set] = None,
+        valid_iids: Optional[set] = None,
     ) -> Optional[Node]:
         """Find the nearest navdata node that has at least one outgoing edge."""
         nearest = None
@@ -70,6 +71,8 @@ class FlatbuffersAirportConnector:
             if exclude_iid is not None and node.iid == exclude_iid:
                 continue
             if exclude_iids is not None and node.iid in exclude_iids:
+                continue
+            if valid_iids is not None and node.iid not in valid_iids:
                 continue
             d = great_circle_distance_km(node.px, node.py, lat, lon)
             if d < min_dist:
@@ -182,11 +185,57 @@ class FlatbuffersAirportConnector:
                         first_pt = proc.points[0]
                         node = self._resolve_node(first_pt[0], first_pt[1], first_pt[2])
                         entry_nodes[node.iid] = node
+
+            # Compute nodes that are genuinely reachable from the main airway
+            # network.  A node qualifies if it has at least two inbound edges
+            # from outside the procedure set, or if it has a single external
+            # inbound edge that ultimately traces back to such a node.  This
+            # prevents selecting dead-end chain nodes (e.g. IGBUR -> GLORY)
+            # that are disconnected from the main network.
+            reverse_adj = {iid: [] for iid in range(len(self.nav_data.node_list))}
+            for node in self.nav_data.node_list:
+                if node is None:
+                    continue
+                for e in node.next_list:
+                    reverse_adj[e.nend].append(node.iid)
+
+            memo: Dict[int, bool] = {}
+
+            def _is_reachable_from_network(iid: int) -> bool:
+                if iid in memo:
+                    return memo[iid]
+                if iid in proc_node_iids:
+                    memo[iid] = False
+                    return False
+                external_sources = [
+                    src for src in reverse_adj[iid] if src not in proc_node_iids
+                ]
+                if len(external_sources) >= 2:
+                    memo[iid] = True
+                    return True
+                memo[iid] = False
+                for src in external_sources:
+                    if _is_reachable_from_network(src):
+                        memo[iid] = True
+                        return True
+                return False
+
+            nodes_reachable_from_network: set = set()
+            for node in self.nav_data.node_list:
+                if node is None:
+                    continue
+                if node.iid not in proc_node_iids and node.next_list:
+                    if _is_reachable_from_network(node.iid):
+                        nodes_reachable_from_network.add(node.iid)
+
             for node in entry_nodes.values():
                 needs_bridge = not node.next_list or node.iid not in nodes_with_inbound
                 if needs_bridge:
                     bridge = self._find_nearest_connected_node(
-                        node.px, node.py, exclude_iid=node.iid, exclude_iids=proc_node_iids
+                        node.px, node.py,
+                        exclude_iid=node.iid,
+                        exclude_iids=proc_node_iids,
+                        valid_iids=nodes_reachable_from_network,
                     )
                     if bridge:
                         conn.bridge_edges.append(
@@ -583,26 +632,27 @@ class FlatbuffersAirportConnector:
         return runway_segments, common_segments, transition_segments
 
     def _apply_filter(self, filter_name: Optional[str], runway_segments, common_segments, transition_segments, proc_type: int):
-        """Filter procedures by any waypoint name in the procedure."""
+        """Filter procedures by exit point (SID) or entry point (STAR)."""
         if not filter_name:
             return runway_segments, common_segments, transition_segments
 
-        def _contains_filter(points, transitions):
-            for p in points:
-                if p[0] == filter_name:
-                    return True
-            for _, t_points in transitions:
-                for p in t_points:
-                    if p[0] == filter_name:
-                        return True
-            return False
+        def _matches_filter(points):
+            if not points:
+                return False
+            if proc_type == 1:  # SID: match exit point (last point)
+                return points[-1][0] == filter_name
+            else:  # STAR: match entry point (first point)
+                return points[0][0] == filter_name
 
         target_procs = set()
         for proc_name, runway, anchor_node, points, transitions, is_main in runway_segments:
-            if _contains_filter(points, transitions):
+            if _matches_filter(points):
                 target_procs.add(proc_name)
         for proc_name, (anchor_node, points, transitions) in common_segments.items():
-            if _contains_filter(points, transitions):
+            if _matches_filter(points):
+                target_procs.add(proc_name)
+        for proc_name, runway, anchor_node, points, transitions, is_main in transition_segments:
+            if _matches_filter(points):
                 target_procs.add(proc_name)
 
         runway_segments = [

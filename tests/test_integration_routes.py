@@ -1284,10 +1284,20 @@ def _verify_sid_star_complete_path(
     if len(seg_nodes) < 2:
         return errors
 
-    # Find best matching procedure
+    # Determine procedure nodes (excluding airport)
+    if label == "SID":
+        proc_seg_nodes = seg_nodes[1:]  # Skip airport at start
+    else:
+        proc_seg_nodes = seg_nodes[:-1]  # Skip airport at end
+
+    if len(proc_seg_nodes) < 2:
+        return errors
+
+    # Find best matching procedure and check against ALL procedures
     best_proc = None
     best_key = None
     best_score = 0
+    valid_procs = []
 
     for key, proc_list in procedures.items():
         for proc in proc_list:
@@ -1301,21 +1311,44 @@ def _verify_sid_star_complete_path(
                 best_proc = proc
                 best_key = key
 
+            # Check if this procedure fully validates the segment
+            if score < 2:
+                continue
+
+            # Check consecutive pairs
+            has_gap = False
+            for i in range(len(proc_seg_nodes) - 1):
+                a, b = proc_seg_nodes[i], proc_seg_nodes[i + 1]
+                if a not in proc_names or b not in proc_names:
+                    continue
+                a_idx = proc_names.index(a)
+                b_idx = proc_names.index(b)
+                if b_idx != a_idx + 1:
+                    has_gap = True
+                    break
+
+            if has_gap:
+                continue
+
+            # Check boundary conditions
+            if label == "SID" and proc_seg_nodes:
+                if proc_seg_nodes[0] != proc_names[0]:
+                    continue
+            if label == "STAR" and proc_seg_nodes:
+                if proc_seg_nodes[-1] != proc_names[-1]:
+                    continue
+
+            valid_procs.append(proc)
+
+    if valid_procs:
+        return errors
+
     if best_proc is None or best_score < 2:
         return errors
 
     proc_names = [p[0] for p in best_proc[2]]
 
-    # Determine procedure nodes (excluding airport)
-    if label == "SID":
-        proc_seg_nodes = seg_nodes[1:]  # Skip airport at start
-    else:
-        proc_seg_nodes = seg_nodes[:-1]  # Skip airport at end
-
-    if len(proc_seg_nodes) < 2:
-        return errors
-
-    # Verify every adjacent pair in proc_seg_nodes is consecutive in procedure
+    # Report errors using the best-matching procedure
     for i in range(len(proc_seg_nodes) - 1):
         a, b = proc_seg_nodes[i], proc_seg_nodes[i + 1]
         if a not in proc_names or b not in proc_names:
@@ -1329,7 +1362,6 @@ def _verify_sid_star_complete_path(
                 f"expected {a_idx + 1}). Procedure points: {proc_names}"
             )
 
-    # For SID: first procedure node must be the first point of procedure
     if label == "SID" and proc_seg_nodes and proc_names:
         if proc_seg_nodes[0] != proc_names[0]:
             errors.append(
@@ -1338,7 +1370,6 @@ def _verify_sid_star_complete_path(
                 f"SID segment: {seg_nodes}"
             )
 
-    # For STAR: last procedure node must be the last point of procedure
     if label == "STAR" and proc_seg_nodes and proc_names:
         if proc_seg_nodes[-1] != proc_names[-1]:
             errors.append(

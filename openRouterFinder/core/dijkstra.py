@@ -175,7 +175,16 @@ class RouteEngine:
             target.route_list, sid_conn, star_conn
         )
 
-        dist_km = target.dist
+        # Recalculate distance after filling procedure gaps.
+        dist_km = 0.0
+        prev_node = sid_conn.airport_node
+        for _, node_name, iid in target.route_list:
+            node = self._get_node(iid, sid_conn, star_conn)
+            if node is not None:
+                dist_km += great_circle_distance_km(
+                    prev_node.px, prev_node.py, node.px, node.py
+                )
+                prev_node = node
         dist_nm = dist_km / 1.852
         dist_str = "%.2f nm / %.2f km" % (dist_nm, dist_km)
         route_total = self._sort_route(orig, target.route_list)
@@ -412,19 +421,62 @@ class RouteEngine:
         procedure, ensuring the displayed route is a single straight line.
         """
 
-        def _best_proc_for_run(node_names: List[str], conn: AirportConnection):
-            """Find the procedure that contains the most nodes from the run."""
+        def _best_proc_for_run(
+            node_names: List[str],
+            conn: AirportConnection,
+            edge_label: str,
+        ):
+            """Find the best-matching procedure for the run.
+
+            Prefer procedures where the run forms a complete contiguous path
+            (starts at first point and ends at last point).  Among incomplete
+            matches, prefer the one with the highest score, then the longest
+            procedure.
+            """
             best_proc = None
             best_key = None
             best_score = 0
+            best_is_complete = False
+
             for key, proc_list in conn.procedures.items():
                 for proc in proc_list:
                     proc_names = [p[0] for p in proc.points]
                     score = sum(1 for name in node_names if name in proc_names)
-                    if score > best_score:
-                        best_score = score
-                        best_proc = proc
-                        best_key = key
+                    if score < 2:
+                        continue
+
+                    match_indices = [
+                        proc_names.index(name)
+                        for name in node_names
+                        if name in proc_names
+                    ]
+                    if len(match_indices) < 2:
+                        continue
+
+                    first_idx = min(match_indices)
+                    last_idx = max(match_indices)
+                    is_complete = (
+                        first_idx == 0 and last_idx == len(proc_names) - 1
+                    )
+
+                    if is_complete and not best_is_complete:
+                        best_proc, best_key, best_score, best_is_complete = (
+                            proc, key, score, True
+                        )
+                    elif is_complete == best_is_complete:
+                        if score > best_score:
+                            best_proc, best_key, best_score, best_is_complete = (
+                                proc, key, score, is_complete
+                            )
+                        elif (
+                            score == best_score
+                            and best_proc is not None
+                            and len(proc.points) > len(best_proc.points)
+                        ):
+                            best_proc, best_key, best_score, best_is_complete = (
+                                proc, key, score, is_complete
+                            )
+
             return best_proc, best_key, best_score
 
         used_procs: Dict[str, Tuple[str, Procedure]] = {}
@@ -463,7 +515,9 @@ class RouteEngine:
                 if prev_node is not None:
                     candidate_names.insert(0, prev_node[1])
 
-                best_proc, best_key, score = _best_proc_for_run(candidate_names, conn)
+                best_proc, best_key, score = _best_proc_for_run(
+                    candidate_names, conn, edge_label
+                )
 
                 if best_proc and score >= 2:
                     proc_names = [p[0] for p in best_proc.points]
@@ -478,6 +532,21 @@ class RouteEngine:
                         first_idx = min(match_indices)
                         last_idx = max(match_indices)
 
+                        # Determine where the procedure path should start/end.
+                        # For SID, always extend to the first point (airport side).
+                        # For STAR, always extend to the last point (airport side).
+                        # This prevents A* from entering/exiting at internal nodes.
+                        prev_is_first = (
+                            prev_node is not None
+                            and prev_node[1] == proc_names[first_idx]
+                        )
+                        if edge_label == "SID":
+                            start_idx = 0
+                            end_idx = max(last_idx, len(proc_names) - 1)
+                        else:
+                            start_idx = first_idx + 1 if prev_is_first else first_idx
+                            end_idx = len(proc_names) - 1
+
                         # Record the procedure actually used for this run so
                         # the caller can report the correct procedure key
                         # instead of guessing via _find_procedure_key_for_node.
@@ -488,17 +557,8 @@ class RouteEngine:
                         if prev_node is not None:
                             known_iids[prev_node[1]] = prev_node[2]
 
-                        # Determine where the procedure path should start.
-                        # If prev_node is the first match, don't duplicate it.
-                        prev_is_first = (
-                            prev_node is not None
-                            and prev_node[1] == proc_names[first_idx]
-                        )
-                        start_idx = first_idx + 1 if prev_is_first else first_idx
-
-                        # Build the full procedure path between start and last match
                         proc_path: List[Tuple[str, str, int]] = []
-                        for k in range(start_idx, last_idx + 1):
+                        for k in range(start_idx, end_idx + 1):
                             pt_name = proc_names[k]
                             pt_iid = known_iids.get(pt_name)
                             if pt_iid is None:
