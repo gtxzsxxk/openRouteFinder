@@ -1,5 +1,6 @@
 """Airport SID/STAR parsing and temporary connector generation."""
 
+import math
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -239,7 +240,7 @@ class FlatbuffersAirportConnector:
     def _is_runway_endpoint(name: str) -> bool:
         return bool(_RUNWAY_ENDPOINT_RE.match(name))
 
-    def _extract_transition_segments(self, trans, proc_type: int = 0) -> List[List[Tuple[str, float, float]]]:
+    def _extract_transition_segments(self, trans, proc_type: int = 0, transition_name: str = "") -> List[List[Tuple[str, float, float]]]:
         """Extract transition segments, splitting on (0,0) separator legs.
 
         Fenix sometimes stores multiple disconnected segments in a single
@@ -254,9 +255,24 @@ class FlatbuffersAirportConnector:
         STAR transitions represent a continuous network->airport path;
         separators are often internal format markers (e.g. transition from
         STAR to approach) that should not break the path.
+
+        Runway-specific transitions (names starting with "RW") describe a
+        continuous runway->common path; the unnamed (0,0) legs in them are
+        runway threshold / climb points, not separators, so they must NOT be
+        split.
         """
         if proc_type == 2:
             # STAR: treat as continuous path, ignore (0,0) separators
+            points = []
+            for i in range(trans.LegsLength()):
+                pt = self._leg_to_point(trans.Legs(i))
+                if pt:
+                    points.append(pt)
+            return [self._dedup_consecutive(points)]
+
+        # Runway-specific transitions: never split — (0,0) legs are runway
+        # threshold / climb points, not segment separators.
+        if transition_name.startswith("RW"):
             points = []
             for i in range(trans.LegsLength()):
                 pt = self._leg_to_point(trans.Legs(i))
@@ -309,6 +325,40 @@ class FlatbuffersAirportConnector:
                 if FlatbuffersAirportConnector.RUNWAY_RE.match(rwy):
                     return rwy
         return default
+
+    def _infer_runway_from_location(self, lat: float, lon: float, ap) -> str:
+        """Infer the nearest runway from a geographic location.
+
+        Used as a last-resort fallback when no runway-specific transitions,
+        DER/DE markers, or approach bridges are available.
+
+        Compares against each runway end individually so that opposite ends
+        of the same physical runway (e.g. 13L vs 31R) are treated as
+        separate candidates and the closest end wins.
+        """
+        best_runway = ""
+        best_dist = float("inf")
+        for i in range(ap.RunwaysLength()):
+            rw = ap.Runways(i)
+            for j in range(rw.EndsLength()):
+                end = rw.Ends(j)
+                end_name_bytes = end.Name()
+                end_name = (
+                    end_name_bytes.decode("utf-8")
+                    if isinstance(end_name_bytes, bytes)
+                    else (end_name_bytes or "")
+                )
+                if not end_name:
+                    continue
+                end_lat = float(end.Lat()) if end.Lat() else 0.0
+                end_lon = float(end.Lon()) if end.Lon() else 0.0
+                if end_lat == 0.0 and end_lon == 0.0:
+                    continue
+                dist = great_circle_distance_km(lat, lon, end_lat, end_lon)
+                if dist < best_dist:
+                    best_dist = dist
+                    best_runway = end_name
+        return best_runway
 
     def _resolve_node(self, name: str, lat: float, lon: float) -> Node:
         """Find node in network or create temp node."""
@@ -445,7 +495,7 @@ class FlatbuffersAirportConnector:
                 trans = proc.Transitions(j)
                 trans_name_bytes = trans.Name()
                 trans_name = trans_name_bytes.decode("utf-8") if isinstance(trans_name_bytes, bytes) else (trans_name_bytes or "")
-                segments = self._extract_transition_segments(trans, proc_type)
+                segments = self._extract_transition_segments(trans, proc_type, trans_name)
                 for segment in segments:
                     seg_points = [(n, lat, lon) for n, lat, lon in segment if n]
                     if not seg_points:
@@ -474,12 +524,15 @@ class FlatbuffersAirportConnector:
                 # Also generate runway segments from transitions so the full
                 # runway->network path is available for display and edge building.
                 # Transitions are already split into clean options above.
+                # Only RWxx transitions become runway segments; non-RW transitions
+                # are enroute transitions and must remain attached to the common
+                # segment so they don't spawn bogus runway-grouped procedures.
                 for trans_name, trans_points in transitions:
                     if not trans_points:
                         continue
-                    # Infer runway from segment content (DERxx/DExx markers);
-                    # fallback to transition name for grouping (validated later).
-                    default_runway = trans_name[2:] if trans_name.startswith("RW") else trans_name
+                    if not trans_name.startswith("RW"):
+                        continue
+                    default_runway = trans_name[2:]
                     runway_name = self._infer_runway_from_points(trans_points, default_runway)
                     if proc_type == 1:
                         t_anchor_name, t_anchor_lat, t_anchor_lon = trans_points[-1]
@@ -625,6 +678,8 @@ class FlatbuffersAirportConnector:
         procedures,
         key_from_points,
         approach_bridges: Optional[Dict[Tuple[str, str], List[Tuple[str, float, float]]]] = None,
+        ap=None,
+        runway_endpoints: Optional[Dict[str, Tuple[str, float, float]]] = None,
     ):
         """Register common segment procedures for runways covered by their transitions.
 
@@ -634,6 +689,15 @@ class FlatbuffersAirportConnector:
         When no transitions exist and approach_bridges is provided (STAR case),
         runway is inferred from which runways have approach bridges starting from
         this segment's final point. This avoids falling back to runway="ALL".
+
+        As a last resort, when an airport object (ap) is provided and no runway
+        can be inferred, the runway is guessed from the geographic location of
+        the segment's final point so the frontend never sees "ALL".
+
+        When runway_endpoints is provided and the inferred runway has a known
+        endpoint marker, the marker is prepended to the procedure points so
+        that all procedures for the same runway share the same starting point.
+        This prevents pooled-edge branching in the internal_edges graph.
 
         Single-point common segments (after filtering synthetic markers) are
         skipped because they provide no meaningful path.
@@ -675,12 +739,36 @@ class FlatbuffersAirportConnector:
                             procedures[key] = [proc]
                         else:
                             procedures[key].append(proc)
+                elif ap is not None and points:
+                    _name, _lat, _lon = points[-1]
+                    inferred = self._infer_runway_from_location(_lat, _lon, ap)
+                    if inferred and runway_endpoints and inferred in runway_endpoints:
+                        re_name, re_lat, re_lon = runway_endpoints[inferred]
+                        if not merged_points or merged_points[0][0] not in (f"DER{inferred}", f"DE{inferred}"):
+                            merged_points = [(re_name, re_lat, re_lon)] + list(merged_points)
+                    proc = Procedure(name=proc_name, runway=inferred if inferred else "ALL", points=merged_points, transitions=transitions)
+                    if key not in procedures:
+                        procedures[key] = [proc]
+                    else:
+                        procedures[key].append(proc)
                 else:
                     proc = Procedure(name=proc_name, runway="ALL", points=merged_points, transitions=transitions)
                     if key not in procedures:
                         procedures[key] = [proc]
                     else:
                         procedures[key].append(proc)
+            elif ap is not None and points:
+                _name, _lat, _lon = points[-1]
+                inferred = self._infer_runway_from_location(_lat, _lon, ap)
+                if inferred and runway_endpoints and inferred in runway_endpoints:
+                    re_name, re_lat, re_lon = runway_endpoints[inferred]
+                    if not merged_points or merged_points[0][0] not in (f"DER{inferred}", f"DE{inferred}"):
+                        merged_points = [(re_name, re_lat, re_lon)] + list(merged_points)
+                proc = Procedure(name=proc_name, runway=inferred if inferred else "ALL", points=merged_points, transitions=transitions)
+                if key not in procedures:
+                    procedures[key] = [proc]
+                else:
+                    procedures[key].append(proc)
             else:
                 proc = Procedure(name=proc_name, runway="ALL", points=merged_points, transitions=transitions)
                 if key not in procedures:
@@ -821,6 +909,51 @@ class FlatbuffersAirportConnector:
         for proc_name, runway, exit_node, points, transitions, is_main in runway_segments:
             runway_groups[(proc_name, runway)].append((exit_node, points, transitions, is_main))
 
+        # Collect candidate runways per proc_name from RWxx transitions.
+        sid_proc_name_candidates: Dict[str, Set[str]] = {}
+        for proc_name, runway, _exit_node, _points, _transitions, _is_main in runway_segments:
+            if self.RUNWAY_RE.match(runway):
+                sid_proc_name_candidates.setdefault(proc_name, set()).add(runway)
+        for proc_name, (_anchor_node, _points, common_trans) in common_segments.items():
+            for trans_name, _ in common_trans:
+                if trans_name.startswith("RW"):
+                    rwy = trans_name[2:]
+                    if self.RUNWAY_RE.match(rwy):
+                        sid_proc_name_candidates.setdefault(proc_name, set()).add(rwy)
+
+        # For transition-only procedures, merge non-RW transition groups into
+        # valid-runway groups as transitions. This prevents enroute transitions
+        # from being spawned as separate bogus procedures with inferred runways.
+        proc_name_to_valid_runways: Dict[str, List[str]] = {}
+        proc_name_to_invalid_runways: Dict[str, List[str]] = {}
+        for proc_name, runway in runway_groups:
+            if self.RUNWAY_RE.match(runway):
+                proc_name_to_valid_runways.setdefault(proc_name, []).append(runway)
+            else:
+                proc_name_to_invalid_runways.setdefault(proc_name, []).append(runway)
+        for proc_name, invalid_runways in proc_name_to_invalid_runways.items():
+            valid_runways = proc_name_to_valid_runways.get(proc_name)
+            if not valid_runways:
+                continue
+            extra_transitions = []
+            for rw in invalid_runways:
+                group = runway_groups[(proc_name, rw)]
+                for _exit_node, points, _transitions, _is_main in group:
+                    if points:
+                        extra_transitions.append((rw, list(points)))
+            for rw in valid_runways:
+                group = runway_groups[(proc_name, rw)]
+                new_group = []
+                for exit_node, points, transitions, is_main in group:
+                    merged_trans = list(transitions)
+                    for et in extra_transitions:
+                        if et not in merged_trans:
+                            merged_trans.append(et)
+                    new_group.append((exit_node, points, merged_trans, is_main))
+                runway_groups[(proc_name, rw)] = new_group
+            for rw in invalid_runways:
+                del runway_groups[(proc_name, rw)]
+
         procedures = {}
         for (proc_name, runway), group in runway_groups.items():
             # Prefer option whose points contain the current runway endpoint
@@ -884,7 +1017,19 @@ class FlatbuffersAirportConnector:
                         t_name = opt_points[0][0] if opt_points else runway
                         merged_transitions.append((t_name, list(opt_points)))
 
-            display_runway = runway if self.RUNWAY_RE.match(runway) else "ALL"
+            candidate_runways = sid_proc_name_candidates.get(proc_name, set())
+            if not self.RUNWAY_RE.match(runway) and candidate_runways:
+                display_runway = sorted(candidate_runways)[0]
+            elif not self.RUNWAY_RE.match(runway):
+                # Fallback: infer runway from the geographic location of the first point.
+                if merged_points:
+                    _name, _lat, _lon = merged_points[0]
+                    inferred = self._infer_runway_from_location(_lat, _lon, ap)
+                    display_runway = inferred if inferred else "ALL"
+                else:
+                    display_runway = "ALL"
+            else:
+                display_runway = runway
             proc = Procedure(name=proc_name, runway=display_runway, points=merged_points, transitions=merged_transitions)
             # SID points are airport->network; key by merged network-side exit point
             key = merged_points[-1][0] if merged_points else exit_node.name
@@ -895,7 +1040,7 @@ class FlatbuffersAirportConnector:
 
         # Also register common segment procedures as selectable exits.
         # Only offer for runways covered by this procedure's transitions.
-        self._register_common_procedures(common_segments, procedures, lambda pts: pts[-1][0])
+        self._register_common_procedures(common_segments, procedures, lambda pts: pts[-1][0], ap=ap, runway_endpoints=runway_endpoints)
 
         procedures = self._deduplicate_procedures(procedures)
 
@@ -1095,6 +1240,23 @@ class FlatbuffersAirportConnector:
         for proc_name, runway, entry_node, points, transitions, is_main in runway_segments:
             runway_groups[(proc_name, runway)].append((entry_node, points, transitions, is_main))
 
+        # Collect candidate runways per proc_name from approach bridges and RWxx transitions.
+        proc_name_candidate_runways: Dict[str, Set[str]] = {}
+        for proc_name, runway, _entry_node, _points, _transitions, _is_main in runway_segments:
+            if self.RUNWAY_RE.match(runway):
+                proc_name_candidate_runways.setdefault(proc_name, set()).add(runway)
+        for proc_name, (anchor_node, points, common_trans) in common_segments.items():
+            if points and approach_bridges:
+                final_point = points[-1][0]
+                for (rwy, entry), _bridge in approach_bridges.items():
+                    if entry == final_point:
+                        proc_name_candidate_runways.setdefault(proc_name, set()).add(rwy)
+            for trans_name, _ in common_trans:
+                if trans_name.startswith("RW"):
+                    rwy = trans_name[2:]
+                    if self.RUNWAY_RE.match(rwy):
+                        proc_name_candidate_runways.setdefault(proc_name, set()).add(rwy)
+
         procedures = {}
         for (proc_name, runway), group in runway_groups.items():
             # Prefer the option whose last point has a matching approach bridge.
@@ -1161,7 +1323,27 @@ class FlatbuffersAirportConnector:
                         t_name = opt_points[-1][0] if opt_points else runway
                         merged_transitions.append((t_name, list(opt_points)))
 
-            display_runway = runway if self.RUNWAY_RE.match(runway) else "ALL"
+            candidate_runways = proc_name_candidate_runways.get(proc_name, set())
+            if not self.RUNWAY_RE.match(runway) and candidate_runways:
+                # Prefer candidate runway whose approach bridge matches this endpoint.
+                best_runway = runway
+                for cr in sorted(candidate_runways):
+                    if points and (cr, points[-1][0]) in approach_bridges:
+                        best_runway = cr
+                        break
+                else:
+                    best_runway = sorted(candidate_runways)[0]
+                display_runway = best_runway
+            elif not self.RUNWAY_RE.match(runway):
+                # Fallback: infer runway from the geographic location of the last point.
+                if merged_points:
+                    _name, _lat, _lon = merged_points[-1]
+                    inferred = self._infer_runway_from_location(_lat, _lon, ap)
+                    display_runway = inferred if inferred else "ALL"
+                else:
+                    display_runway = "ALL"
+            else:
+                display_runway = runway
             proc = Procedure(name=proc_name, runway=display_runway, points=merged_points, transitions=merged_transitions)
             # STAR main-legs are network->airport; key by merged network-side entry point.
             if merged_points:
@@ -1177,26 +1359,49 @@ class FlatbuffersAirportConnector:
         # Only offer for runways covered by this procedure's transitions.
         # For common segments without transitions, infer runway from approach bridges.
         self._register_common_procedures(
-            common_segments, procedures, lambda pts: pts[0][0], approach_bridges
+            common_segments, procedures, lambda pts: pts[0][0], approach_bridges, ap=ap
         )
 
         procedures = self._deduplicate_procedures(procedures)
 
         # Merge approach bridges (Type=3) into STAR procedures so the full
         # path from STAR endpoint to runway is available for display and routing.
+        # Pre-compute entry point -> [(runway, bridge_points)] for ALL-variant matching.
+        entry_to_bridges: Dict[str, List[Tuple[str, List[Tuple[str, float, float]]]]] = {}
+        for (rwy, entry), bridge_points in approach_bridges.items():
+            entry_to_bridges.setdefault(entry, []).append((rwy, bridge_points))
+
         used_bridges: set = set()
         for key, proc_list in procedures.items():
             for proc in proc_list:
-                if proc.points:
-                    bridge_key = (proc.runway, proc.points[-1][0])
-                    if bridge_key in approach_bridges:
-                        bridge_points = approach_bridges[bridge_key]
-                        seen = {p[0] for p in proc.points}
-                        for bp in bridge_points:
-                            if bp[0] not in seen:
-                                proc.points.append(bp)
-                                seen.add(bp[0])
-                        used_bridges.add(bridge_key)
+                if not proc.points:
+                    continue
+                entry_point = proc.points[-1][0]
+                bridge_key = (proc.runway, entry_point)
+                if bridge_key in approach_bridges:
+                    bridge_points = approach_bridges[bridge_key]
+                    seen = {p[0] for p in proc.points}
+                    for bp in bridge_points:
+                        if bp[0] not in seen:
+                            proc.points.append(bp)
+                            seen.add(bp[0])
+                    used_bridges.add(bridge_key)
+                elif proc.runway == "ALL" and entry_point in entry_to_bridges:
+                    bridges = entry_to_bridges[entry_point]
+                    best_runway, best_bridge = bridges[0]
+                    if len(bridges) > 1:
+                        candidates = proc_name_candidate_runways.get(proc.name, set())
+                        for rwy, bp in bridges:
+                            if rwy in candidates:
+                                best_runway, best_bridge = rwy, bp
+                                break
+                    seen = {p[0] for p in proc.points}
+                    for bp in best_bridge:
+                        if bp[0] not in seen:
+                            proc.points.append(bp)
+                            seen.add(bp[0])
+                    proc.runway = best_runway
+                    used_bridges.add((best_runway, entry_point))
 
         # Build connections from each procedure's last point to the airport.
         # This ensures that when an approach bridge extends the path, the

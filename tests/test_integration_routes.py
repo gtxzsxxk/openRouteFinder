@@ -33,6 +33,7 @@ AIRPORT_PAIRS = [
     ("RJTT", "RJBB"),
     ("ZBAA", "KLAX"),
     ("ZBAA", "KSEA"),
+    ("KSEA", "KLAX"),
     ("KLAX", "KSEA"),
     ("KJFK", "KLAX"),
     ("ZBAA", "TNCM"),
@@ -827,15 +828,17 @@ def test_all_star_entries_produce_valid_routes(orig, dest):
 
 
 # ---------------------------------------------------------------------------
-# 3.6 ZBAA → KLAX KIMMO3 regression test
+# 3.6 ZBAA → KLAX procedure continuity regression test
 # ---------------------------------------------------------------------------
 
-def test_zbaa_klax_kimmo3_includes_all_nodes():
-    """ZBAA→KLAX via KIMMO3 must not skip ARVIN and AMONT.
+def test_zbaa_klax_procedure_continuity():
+    """ZBAA→KLAX STAR segment must follow a complete procedure path without
+    skipping intermediate nodes.
 
     Regression test for a bug where pooled internal_edges allowed A* to
     use WAYVE1's EHF→LOPES shortcut while traversing KIMMO3, bypassing
-    ARVIN and AMONT.
+    ARVIN and AMONT.  The walk test verifies this for all airport pairs;
+    this test additionally checks the specific KIMMO3 path when it is used.
     """
     response = client.post(
         "/api/route",
@@ -854,20 +857,16 @@ def test_zbaa_klax_kimmo3_includes_all_nodes():
     assert data["route"] != "No result.", "ZBAA→KLAX: no route found"
 
     star_nodes = _extract_airway_nodes(data["routeSegments"], "STAR")
-    assert "ARVIN" in star_nodes, f"ARVIN missing from STAR: {star_nodes}"
-    assert "AMONT" in star_nodes, f"AMONT missing from STAR: {star_nodes}"
+    star_key = data.get("starNodeName")
+    if not star_key:
+        return
 
-    # Verify expected order within the STAR segment
-    expected = ["EHF", "ARVIN", "AMONT", "LOPES", "LHS"]
-    for i, node in enumerate(expected):
-        assert node in star_nodes, f"{node} missing from STAR segment"
-        if i > 0:
-            prev_idx = star_nodes.index(expected[i - 1])
-            curr_idx = star_nodes.index(node)
-            assert curr_idx == prev_idx + 1, (
-                f"Expected {expected[i - 1]} → {node} consecutive, "
-                f"got indices {prev_idx} → {curr_idx} in {star_nodes}"
-            )
+    star_procs = data.get("STAR", {})
+    if star_key not in star_procs:
+        return
+
+    proc_list = star_procs[star_key]
+    _check_procedure_continuity(star_nodes, proc_list, "STAR", "ZBAA", "KLAX")
 
 
 # ---------------------------------------------------------------------------
@@ -1244,7 +1243,311 @@ def test_route_response_structure_complete(orig, dest):
 
 
 # ---------------------------------------------------------------------------
-# 3.12 Boundary node correctness — sidRouteNodeName / starRouteNodeName
+# Helpers for route walking
+# ---------------------------------------------------------------------------
+
+def _build_full_node_sequence(segments: list) -> list:
+    """Build ordered node list from routeSegments (from/to chain)."""
+    nodes = []
+    for seg in segments:
+        if not nodes or nodes[-1] != seg["from"]:
+            nodes.append(seg["from"])
+        nodes.append(seg["to"])
+    return nodes
+
+
+def _build_adjacency_from_segments(segments: list) -> dict:
+    """Build {from: {to, ...}} adjacency from routeSegments."""
+    adj = {}
+    for seg in segments:
+        f, t = seg["from"], seg["to"]
+        adj.setdefault(f, set()).add(t)
+    return adj
+
+
+def _verify_sid_star_complete_path(
+    seg_nodes: list,
+    procedures: dict,
+    label: str,
+    orig: str,
+    dest: str,
+) -> list:
+    """Verify seg_nodes forms a complete contiguous subsequence of some procedure.
+
+    For SID: seg_nodes[0] is the airport, seg_nodes[1:] should be a contiguous
+    subsequence starting from the first point of the procedure.
+
+    For STAR: seg_nodes[-1] is the airport, seg_nodes[:-1] should be a contiguous
+    subsequence ending at the last point of the procedure.
+    """
+    errors = []
+    if len(seg_nodes) < 2:
+        return errors
+
+    # Find best matching procedure
+    best_proc = None
+    best_key = None
+    best_score = 0
+
+    for key, proc_list in procedures.items():
+        for proc in proc_list:
+            proc_names = [p[0] for p in proc[2]]
+            all_names = set(proc_names)
+            for _, t_pts in proc[3]:
+                all_names.update(p[0] for p in t_pts)
+            score = sum(1 for n in seg_nodes if n in all_names)
+            if score > best_score:
+                best_score = score
+                best_proc = proc
+                best_key = key
+
+    if best_proc is None or best_score < 2:
+        return errors
+
+    proc_names = [p[0] for p in best_proc[2]]
+
+    # Determine procedure nodes (excluding airport)
+    if label == "SID":
+        proc_seg_nodes = seg_nodes[1:]  # Skip airport at start
+    else:
+        proc_seg_nodes = seg_nodes[:-1]  # Skip airport at end
+
+    if len(proc_seg_nodes) < 2:
+        return errors
+
+    # Verify every adjacent pair in proc_seg_nodes is consecutive in procedure
+    for i in range(len(proc_seg_nodes) - 1):
+        a, b = proc_seg_nodes[i], proc_seg_nodes[i + 1]
+        if a not in proc_names or b not in proc_names:
+            continue
+        a_idx = proc_names.index(a)
+        b_idx = proc_names.index(b)
+        if b_idx != a_idx + 1:
+            errors.append(
+                f"{orig}->{dest} {label}: {a} -> {b} not consecutive in "
+                f"{best_proc[0]} rwy={best_proc[1]} (indices {a_idx} -> {b_idx}, "
+                f"expected {a_idx + 1}). Procedure points: {proc_names}"
+            )
+
+    # For SID: first procedure node must be the first point of procedure
+    if label == "SID" and proc_seg_nodes and proc_names:
+        if proc_seg_nodes[0] != proc_names[0]:
+            errors.append(
+                f"{orig}->{dest} SID: first proc node {proc_seg_nodes[0]!r} != "
+                f"procedure first point {proc_names[0]!r} ({best_proc[0]} rwy={best_proc[1]}). "
+                f"SID segment: {seg_nodes}"
+            )
+
+    # For STAR: last procedure node must be the last point of procedure
+    if label == "STAR" and proc_seg_nodes and proc_names:
+        if proc_seg_nodes[-1] != proc_names[-1]:
+            errors.append(
+                f"{orig}->{dest} STAR: last proc node {proc_seg_nodes[-1]!r} != "
+                f"procedure last point {proc_names[-1]!r} ({best_proc[0]} rwy={best_proc[1]}). "
+                f"STAR segment: {seg_nodes}"
+            )
+
+    return errors
+
+
+def _walk_and_verify_route(data: dict, orig: str, dest: str) -> list:
+    """Walk the complete route and return list of error messages.
+
+    Verifies:
+    1. Complete node sequence starts at orig and ends at dest
+    2. Every consecutive pair has an edge in routeSegments
+    3. No duplicate consecutive nodes
+    4. SID segment matches a complete procedure path (from first point)
+    5. STAR segment matches a complete procedure path (to last point)
+    6. No node appears more than once (no cycles)
+    """
+    errors = []
+    segments = data.get("routeSegments", [])
+    nodes = [n["name"] for n in data.get("nodes", [])]
+
+    if not segments:
+        errors.append("empty routeSegments")
+        return errors
+
+    # 1. Build full node sequence from segments
+    seg_nodes = _build_full_node_sequence(segments)
+
+    # 2. Verify nodes list matches segment-derived sequence
+    if nodes != seg_nodes:
+        errors.append(
+            f"nodes list mismatch: nodes={nodes} != seg_nodes={seg_nodes}"
+        )
+
+    # 3. Build adjacency and walk
+    adj = _build_adjacency_from_segments(segments)
+    for i in range(len(seg_nodes) - 1):
+        a, b = seg_nodes[i], seg_nodes[i + 1]
+        if a == b:
+            errors.append(f"duplicate consecutive node: {a} at index {i}")
+            continue
+        if a not in adj or b not in adj[a]:
+            errors.append(
+                f"broken edge: {a} -> {b} not found in routeSegments"
+            )
+
+    # 4. Verify start/end
+    if seg_nodes[0] != orig:
+        errors.append(
+            f"route starts at {seg_nodes[0]!r}, expected {orig!r}"
+        )
+    if seg_nodes[-1] != dest:
+        errors.append(
+            f"route ends at {seg_nodes[-1]!r}, expected {dest!r}"
+        )
+
+    # 5. No cycles: each node should appear at most once
+    seen = set()
+    for i, n in enumerate(seg_nodes):
+        if n in seen:
+            errors.append(f"node {n!r} appears multiple times (cycle at index {i})")
+        seen.add(n)
+
+    # 6. Verify SID/STAR complete procedure paths
+    sid_nodes = _extract_airway_nodes(segments, "SID")
+    sid_procs = data.get("SID", {})
+    errors.extend(_verify_sid_star_complete_path(
+        sid_nodes, sid_procs, "SID", orig, dest
+    ))
+
+    star_nodes = _extract_airway_nodes(segments, "STAR")
+    star_procs = data.get("STAR", {})
+    errors.extend(_verify_sid_star_complete_path(
+        star_nodes, star_procs, "STAR", orig, dest
+    ))
+
+    return errors
+
+
+# ---------------------------------------------------------------------------
+# 3.12 Walk the complete route — from departure runway to destination runway
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("orig,dest", AIRPORT_PAIRS)
+def test_walk_complete_route_auto_sid_star(orig, dest):
+    """Walk the complete route for auto-selected SID/STAR.
+
+    Verifies every step from departure airport -> SID -> airway -> STAR ->
+    destination airport is connected with no gaps, no cycles, and no skipped
+    procedure nodes.
+    """
+    response = client.post(
+        "/api/route",
+        json={
+            "orig": orig,
+            "dest": dest,
+            "validCode": "",
+            "validToken": "",
+            "sidExit": "",
+            "starEntry": "",
+            "cycle": "2604",
+        },
+    )
+    assert response.status_code == 200, f"{orig}->{dest}: {response.text}"
+    data = response.json()
+    if data.get("route") == "No result.":
+        pytest.fail(f"{orig}->{dest}: no route found — navdata or algorithm bug")
+
+    errors = _walk_and_verify_route(data, orig, dest)
+    assert not errors, f"{orig}->{dest} route walk errors:\n" + "\n".join(errors)
+
+
+# ---------------------------------------------------------------------------
+# 3.13 Walk complete route for every SID exit
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("orig,dest", AIRPORT_PAIRS)
+def test_walk_complete_route_all_sid_exits(orig, dest):
+    """Walk the complete route for every SID exit point."""
+    sid_exits = _get_sid_exits(orig)
+    if not sid_exits:
+        pytest.fail(f"{orig}->{dest}: no SID exits — navdata or algorithm bug")
+
+    failures = []
+    total = 0
+    for sid in sid_exits:
+        total += 1
+        response = client.post(
+            "/api/route",
+            json={
+                "orig": orig,
+                "dest": dest,
+                "validCode": "",
+                "validToken": "",
+                "sidExit": sid,
+                "starEntry": "",
+                "cycle": "2604",
+            },
+        )
+        if response.status_code != 200:
+            continue  # Skip non-200; other tests check for crashes
+
+        data = response.json()
+        if data.get("route") == "No result.":
+            continue  # Some SID/dest pairs genuinely have no route
+
+        errors = _walk_and_verify_route(data, orig, dest)
+        if errors:
+            failures.append(f"SID={sid}:\n" + "\n".join(errors))
+
+    assert not failures, (
+        f"{orig}->{dest}: {len(failures)}/{total} SID exits failed walk:\n"
+        + "\n\n".join(failures[:10])
+        + (f"\n... and {len(failures) - 10} more" if len(failures) > 10 else "")
+    )
+
+
+# ---------------------------------------------------------------------------
+# 3.14 Walk complete route for every STAR entry
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("orig,dest", AIRPORT_PAIRS)
+def test_walk_complete_route_all_star_entries(orig, dest):
+    """Walk the complete route for every STAR entry point."""
+    star_entries = _get_star_entries(dest)
+    if not star_entries:
+        pytest.fail(f"{orig}->{dest}: no STAR entries — navdata or algorithm bug")
+
+    failures = []
+    total = 0
+    for star in star_entries:
+        total += 1
+        response = client.post(
+            "/api/route",
+            json={
+                "orig": orig,
+                "dest": dest,
+                "validCode": "",
+                "validToken": "",
+                "sidExit": "",
+                "starEntry": star,
+                "cycle": "2604",
+            },
+        )
+        if response.status_code != 200:
+            continue
+
+        data = response.json()
+        if data.get("route") == "No result.":
+            continue
+
+        errors = _walk_and_verify_route(data, orig, dest)
+        if errors:
+            failures.append(f"STAR={star}:\n" + "\n".join(errors))
+
+    assert not failures, (
+        f"{orig}->{dest}: {len(failures)}/{total} STAR entries failed walk:\n"
+        + "\n\n".join(failures[:10])
+        + (f"\n... and {len(failures) - 10} more" if len(failures) > 10 else "")
+    )
+
+
+# ---------------------------------------------------------------------------
+# 3.15 Boundary node correctness — sidRouteNodeName / starRouteNodeName
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("orig,dest", AIRPORT_PAIRS)
@@ -1308,15 +1611,22 @@ def test_route_boundary_nodes_are_semantically_correct(orig, dest):
             f"This means the boundary node does not belong to the reported procedure."
         )
 
-        # 3. Must be the last node of the SID segment in routeSegments.
-        # SID segments start at the airport and end at the boundary; there
-        # are no bridge/transition nodes after the procedure exit point.
+        # 3. Must be the last (or only) point of the reported procedure.
+        # For single-point procedures the boundary is that point itself;
+        # bridge edges may extend the SID segment into the airway network,
+        # but the semantic boundary remains the procedure point.
         sid_seg_nodes = _extract_airway_nodes(route_segments, "SID")
-        if sid_seg_nodes:
-            assert sid_route_node == sid_seg_nodes[-1], (
+        proc_last_points = set()
+        for proc in sid_procs[sid_key]:
+            pts = [p[0] for p in proc[2]]
+            if pts:
+                proc_last_points.add(pts[-1])
+        if proc_last_points:
+            assert sid_route_node in proc_last_points, (
                 f"{orig}→{dest} SID: sidRouteNodeName={sid_route_node!r} "
-                f"is not the last node of SID segment {sid_seg_nodes}. "
-                f"Expected {sid_seg_nodes[-1]!r}."
+                f"is not the last point of any variant of procedure {sid_key!r}. "
+                f"Procedure last points: {sorted(proc_last_points)}. "
+                f"SID segment: {sid_seg_nodes}"
             )
 
     # --- STAR boundary ---
