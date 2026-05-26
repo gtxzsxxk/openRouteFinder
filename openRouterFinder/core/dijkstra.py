@@ -441,14 +441,20 @@ class RouteEngine:
             for key, proc_list in conn.procedures.items():
                 for proc in proc_list:
                     proc_names = [p[0] for p in proc.points]
-                    score = sum(1 for name in node_names if name in proc_names)
+                    # Also include transition points so runs that enter via a
+                    # transition can be matched to their procedure.
+                    trans_names = []
+                    for t_name, t_pts in proc.transitions:
+                        trans_names.extend([p[0] for p in t_pts])
+                    all_proc_names = list(dict.fromkeys(proc_names + trans_names))
+                    score = sum(1 for name in node_names if name in all_proc_names)
                     if score < 2:
                         continue
 
                     match_indices = [
-                        proc_names.index(name)
+                        all_proc_names.index(name)
                         for name in node_names
-                        if name in proc_names
+                        if name in all_proc_names
                     ]
                     if len(match_indices) < 2:
                         continue
@@ -456,7 +462,7 @@ class RouteEngine:
                     first_idx = min(match_indices)
                     last_idx = max(match_indices)
                     is_complete = (
-                        first_idx == 0 and last_idx == len(proc_names) - 1
+                        first_idx == 0 and last_idx == len(all_proc_names) - 1
                     )
 
                     if is_complete and not best_is_complete:
@@ -522,11 +528,37 @@ class RouteEngine:
                 if best_proc and score >= 2:
                     proc_names = [p[0] for p in best_proc.points]
 
-                    # Find first and last matching node indices in best_proc
+                    # Determine if the route entered via a transition.
+                    # Prefer the transition whose start point is in the route
+                    # and that shares the most nodes with the candidate names.
+                    active_trans_points = None
+                    best_trans_score = 0
+                    for t_name, t_pts in best_proc.transitions:
+                        t_pt_names = [p[0] for p in t_pts]
+                        if not t_pt_names or t_pt_names[0] not in candidate_names:
+                            continue
+                        score = sum(
+                            1 for name in candidate_names if name in t_pt_names
+                        )
+                        if score > best_trans_score:
+                            best_trans_score = score
+                            active_trans_points = t_pts
+
+                    if active_trans_points:
+                        t_names = [p[0] for p in active_trans_points]
+                        # Remove overlap: transition last point == points first point
+                        if t_names and proc_names and t_names[-1] == proc_names[0]:
+                            all_names = t_names + proc_names[1:]
+                        else:
+                            all_names = t_names + proc_names
+                    else:
+                        all_names = proc_names
+
+                    # Find first and last matching node indices
                     match_indices = []
                     for name in candidate_names:
-                        if name in proc_names:
-                            match_indices.append(proc_names.index(name))
+                        if name in all_names:
+                            match_indices.append(all_names.index(name))
 
                     if len(match_indices) >= 2:
                         first_idx = min(match_indices)
@@ -538,14 +570,14 @@ class RouteEngine:
                         # This prevents A* from entering/exiting at internal nodes.
                         prev_is_first = (
                             prev_node is not None
-                            and prev_node[1] == proc_names[first_idx]
+                            and prev_node[1] == all_names[first_idx]
                         )
                         if edge_label == "SID":
                             start_idx = 0
-                            end_idx = max(last_idx, len(proc_names) - 1)
+                            end_idx = max(last_idx, len(all_names) - 1)
                         else:
                             start_idx = first_idx + 1 if prev_is_first else first_idx
-                            end_idx = len(proc_names) - 1
+                            end_idx = len(all_names) - 1
 
                         # Record the procedure actually used for this run so
                         # the caller can report the correct procedure key
@@ -559,7 +591,7 @@ class RouteEngine:
 
                         proc_path: List[Tuple[str, str, int]] = []
                         for k in range(start_idx, end_idx + 1):
-                            pt_name = proc_names[k]
+                            pt_name = all_names[k]
                             pt_iid = known_iids.get(pt_name)
                             if pt_iid is None:
                                 mid_node = self._get_node_by_name(
@@ -576,7 +608,7 @@ class RouteEngine:
                         airport_name = conn.airport_node.name
                         suffix: List[Tuple[str, str, int]] = []
                         for e_name, n_name, n_iid in run:
-                            if n_name not in proc_names and n_name == airport_name:
+                            if n_name not in all_names and n_name == airport_name:
                                 suffix.append((e_name, n_name, n_iid))
 
                         result.extend(proc_path)
@@ -654,7 +686,7 @@ class RouteEngine:
             for proc_list in star_conn.procedures.values():
                 for proc in proc_list:
                     for t_name, t_points in proc.transitions:
-                        if t_points and t_points[-1][0] == start_node.name:
+                        if t_points and t_points[0][0] == start_node.name:
                             score = 0
                             if route_node_names:
                                 for pt in proc.points:

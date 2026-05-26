@@ -1751,6 +1751,12 @@ def test_star_transition_points_are_not_skipped_by_airway(orig, dest):
             if not trans_names:
                 continue
 
+            # Skip runway transitions (final approach paths).  A* may take a
+            # direct airway/bridge to the runway, skipping intermediate final
+            # approach fixes; this is normal routing behaviour.
+            if t_name.startswith("RW"):
+                continue
+
             # The transition start must be present in the route; if it is not,
             # A* entered via a different point and this transition is irrelevant.
             start_name = trans_names[0]

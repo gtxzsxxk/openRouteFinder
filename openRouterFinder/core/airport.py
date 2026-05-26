@@ -81,10 +81,12 @@ class FlatbuffersAirportConnector:
         return nearest
 
     def _ensure_continuous_paths(self, conn: AirportConnection, label: str):
-        """Add missing internal_edges so every consecutive pair in procedure points is connected."""
+        """Add missing internal_edges so every consecutive pair in procedure
+        points and transitions is connected."""
         existing = {(e.nfrom, e.nend) for e in conn.internal_edges}
         for key, proc_list in conn.procedures.items():
             for proc in proc_list:
+                # Main procedure points
                 pts = proc.points
                 for i in range(len(pts) - 1):
                     from_node = self._resolve_node(pts[i][0], pts[i][1], pts[i][2])
@@ -92,6 +94,14 @@ class FlatbuffersAirportConnector:
                     if (from_node.iid, to_node.iid) not in existing:
                         conn.internal_edges.append(Edge(nfrom=from_node.iid, nend=to_node.iid, name=label))
                         existing.add((from_node.iid, to_node.iid))
+                # Transition points
+                for t_name, t_pts in proc.transitions:
+                    for i in range(len(t_pts) - 1):
+                        from_node = self._resolve_node(t_pts[i][0], t_pts[i][1], t_pts[i][2])
+                        to_node = self._resolve_node(t_pts[i + 1][0], t_pts[i + 1][1], t_pts[i + 1][2])
+                        if (from_node.iid, to_node.iid) not in existing:
+                            conn.internal_edges.append(Edge(nfrom=from_node.iid, nend=to_node.iid, name=label))
+                            existing.add((from_node.iid, to_node.iid))
 
     def _add_network_bridges(self, conn: AirportConnection, proc_type: int, icao: str):
         """Add bridge edges from isolated procedure nodes to the nearest connected network node.
@@ -1274,11 +1284,10 @@ class FlatbuffersAirportConnector:
         # form continuous paths because the segments share endpoints. Explicit
         # connecting edges are unnecessary and can create duplicates/cycles.
 
-        # Transition edges: STAR transitions are normalized airport->network,
-        # but flight direction is network->airport, so reverse the edge.
+        # Transition edges: network -> airport (same direction as flight)
         for proc_name, trans_name, from_node, to_node, t_points in self._flatten_transitions(transition_segments):
             if from_node is not None and to_node is not None:
-                transition_edges.append(Edge(nfrom=to_node.iid, nend=from_node.iid, name="STAR"))
+                transition_edges.append(Edge(nfrom=from_node.iid, nend=to_node.iid, name="STAR"))
 
         # Build procedures from runway segments.
         # Merge matching common segment points and transitions so the full
