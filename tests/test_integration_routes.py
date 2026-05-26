@@ -1642,16 +1642,20 @@ def test_route_boundary_nodes_are_semantically_correct(orig, dest):
             f"This means the boundary node does not belong to the reported procedure."
         )
 
-        # 3. Must be the last (or only) point of the reported procedure.
-        # For single-point procedures the boundary is that point itself;
-        # bridge edges may extend the SID segment into the airway network,
-        # but the semantic boundary remains the procedure point.
+        # 3. Must be the last (or only) point of the reported procedure or
+        # one of its transitions.  When _fill_procedure_gaps extends the
+        # route through a transition, the boundary node becomes the
+        # transition's exit point (network side) rather than the main
+        # procedure's last point.
         sid_seg_nodes = _extract_airway_nodes(route_segments, "SID")
         proc_last_points = set()
         for proc in sid_procs[sid_key]:
             pts = [p[0] for p in proc[2]]
             if pts:
                 proc_last_points.add(pts[-1])
+            for t_name, t_pts in proc[3]:
+                if t_pts:
+                    proc_last_points.add(t_pts[-1][0])
         if proc_last_points:
             assert sid_route_node in proc_last_points, (
                 f"{orig}→{dest} SID: sidRouteNodeName={sid_route_node!r} "

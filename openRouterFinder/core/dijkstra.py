@@ -531,9 +531,13 @@ class RouteEngine:
                     # Determine if the route entered via a transition.
                     # Prefer the transition whose start point is in the route
                     # and that shares the most nodes with the candidate names.
+                    # Skip runway transitions (final approach paths) as they are
+                    # subsumed by the main procedure points.
                     active_trans_points = None
                     best_trans_score = 0
                     for t_name, t_pts in best_proc.transitions:
+                        if t_name.startswith("RW"):
+                            continue
                         t_pt_names = [p[0] for p in t_pts]
                         if not t_pt_names or t_pt_names[0] not in candidate_names:
                             continue
@@ -546,9 +550,16 @@ class RouteEngine:
 
                     if active_trans_points:
                         t_names = [p[0] for p in active_trans_points]
-                        # Remove overlap: transition last point == points first point
-                        if t_names and proc_names and t_names[-1] == proc_names[0]:
-                            all_names = t_names + proc_names[1:]
+                        # Remove overlap between transition and main points.
+                        # Transition may precede points (t[-1] == p[0]) or
+                        # follow points (p[-1] == t[0]).
+                        if t_names and proc_names:
+                            if t_names[-1] == proc_names[0]:
+                                all_names = t_names + proc_names[1:]
+                            elif proc_names[-1] == t_names[0]:
+                                all_names = proc_names + t_names[1:]
+                            else:
+                                all_names = t_names + proc_names
                         else:
                             all_names = t_names + proc_names
                     else:
