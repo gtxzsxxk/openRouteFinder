@@ -26,7 +26,7 @@
       <div class="flex items-center gap-2 text-sm text-text-secondary flex-wrap">
         <span>{{ distance }}</span>
         <span class="text-border">·</span>
-        <span>{{ totalTime }}s</span>
+        <span>{{ totalTime }}ms</span>
         <span class="text-border">·</span>
         <span class="text-text-tertiary">{{ dataVersion }}</span>
       </div>

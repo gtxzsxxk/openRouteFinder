@@ -2,6 +2,7 @@
 
 import heapq
 import json
+import math
 import time
 from typing import List, Dict, Tuple, Optional
 
@@ -71,10 +72,20 @@ class RouteEngine:
         self,
         node_list: Tuple[Optional[Node], ...],
         data_version: str,
+        node_index: Optional[Dict[Tuple[str, float, float], Node]] = None,
     ):
         self.node_list = node_list
         self.data_version = data_version
         self.num_nodes = len(node_list)
+
+        # O(1) node lookup by (name, lat, lon) for procedure assembly
+        if node_index is not None:
+            self._node_index = node_index
+        else:
+            self._node_index: Dict[Tuple[str, float, float], Node] = {}
+            for node in node_list:
+                if node is not None:
+                    self._node_index[node.node_key()] = node
 
     def search(
         self,
@@ -86,188 +97,165 @@ class RouteEngine:
         sid_exit: Optional[str] = None,
         star_entry: Optional[str] = None,
     ) -> Optional[str]:
-        """Run A* search. Returns JSON string or None."""
+        """Run phase-separated A* search. Returns JSON string or None."""
         timestart = time.time()
 
-        # Build adjacency map for this search (shared edges + temporary airport edges)
-        adjacency = self._build_adjacency(sid_conn, star_conn)
+        # Phase 1: Bearing-based SID selection (fast reference)
+        sid_proc, sid_boundary = self._select_procedure(
+            sid_conn, star_conn.airport_node, is_sid=True, filter_name=sid_exit
+        )
 
-        # A* search
-        start_iid = sid_conn.airport_node.iid
-        end_iid = star_conn.airport_node.iid
-
-        # Distances dict (supports negative temp node iids)
-        INF = float('inf')
-        dists: Dict[int, float] = {start_iid: 0.0}
-
-        # Priority queue: (f_score, counter, node)
-        counter = 0
-        queue = []
-
-        start_node = SearchingNode(iid=start_iid, name=orig, route=orig)
-        end_lat = star_conn.airport_node.px
-        end_lon = star_conn.airport_node.py
-
-        heapq.heappush(queue, (0.0, counter, start_node))
-        counter += 1
-
-        target = None
-
-        while queue:
-            _, _, current = heapq.heappop(queue)
-            current_node = self._get_node(current.iid, sid_conn, star_conn)
-
-            if current.iid == end_iid:
-                target = current
-                break
-
-            # Skip if already found better path
-            if current.dist > dists.get(current.iid, INF):
-                continue
-
-            for edge in adjacency.get(current.iid, []):
-                next_node = self._get_node(edge.nend, sid_conn, star_conn)
-                if next_node is None:
-                    continue
-
-                edge_dist = great_circle_distance_km(
-                    current_node.px, current_node.py,
-                    next_node.px, next_node.py,
-                )
-                # Prefer SID/STAR procedure edges over network shortcuts
-                if edge.name in ("SID", "STAR"):
-                    edge_dist *= 0.5
-                new_dist = current.dist + edge_dist
-
-                if new_dist < dists.get(edge.nend, INF):
-                    dists[edge.nend] = new_dist
-                    next_search = SearchingNode(
-                        iid=edge.nend,
-                        name=next_node.name,
-                    )
-                    next_search.route = (
-                        current.route + " " + edge.name + " " + next_node.name
-                    )
-                    next_search.route_list = list(current.route_list)
-                    next_search.route_list.append((edge.name, next_node.name, edge.nend))
-                    next_search.dist = new_dist
-
-                    h = heuristic_km(next_node.px, next_node.py, end_lat, end_lon)
-                    heapq.heappush(queue, (new_dist + h, counter, next_search))
-                    counter += 1
-
-        time_total = time.time() - timestart
-        sttime = "%.2f" % time_total
-
-        if target is None:
+        if sid_proc is None or sid_boundary is None:
             return build_route_info(
-                self.data_version, sttime,
+                self.data_version, "0.00",
                 "No result.", "0.00 nm / 0.00 km",
                 None, {}, {}, [],
             )
 
-        # Post-process: ensure route follows complete procedure paths.
-        # A* may skip intermediate procedure nodes when pooled internal_edges
-        # contain shortcuts from other procedures (e.g. WAYVE1's EHF->LOPES
-        # bypasses KIMMO3's ARVIN/AMONT).  Insert missing nodes so the
-        # route reflects the intended procedure topology.
-        target.route_list, used_procs = self._fill_procedure_gaps(
-            target.route_list, sid_conn, star_conn
+        # Phase 2: SID transition selection
+        sid_transition_result = self._select_sid_transition(
+            sid_proc, sid_conn, star_conn, star_conn.airport_node
+        )
+        sid_transition_pts = None
+        if sid_transition_result is not None:
+            _, sid_transition_pts, sid_boundary = sid_transition_result
+
+        # Phase 3: Collect STAR candidates and select by A* distance
+        star_candidates = self._collect_procedure_candidates(
+            star_conn, is_sid=False, filter_name=star_entry,
+            sid_conn=sid_conn, star_conn=star_conn
+        )
+        if not star_candidates:
+            return build_route_info(
+                self.data_version, "0.00",
+                "No result.", "0.00 nm / 0.00 km",
+                None, {}, {}, [],
+            )
+
+        star_proc, star_boundary = self._select_procedure_astar(
+            star_candidates, sid_boundary.iid, is_sid=False, conn=star_conn
+        )
+        if star_proc is None or star_boundary is None:
+            return build_route_info(
+                self.data_version, "0.00",
+                "No result.", "0.00 nm / 0.00 km",
+                None, {}, {}, [],
+            )
+
+        # Phase 4: SID is kept as selected by bearing + transition (already optimal
+        # for most routes; A*-based SID selection can pick a different procedure
+        # with a shorter airway but a much longer SID, so we keep the bearing choice).
+
+        if star_proc is None or star_boundary is None or sid_boundary is None:
+            return build_route_info(
+                self.data_version, "0.00",
+                "No result.", "0.00 nm / 0.00 km",
+                None, {}, {}, [],
+            )
+
+        # Phase 5: Airway A* (zero-copy, pure airway graph).
+        # Forbid passing through SID/STAR procedure nodes to prevent cycles
+        # where the airway revisits a procedure waypoint.
+        def _build_forbidden(sid_p, star_p):
+            forbidden = set()
+            for pt in sid_p.points:
+                node = self._find_node_for_point(pt, sid_conn, star_conn)
+                if node is not None:
+                    forbidden.add(node.iid)
+            for pt in star_p.points:
+                node = self._find_node_for_point(pt, sid_conn, star_conn)
+                if node is not None:
+                    forbidden.add(node.iid)
+            forbidden.discard(sid_boundary.iid)
+            return forbidden
+
+        forbidden_iids = _build_forbidden(sid_proc, star_proc)
+        forbidden_iids.discard(star_boundary.iid)
+
+        airway_route = self._astar_airway(
+            sid_boundary.iid, star_boundary.iid, forbidden_iids
         )
 
-        # Recalculate distance after filling procedure gaps.
-        dist_km = 0.0
-        prev_node = sid_conn.airport_node
-        for _, node_name, iid in target.route_list:
-            node = self._get_node(iid, sid_conn, star_conn)
-            if node is not None:
-                dist_km += great_circle_distance_km(
-                    prev_node.px, prev_node.py, node.px, node.py
+        # Fallback: if filtered STAR is unreachable via pure airway graph,
+        # try auto-selected STAR (matches old mixed-graph behaviour where
+        # all procedures were implicitly available).
+        if airway_route is None and star_entry:
+            fallback_candidates = self._collect_procedure_candidates(
+                star_conn, is_sid=False, filter_name=None,
+                sid_conn=sid_conn, star_conn=star_conn
+            )
+            fallback_proc, fallback_boundary = self._select_procedure_astar(
+                fallback_candidates, sid_boundary.iid, is_sid=False
+            )
+            if fallback_proc is not None and fallback_boundary is not None:
+                forbidden_iids = _build_forbidden(sid_proc, fallback_proc)
+                forbidden_iids.discard(fallback_boundary.iid)
+                airway_route = self._astar_airway(
+                    sid_boundary.iid, fallback_boundary.iid, forbidden_iids
                 )
-                prev_node = node
+                if airway_route is not None:
+                    star_proc = fallback_proc
+                    star_boundary = fallback_boundary
+
+        if airway_route is None:
+            return build_route_info(
+                self.data_version, "0.00",
+                "No result.", "0.00 nm / 0.00 km",
+                None, {}, {}, [],
+            )
+
+        # Phase 6: Assemble full route
+        route_list = self._assemble_route(
+            sid_conn, sid_proc, airway_route, star_proc, star_conn,
+            sid_transition_pts=sid_transition_pts
+        )
+
+        # Recalculate distance
+        dist_km = self._calc_route_distance(route_list, sid_conn, star_conn)
         dist_nm = dist_km / 1.852
         dist_str = "%.2f nm / %.2f km" % (dist_nm, dist_km)
-        route_total = self._sort_route(orig, target.route_list)
-        node_info = self._build_node_info(sid_conn, star_conn, target.route_list)
-        route_segments = self._build_route_segments(sid_conn, target.route_list)
 
-        # Detect active transitions from route_list
-        active_sid_transition = None
-        active_star_transition = None
-        route_iids = set(iid for _, _, iid in target.route_list)
-        route_node_names = set(node_name for _, node_name, _ in target.route_list)
+        route_total = self._sort_route(orig, route_list)
+        node_info = self._build_node_info(sid_conn, star_conn, route_list)
+        route_segments = self._build_route_segments(sid_conn, route_list)
 
-        for edge in sid_conn.transition_edges:
-            if edge.nend in route_iids:
-                active_sid_transition = self._find_transition_name(
-                    edge, sid_conn, star_conn, is_sid=True,
-                    route_node_names=route_node_names,
-                )
-                if active_sid_transition:
-                    break
+        # SID/STAR node names (procedure keys)
+        sid_node_name = sid_proc.points[-1][0] if sid_proc.points else None
+        star_node_name = star_proc.points[0][0] if star_proc.points else None
 
-        for edge in star_conn.transition_edges:
-            if edge.nfrom in route_iids:
-                active_star_transition = self._find_transition_name(
-                    edge, sid_conn, star_conn, is_sid=False,
-                    route_node_names=route_node_names,
-                )
-                if active_star_transition:
-                    break
-
-        # Find SID exit node name and STAR entry node name from route.
-        # sid_node_name is the procedure key; sid_route_node_name is the
-        # actual node in the route that belongs to the procedure (used by
-        # the frontend to locate the procedure in the route node list).
-        # Prefer the procedure recorded by _fill_procedure_gaps, which knows
-        # exactly which procedure the route actually followed.
-        sid_node_name = None
+        # Boundary nodes: the last route node belonging to the SID procedure
+        # and the first route node belonging to the STAR procedure.
+        # This correctly handles single-point procedures where the airway
+        # ends at the procedure point (the point is skipped in the STAR loop
+        # because it duplicates the last airway node).
         sid_route_node_name = None
-        sid_used = used_procs.get("SID")
-        if sid_used:
-            sid_node_name = sid_used[0]
-            # Find the last route node that belongs to this procedure.
-            # The frontend excludes nodes *before* sidRouteNodeName, so this
-            # must be the boundary between SID and airway (last SID node).
-            for _, node_name, _ in reversed(target.route_list):
-                if self._node_in_procedure_key(node_name, sid_node_name, sid_conn):
+        if sid_proc and sid_proc.points:
+            sid_names = {p[0] for p in sid_proc.points}
+            for _, node_name, _ in route_list:
+                if node_name in sid_names:
                     sid_route_node_name = node_name
-                    break
-        else:
-            for _, node_name, _ in target.route_list:
-                if node_name in sid_conn.procedures:
-                    sid_node_name = node_name
-                    sid_route_node_name = node_name
-                    break
-                key = self._find_procedure_key_for_node(node_name, sid_conn)
-                if key:
-                    sid_node_name = key
-                    sid_route_node_name = node_name
+
+        star_route_node_name = None
+        if star_proc and star_proc.points:
+            star_names = {p[0] for p in star_proc.points}
+            for t_name, t_pts in star_proc.transitions:
+                star_names.update(p[0] for p in t_pts)
+            for _, node_name, _ in route_list:
+                if node_name in star_names:
+                    star_route_node_name = node_name
                     break
 
-        star_node_name = None
-        star_route_node_name = None
-        star_used = used_procs.get("STAR")
-        if star_used:
-            star_node_name = star_used[0]
-            # Find the first route node that belongs to this procedure.
-            # The frontend excludes nodes *after* starRouteNodeName, so this
-            # must be the boundary between airway and STAR (first STAR node).
-            for _, node_name, _ in target.route_list:
-                if self._node_in_procedure_key(node_name, star_node_name, star_conn):
-                    star_route_node_name = node_name
-                    break
-        else:
-            for _, node_name, _ in reversed(target.route_list):
-                if node_name in star_conn.procedures:
-                    star_node_name = node_name
-                    star_route_node_name = node_name
-                    break
-                key = self._find_procedure_key_for_node(node_name, star_conn)
-                if key:
-                    star_node_name = key
-                    star_route_node_name = node_name
-                    break
+        # Active transitions
+        route_node_names = set(node_name for _, node_name, _ in route_list)
+        active_sid_transition = self._find_active_transition(
+            sid_proc, route_node_names, is_sid=True
+        )
+        active_star_transition = self._find_active_transition(
+            star_proc, route_node_names, is_sid=False
+        )
+
+        time_total = time.time() - timestart
+        sttime = "%.2f" % (time_total * 1000)
 
         return build_route_info(
             self.data_version,
@@ -287,58 +275,764 @@ class RouteEngine:
             star_route_node_name,
         )
 
-    def _build_adjacency(
+    def _select_procedure(
         self,
+        conn: AirportConnection,
+        other_airport_node: Node,
+        is_sid: bool,
+        filter_name: Optional[str] = None,
+    ) -> Tuple[Optional[Procedure], Optional[Node]]:
+        """Deterministically select the best procedure and its airway boundary node.
+
+        If filter_name is given, only consider procedures whose key matches.
+        Otherwise pick the procedure whose exit/entry direction best aligns
+        with the great-circle route to/from the other airport.
+        """
+        candidates: List[Tuple[Procedure, Node, str]] = []
+
+        effective_filter = filter_name if filter_name else None
+        for key, proc_list in conn.procedures.items():
+            if effective_filter is not None and key != effective_filter:
+                continue
+            for proc in proc_list:
+                boundary = self._find_boundary_node(conn, proc, is_sid)
+                if boundary is not None:
+                    candidates.append((proc, boundary, key))
+
+        if not candidates:
+            return None, None
+
+        if len(candidates) == 1:
+            return candidates[0][0], candidates[0][1]
+
+        ap_lat, ap_lon = conn.airport_node.px, conn.airport_node.py
+        other_lat, other_lon = other_airport_node.px, other_airport_node.py
+
+        if is_sid:
+            # SID: prefer exit bearing closest to airport -> destination
+            target_bearing = self._bearing(ap_lat, ap_lon, other_lat, other_lon)
+            best_proc, best_boundary = None, None
+            best_score = float('inf')
+            for proc, boundary, _ in candidates:
+                if proc.points:
+                    exit_lat, exit_lon = proc.points[-1][1], proc.points[-1][2]
+                    exit_bearing = self._bearing(ap_lat, ap_lon, exit_lat, exit_lon)
+                    score = abs(self._angle_diff(target_bearing, exit_bearing))
+                    if score < best_score:
+                        best_score = score
+                        best_proc, best_boundary = proc, boundary
+            return best_proc, best_boundary
+        else:
+            # STAR: prefer entry bearing closest to source -> airport
+            # (i.e. bearing from entry point toward airport)
+            target_bearing = self._bearing(other_lat, other_lon, ap_lat, ap_lon)
+            best_proc, best_boundary = None, None
+            best_score = float('inf')
+            for proc, boundary, _ in candidates:
+                if proc.points:
+                    entry_lat, entry_lon = proc.points[0][1], proc.points[0][2]
+                    entry_bearing = self._bearing(entry_lat, entry_lon, ap_lat, ap_lon)
+                    score = abs(self._angle_diff(target_bearing, entry_bearing))
+                    if score < best_score:
+                        best_score = score
+                        best_proc, best_boundary = proc, boundary
+            return best_proc, best_boundary
+
+    def _find_boundary_node(
+        self,
+        conn: AirportConnection,
+        proc: Procedure,
+        is_sid: bool,
+    ) -> Optional[Node]:
+        """Find the airway node that serves as the boundary between procedure and airway.
+
+        For SID: the exit point (last point). If it is a temp node, follow
+        bridge_edges to the connected airway node.
+        For STAR: the entry point (first point). If it is a temp node, follow
+        bridge_edges backward to the connected airway node.
+        """
+        if not proc.points:
+            return None
+
+        if is_sid:
+            pt = proc.points[-1]
+        else:
+            pt = proc.points[0]
+
+        name, lat, lon = pt
+        key = (name, round(lat, 6), round(lon, 6))
+        node = self._node_index.get(key)
+
+        if node is None:
+            # Search temp nodes
+            for temp in conn.temp_nodes:
+                if temp.name == name and abs(temp.px - lat) < 1e-6 and abs(temp.py - lon) < 1e-6:
+                    node = temp
+                    break
+
+        if node is None:
+            return None
+
+        # If node has outgoing airway edges, it's already an airway node
+        if node.next_list:
+            return node
+
+        # Node is isolated (temp) – follow bridge_edges
+        if is_sid:
+            # SID bridge: temp -> airway
+            for edge in conn.bridge_edges:
+                if edge.nfrom == node.iid:
+                    if 0 <= edge.nend < self.num_nodes:
+                        airway_node = self.node_list[edge.nend]
+                        if airway_node is not None:
+                            return airway_node
+        else:
+            # STAR bridge: airway -> temp
+            for edge in conn.bridge_edges:
+                if edge.nend == node.iid:
+                    if 0 <= edge.nfrom < self.num_nodes:
+                        airway_node = self.node_list[edge.nfrom]
+                        if airway_node is not None:
+                            return airway_node
+
+        return None
+
+    def _select_sid_transition(
+        self,
+        sid_proc: Procedure,
         sid_conn: AirportConnection,
         star_conn: AirportConnection,
-    ) -> Dict[int, List[Edge]]:
-        """Build adjacency list: shared nodes + temporary airport connections."""
-        adj: Dict[int, List[Edge]] = {}
-        for node in self.node_list:
+        dest_node: Node,
+    ) -> Optional[Tuple[str, List[Tuple[str, float, float]], Node]]:
+        """Select the best SID transition and return (name, points, boundary_node).
+
+        The boundary_node is the airway node connected to the transition end.
+        If no transition is suitable, returns None.
+
+        Scoring uses the main procedure's last point as the reference, because
+        transitions branch from the common endpoint.  This avoids picking a
+        transition that is geographically close to the airport but points in
+        the wrong direction from the procedure exit (e.g. GARDY4 MISEN).
+        """
+        if not sid_proc.transitions:
+            return None
+
+        # Reference point: main procedure's last point (the common endpoint)
+        if sid_proc.points:
+            ref_pt = sid_proc.points[-1]
+            ref_lat, ref_lon = ref_pt[1], ref_pt[2]
+        else:
+            ref_lat, ref_lon = sid_conn.airport_node.px, sid_conn.airport_node.py
+
+        dest_lat, dest_lon = dest_node.px, dest_node.py
+        target_bearing = self._bearing(ref_lat, ref_lon, dest_lat, dest_lon)
+
+        best = None
+        best_score = float('inf')
+
+        for t_name, t_pts in sid_proc.transitions:
+            if t_name.startswith("RW"):
+                continue
+            if len(t_pts) < 2:
+                continue
+
+            end_pt = t_pts[-1]
+            end_node = self._find_node_for_point(end_pt, sid_conn, star_conn)
+            if end_node is None:
+                continue
+
+            # Follow bridge_edges to find the connected airway node
+            boundary = end_node
+            if not boundary.next_list:
+                for edge in sid_conn.bridge_edges:
+                    if edge.nfrom == boundary.iid:
+                        if 0 <= edge.nend < self.num_nodes:
+                            airway_node = self.node_list[edge.nend]
+                            if airway_node is not None:
+                                boundary = airway_node
+                                break
+
+            if not boundary.next_list:
+                continue
+
+            end_lat, end_lon = end_pt[1], end_pt[2]
+            end_bearing = self._bearing(ref_lat, ref_lon, end_lat, end_lon)
+            score = abs(self._angle_diff(target_bearing, end_bearing))
+
+            if score < best_score:
+                best_score = score
+                best = (t_name, t_pts, boundary)
+
+        return best
+
+    @staticmethod
+    def _is_excluded_airway(name: str) -> bool:
+        """Check if an airway is a T-route (terminal route) that should be
+        excluded from enroute A*.
+
+        T-routes are low-altitude terminal routes that provide shortcuts in
+        terminal areas but fragment the enroute airway graph, causing A* to
+        deviate from standard high-altitude routes.
+        """
+        if not name:
+            return False
+        return name[0] == 'T' and len(name) > 1 and name[1:].isdigit()
+
+    def _should_skip_edge(self, curr_node, edge_name: str) -> bool:
+        """Determine whether to skip an edge during A* traversal.
+
+        T-routes are excluded only when the current node has non-T
+        alternatives. This allows departure from terminal-only nodes
+        (e.g. WUMOX) while preventing T-route shortcuts in the enroute
+        core where J/V/Q airways are available.
+        """
+        if not self._is_excluded_airway(edge_name):
+            return False
+        has_non_t = any(
+            not self._is_excluded_airway(e.name) for e in curr_node.next_list
+        )
+        return has_non_t
+
+    @staticmethod
+    def _edge_sort_key(name: str) -> tuple:
+        """Sort key for airway names to ensure deterministic tie-breaking.
+
+        Extracts alphabetic prefix and numeric suffix so that J70 sorts
+        before J106 (70 < 106).
+        """
+        prefix = ''
+        num_str = ''
+        for c in name:
+            if c.isalpha() and not num_str:
+                prefix += c
+            elif c.isdigit():
+                num_str += c
+            else:
+                break
+        return (prefix, int(num_str) if num_str else 999999, name)
+
+    def _astar_airway(
+        self,
+        start_iid: int,
+        end_iid: int,
+        forbidden_iids: Optional[set] = None,
+    ) -> Optional[List[Tuple[str, str, int]]]:
+        """Zero-copy A* on the pure airway graph (node.next_list only).
+
+        Returns route_list of (edge_name, node_name, node_iid) or None.
+        """
+        INF = float('inf')
+        dists = [INF] * self.num_nodes
+        prev_edge: List[Optional[Tuple[int, str]]] = [None] * self.num_nodes
+
+        start_node = self.node_list[start_iid]
+        end_node = self.node_list[end_iid]
+        if start_node is None or end_node is None:
+            return None
+
+        end_lat, end_lon = end_node.px, end_node.py
+        dists[start_iid] = 0.0
+
+        queue = []
+        # Use (f_score, g_score, node_iid) for tie-breaking consistency with Dijkstra
+        heapq.heappush(queue, (0.0, 0.0, start_iid))
+
+        while queue:
+            f_score, g_score, curr = heapq.heappop(queue)
+
+            if curr == end_iid:
+                break
+
+            if dists[curr] == INF:
+                continue
+
+            curr_node = self.node_list[curr]
+            if curr_node is None:
+                continue
+
+            for edge in curr_node.next_list:
+                next_node = self.node_list[edge.nend]
+                if next_node is None:
+                    continue
+                if forbidden_iids and edge.nend in forbidden_iids:
+                    continue
+                if self._should_skip_edge(curr_node, edge.name):
+                    continue
+
+                nd = dists[curr] + great_circle_distance_km(
+                    curr_node.px, curr_node.py,
+                    next_node.px, next_node.py,
+                )
+
+                if nd < dists[edge.nend]:
+                    dists[edge.nend] = nd
+                    prev_edge[edge.nend] = (curr, edge.name)
+                    h = heuristic_km(next_node.px, next_node.py, end_lat, end_lon)
+                    heapq.heappush(queue, (nd + h, nd, edge.nend))
+
+        if dists[end_iid] == INF:
+            return None
+
+        # Backtrack
+        route = []
+        curr = end_iid
+        while curr != start_iid and prev_edge[curr] is not None:
+            prev_iid, edge_name = prev_edge[curr]
+            route.append((edge_name, self.node_list[curr].name, curr))
+            curr = prev_iid
+        route.reverse()
+        return route
+
+    def _astar_airway_distance(
+        self,
+        start_iid: int,
+        end_iid: int,
+        forbidden_iids: Optional[set] = None,
+    ) -> Optional[float]:
+        """Run A* and return only the total distance (no path reconstruction)."""
+        INF = float('inf')
+        dists = [INF] * self.num_nodes
+
+        start_node = self.node_list[start_iid]
+        end_node = self.node_list[end_iid]
+        if start_node is None or end_node is None:
+            return None
+
+        end_lat, end_lon = end_node.px, end_node.py
+        dists[start_iid] = 0.0
+
+        queue = []
+        heapq.heappush(queue, (0.0, 0.0, start_iid))
+
+        while queue:
+            f_score, g_score, curr = heapq.heappop(queue)
+
+            if curr == end_iid:
+                break
+
+            if dists[curr] == INF:
+                continue
+
+            curr_node = self.node_list[curr]
+            if curr_node is None:
+                continue
+
+            for edge in curr_node.next_list:
+                next_node = self.node_list[edge.nend]
+                if next_node is None:
+                    continue
+                if forbidden_iids and edge.nend in forbidden_iids:
+                    continue
+                if self._should_skip_edge(curr_node, edge.name):
+                    continue
+
+                nd = dists[curr] + great_circle_distance_km(
+                    curr_node.px, curr_node.py,
+                    next_node.px, next_node.py,
+                )
+
+                if nd < dists[edge.nend]:
+                    dists[edge.nend] = nd
+                    h = heuristic_km(next_node.px, next_node.py, end_lat, end_lon)
+                    heapq.heappush(queue, (nd + h, nd, edge.nend))
+
+        if dists[end_iid] == INF:
+            return None
+        return dists[end_iid]
+
+    def _collect_procedure_candidates(
+        self,
+        conn: AirportConnection,
+        is_sid: bool,
+        filter_name: Optional[str] = None,
+        sid_conn: Optional[AirportConnection] = None,
+        star_conn: Optional[AirportConnection] = None,
+    ) -> List[Tuple[Procedure, Node, str, Optional[str]]]:
+        """Collect all procedure candidates with their boundary nodes.
+
+        For STAR, also includes transition boundaries. Transition candidates
+        are identified by their start point on the airway graph.
+
+        Returns list of (procedure, boundary_node, key, transition_name).
+        transition_name is None for main procedure boundary.
+        """
+        candidates: List[Tuple[Procedure, Node, str, Optional[str]]] = []
+        effective_filter = filter_name if filter_name else None
+
+        for key, proc_list in conn.procedures.items():
+            if effective_filter is not None and key != effective_filter:
+                continue
+            for proc in proc_list:
+                # Main procedure boundary
+                boundary = self._find_boundary_node(conn, proc, is_sid)
+                if boundary is not None:
+                    candidates.append((proc, boundary, key, None))
+
+                # For STAR, also collect transition boundaries
+                if not is_sid:
+                    for t_name, t_pts in proc.transitions:
+                        if t_name.startswith("RW"):
+                            continue
+                        if len(t_pts) < 2:
+                            continue
+
+                        # Find the airway node for transition start
+                        start_pt = t_pts[0]
+                        start_node = self._find_node_for_point(start_pt, sid_conn, star_conn)
+                        if start_node is None:
+                            continue
+
+                        # Ensure it's an airway node (has outgoing edges or via bridge)
+                        boundary = start_node
+                        if not boundary.next_list:
+                            # STAR bridge: airway -> temp
+                            for edge in conn.bridge_edges:
+                                if edge.nend == boundary.iid:
+                                    if 0 <= edge.nfrom < self.num_nodes:
+                                        airway_node = self.node_list[edge.nfrom]
+                                        if airway_node is not None:
+                                            boundary = airway_node
+                                            break
+
+                        if boundary is not None and boundary.next_list:
+                            candidates.append((proc, boundary, key, t_name))
+
+        return candidates
+
+    def _calc_procedure_distance(
+        self,
+        proc: Procedure,
+        conn: AirportConnection,
+        transition_name: Optional[str] = None,
+    ) -> float:
+        """Calculate total distance of a procedure and optional transition in km."""
+        points: List[Tuple[str, float, float]] = []
+
+        if transition_name is not None:
+            for t_name, t_pts in proc.transitions:
+                if t_name == transition_name:
+                    points = list(t_pts)
+                    break
+
+        # Add procedure points (skip first if same as transition's last point)
+        proc_points = list(proc.points)
+        if points and proc_points and points[-1][0] == proc_points[0][0]:
+            points.extend(proc_points[1:])
+        else:
+            points.extend(proc_points)
+
+        if len(points) < 2:
+            return 0.0
+
+        dist_km = 0.0
+        for i in range(len(points) - 1):
+            _, lat1, lon1 = points[i]
+            _, lat2, lon2 = points[i + 1]
+            dist_km += great_circle_distance_km(lat1, lon1, lat2, lon2)
+
+        return dist_km
+
+    def _select_procedure_astar(
+        self,
+        candidates: List[Tuple[Procedure, Node, str, Optional[str]]],
+        other_boundary_iid: int,
+        is_sid: bool,
+        conn: Optional[AirportConnection] = None,
+    ) -> Tuple[Optional[Procedure], Optional[Node]]:
+        """Select best procedure by total distance (airway + procedure).
+
+        For SID: airway from boundary to other_boundary + SID procedure distance.
+        For STAR: airway from other_boundary to boundary + STAR procedure distance.
+        """
+        if not candidates:
+            return None, None
+
+        if len(candidates) == 1:
+            return candidates[0][0], candidates[0][1]
+
+        best_proc, best_boundary = None, None
+        best_dist = float('inf')
+
+        for proc, boundary, key, t_name in candidates:
+            if is_sid:
+                dist = self._astar_airway_distance(boundary.iid, other_boundary_iid)
+            else:
+                dist = self._astar_airway_distance(other_boundary_iid, boundary.iid)
+
+            if dist is not None and conn is not None:
+                proc_dist = self._calc_procedure_distance(proc, conn, t_name)
+                dist += proc_dist
+
+            if dist is not None and dist < best_dist:
+                best_dist = dist
+                best_proc = proc
+                best_boundary = boundary
+
+        if best_proc is None:
+            # Fallback: return first candidate
+            return candidates[0][0], candidates[0][1]
+
+        return best_proc, best_boundary
+
+    def _find_insertion_transition(
+        self,
+        airway_route: List[Tuple[str, str, int]],
+        star_proc: Procedure,
+    ) -> Optional[List[Tuple[str, float, float]]]:
+        """Find the STAR transition whose start is in the airway route.
+
+        Returns the transition point list (including start and end) or None.
+        """
+        if not star_proc.transitions or not airway_route:
+            return None
+
+        airway_names = {name for _, name, _ in airway_route}
+        best_transition = None
+        best_start_idx = -1
+
+        for t_name, t_pts in star_proc.transitions:
+            if t_name.startswith("RW"):
+                continue
+            if len(t_pts) < 2:
+                continue
+            start_name = t_pts[0][0]
+            if start_name not in airway_names:
+                continue
+            for i, (_, name, _) in enumerate(airway_route):
+                if name == start_name and i > best_start_idx:
+                    best_start_idx = i
+                    best_transition = t_pts
+                    break
+
+        return best_transition
+
+    def _assemble_route(
+        self,
+        sid_conn: AirportConnection,
+        sid_proc: Procedure,
+        airway_route: List[Tuple[str, str, int]],
+        star_proc: Procedure,
+        star_conn: AirportConnection,
+        sid_transition_pts: Optional[List[Tuple[str, float, float]]] = None,
+    ) -> List[Tuple[str, str, int]]:
+        """Assemble full route: SID -> airway -> STAR."""
+        route: List[Tuple[str, str, int]] = []
+
+        # SID segment (skip first point if it's the airport itself)
+        if sid_proc.points:
+            start_idx = 1 if sid_proc.points[0][0] == sid_conn.airport_node.name else 0
+
+            # If the airway starts at a node inside the SID procedure, only
+            # include SID points before that node. This prevents gaps where
+            # the boundary node is skipped but later procedure points are added.
+            first_airway_name = airway_route[0][1] if airway_route else None
+            sid_end_idx = len(sid_proc.points)
+            if first_airway_name is not None:
+                for idx, pt in enumerate(sid_proc.points):
+                    if pt[0] == first_airway_name:
+                        sid_end_idx = idx
+                        break
+
+            for i in range(start_idx, sid_end_idx):
+                node = self._find_node_for_point(sid_proc.points[i], sid_conn, star_conn)
+                if node is not None:
+                    route.append(("SID", node.name, node.iid))
+
+        # Insert SID transition points (between SID and airway)
+        if sid_transition_pts is not None:
+            # Skip first point if it's the last SID main point (avoid duplication)
+            t_start = 0
+            if sid_proc.points and sid_transition_pts[0][0] == sid_proc.points[-1][0]:
+                t_start = 1
+            # Skip last point if it's the first airway point (avoid duplication)
+            t_end = len(sid_transition_pts)
+            if airway_route and sid_transition_pts[-1][0] == airway_route[0][1]:
+                t_end -= 1
+
+            for i in range(t_start, t_end):
+                pt = sid_transition_pts[i]
+                node = self._find_node_for_point(pt, sid_conn, star_conn)
+                if node is not None:
+                    if route and route[-1][2] == node.iid:
+                        continue
+                    route.append(("SID", node.name, node.iid))
+
+        # Determine if a STAR transition needs to be inserted
+        transition_pts = self._find_insertion_transition(airway_route, star_proc)
+
+        # Airway segment: filter out nodes that also appear in STAR procedure
+        # (except the last airway node which is the boundary to STAR)
+        filtered_airway = list(airway_route)
+
+        # If a transition starts inside the airway, truncate the airway at the
+        # transition start so the transition points form the path to the STAR.
+        if transition_pts is not None:
+            start_name = transition_pts[0][0]
+            for i, (_, name, _) in enumerate(filtered_airway):
+                if name == start_name:
+                    filtered_airway = filtered_airway[:i + 1]
+                    break
+
+        if star_proc and star_proc.points and filtered_airway:
+            star_node_names = {p[0] for p in star_proc.points}
+            # If an internal airway node is also in STAR, truncate airway there
+            truncate_idx = None
+            for i, (edge_name, node_name, iid) in enumerate(filtered_airway):
+                if node_name in star_node_names and i < len(filtered_airway) - 1:
+                    truncate_idx = i
+                    break
+            if truncate_idx is not None:
+                filtered_airway = filtered_airway[:truncate_idx + 1]
+
+        route.extend(filtered_airway)
+
+        # Insert transition points (skip start – already in airway)
+        if transition_pts is not None:
+            for pt in transition_pts[1:]:
+                node = self._find_node_for_point(pt, sid_conn, star_conn)
+                if node is not None:
+                    if route and route[-1][2] == node.iid:
+                        continue
+                    route.append(("STAR", node.name, node.iid))
+
+        # STAR segment
+        if star_proc.points:
+            last_airway_iid = filtered_airway[-1][2] if filtered_airway else None
+            last_airway_name = filtered_airway[-1][1] if filtered_airway else None
+
+            # Find where the truncated airway ends in the STAR procedure.
+            # If the airway ends at an internal STAR node (e.g. SAUGS in
+            # [WAYVE, SAUGS, KIMMO, UPDOC]), start the STAR loop from that
+            # index so the STAR subsequence is contiguous.
+            star_start_idx = 0
+            if last_airway_name is not None:
+                for idx, pt in enumerate(star_proc.points):
+                    if pt[0] == last_airway_name:
+                        star_start_idx = idx
+                        break
+
+            # Only insert a bridge edge when the airway does NOT end at any
+            # STAR point (normal boundary case: airway end -> STAR start).
+            if star_start_idx == 0 and last_airway_name != star_proc.points[0][0]:
+                first_star_pt = star_proc.points[0]
+                first_star_node = self._find_node_for_point(
+                    first_star_pt, sid_conn, star_conn
+                )
+                if first_star_node is not None and first_star_node.iid != last_airway_iid:
+                    for edge in star_conn.bridge_edges:
+                        if edge.nfrom == last_airway_iid and edge.nend == first_star_node.iid:
+                            route.append(("STAR", first_star_node.name, first_star_node.iid))
+                            break
+
+            for pt in star_proc.points[star_start_idx:]:
+                node = self._find_node_for_point(pt, sid_conn, star_conn)
+                if node is not None:
+                    # Skip the node already present as the last airway node
+                    if node.iid == last_airway_iid:
+                        continue
+                    # Skip consecutive duplicates
+                    if route and route[-1][2] == node.iid:
+                        continue
+                    route.append(("STAR", node.name, node.iid))
+
+        # Ensure route reaches the destination airport
+        if not route or route[-1][2] != star_conn.airport_node.iid:
+            route.append(("STAR", star_conn.airport_node.name, star_conn.airport_node.iid))
+
+        return route
+
+    def _find_node_for_point(
+        self,
+        pt: Tuple[str, float, float],
+        sid_conn: Optional[AirportConnection] = None,
+        star_conn: Optional[AirportConnection] = None,
+    ) -> Optional[Node]:
+        """Find node for a procedure point (name, lat, lon)."""
+        name, lat, lon = pt
+        key = (name, round(lat, 6), round(lon, 6))
+        node = self._node_index.get(key)
+        if node is not None:
+            return node
+        if sid_conn is not None:
+            for temp in sid_conn.temp_nodes:
+                if temp.name == name and abs(temp.px - lat) < 1e-6 and abs(temp.py - lon) < 1e-6:
+                    return temp
+        if star_conn is not None:
+            for temp in star_conn.temp_nodes:
+                if temp.name == name and abs(temp.px - lat) < 1e-6 and abs(temp.py - lon) < 1e-6:
+                    return temp
+        return None
+
+    def _calc_route_distance(
+        self,
+        route_list: List[Tuple[str, str, int]],
+        sid_conn: AirportConnection,
+        star_conn: AirportConnection,
+    ) -> float:
+        """Calculate total distance in km."""
+        dist_km = 0.0
+        prev_node = sid_conn.airport_node
+        for _, _, iid in route_list:
+            node = self._get_node(iid, sid_conn, star_conn)
             if node is not None:
-                adj[node.iid] = list(node.next_list)
+                dist_km += great_circle_distance_km(
+                    prev_node.px, prev_node.py,
+                    node.px, node.py,
+                )
+                prev_node = node
+        return dist_km
 
-        # Add temp nodes
-        for node in sid_conn.temp_nodes:
-            if node.iid not in adj:
-                adj[node.iid] = []
-        for node in star_conn.temp_nodes:
-            if node.iid not in adj:
-                adj[node.iid] = []
+    def _find_active_transition(
+        self,
+        proc: Optional[Procedure],
+        route_node_names: set,
+        is_sid: bool,
+    ) -> Optional[str]:
+        """Find the transition whose nodes best match the route."""
+        if proc is None or not proc.transitions:
+            return None
 
-        # Add SID edges (airport -> procedure -> network)
-        adj[sid_conn.airport_node.iid] = list(sid_conn.connections)
-        for edge in sid_conn.internal_edges:
-            if edge.nfrom not in adj:
-                adj[edge.nfrom] = []
-            adj[edge.nfrom].append(edge)
-        for edge in sid_conn.transition_edges:
-            if edge.nfrom not in adj:
-                adj[edge.nfrom] = []
-            adj[edge.nfrom].append(edge)
-        for edge in sid_conn.bridge_edges:
-            if edge.nfrom not in adj:
-                adj[edge.nfrom] = []
-            adj[edge.nfrom].append(edge)
+        best = None
+        best_score = 0
 
-        # Add STAR edges (network -> procedure -> airport)
-        for edge in star_conn.connections:
-            if edge.nfrom not in adj:
-                adj[edge.nfrom] = []
-            adj[edge.nfrom].append(edge)
-        for edge in star_conn.internal_edges:
-            if edge.nfrom not in adj:
-                adj[edge.nfrom] = []
-            adj[edge.nfrom].append(edge)
-        for edge in star_conn.transition_edges:
-            if edge.nfrom not in adj:
-                adj[edge.nfrom] = []
-            adj[edge.nfrom].append(edge)
-        for edge in star_conn.bridge_edges:
-            if edge.nfrom not in adj:
-                adj[edge.nfrom] = []
-            adj[edge.nfrom].append(edge)
-        return adj
+        for t_name, t_pts in proc.transitions:
+            if t_name.startswith("RW"):
+                continue
+            t_names = [p[0] for p in t_pts]
+            if not t_names:
+                continue
+
+            # Directional check: SID transition starts in route, STAR ends in route
+            if is_sid:
+                if t_names[0] not in route_node_names:
+                    continue
+            else:
+                if t_names[-1] not in route_node_names:
+                    continue
+
+            score = sum(1 for n in t_names if n in route_node_names)
+            if score > best_score:
+                best_score = score
+                best = t_name
+
+        return best
+
+    @staticmethod
+    def _bearing(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        """Calculate bearing from point 1 to point 2 in degrees (0-360)."""
+        lat1r = math.radians(lat1)
+        lat2r = math.radians(lat2)
+        dlon = math.radians(lon2 - lon1)
+        x = math.sin(dlon) * math.cos(lat2r)
+        y = math.cos(lat1r) * math.sin(lat2r) - math.sin(lat1r) * math.cos(lat2r) * math.cos(dlon)
+        bearing = math.degrees(math.atan2(x, y))
+        return (bearing + 360) % 360
+
+    @staticmethod
+    def _angle_diff(a1: float, a2: float) -> float:
+        """Minimum difference between two bearings in degrees."""
+        diff = abs(a1 - a2) % 360
+        return diff if diff <= 180 else 360 - diff
 
     def _get_node(
         self,
@@ -354,359 +1048,12 @@ class RouteEngine:
             node = self.node_list[iid]
             if node is not None and node.iid == iid:
                 return node
-        # Check temp nodes
         for node in sid_conn.temp_nodes:
             if node.iid == iid:
                 return node
         for node in star_conn.temp_nodes:
             if node.iid == iid:
                 return node
-        return None
-
-    def _node_in_procedure_key(
-        self,
-        node_name: str,
-        key: str,
-        conn: AirportConnection,
-    ) -> bool:
-        """Return True if node_name appears in any procedure under the given key."""
-        for proc in conn.procedures.get(key, []):
-            for pt in proc.points:
-                if pt[0] == node_name:
-                    return True
-            for _, t_pts in proc.transitions:
-                for pt in t_pts:
-                    if pt[0] == node_name:
-                        return True
-        return False
-
-    def _find_procedure_key_for_node(
-        self,
-        node_name: str,
-        conn: AirportConnection,
-    ) -> Optional[str]:
-        """Find the procedure key that contains node_name in its points or transitions.
-
-        When A* routes through the interior of a procedure (not its anchor
-        point), the node will not match any procedure key directly.  This
-        helper walks all procedures to find the key whose points or
-        transitions contain the node.
-        """
-        for key, proc_list in conn.procedures.items():
-            for proc in proc_list:
-                for pt in proc.points:
-                    if pt[0] == node_name:
-                        return key
-                for _, t_pts in proc.transitions:
-                    for pt in t_pts:
-                        if pt[0] == node_name:
-                            return key
-        return None
-
-    def _fill_procedure_gaps(
-        self,
-        route_list: List[Tuple[str, str, int]],
-        sid_conn: AirportConnection,
-        star_conn: AirportConnection,
-    ) -> Tuple[List[Tuple[str, str, int]], Dict[str, Tuple[str, "Procedure"]]]:
-        """Ensure SID/STAR segments follow complete single-procedure paths.
-
-        When pooled internal_edges are shared across all procedures, A* may
-        mix segments from different procedures or skip intermediate nodes
-        (e.g. KIMMO3's ARVIN and AMONT are bypassed by WAYVE1's EHF->LOPES
-        edge, or XACN's XAC->UTIBO is combined with XAC1K's KAIHO->AZURE).
-
-        This post-processor replaces each maximal contiguous run of SID or
-        STAR edges with the full path through the single best-matching
-        procedure, ensuring the displayed route is a single straight line.
-        """
-
-        def _best_proc_for_run(
-            node_names: List[str],
-            conn: AirportConnection,
-            edge_label: str,
-        ):
-            """Find the best-matching procedure for the run.
-
-            Prefer procedures where the run forms a complete contiguous path
-            (starts at first point and ends at last point).  Among incomplete
-            matches, prefer the one with the highest score, then the longest
-            procedure.
-            """
-            best_proc = None
-            best_key = None
-            best_score = 0
-            best_is_complete = False
-
-            for key, proc_list in conn.procedures.items():
-                for proc in proc_list:
-                    proc_names = [p[0] for p in proc.points]
-                    # Also include transition points so runs that enter via a
-                    # transition can be matched to their procedure.
-                    trans_names = []
-                    for t_name, t_pts in proc.transitions:
-                        trans_names.extend([p[0] for p in t_pts])
-                    all_proc_names = list(dict.fromkeys(proc_names + trans_names))
-                    score = sum(1 for name in node_names if name in all_proc_names)
-                    if score < 2:
-                        continue
-
-                    match_indices = [
-                        all_proc_names.index(name)
-                        for name in node_names
-                        if name in all_proc_names
-                    ]
-                    if len(match_indices) < 2:
-                        continue
-
-                    first_idx = min(match_indices)
-                    last_idx = max(match_indices)
-                    is_complete = (
-                        first_idx == 0 and last_idx == len(all_proc_names) - 1
-                    )
-
-                    if is_complete and not best_is_complete:
-                        best_proc, best_key, best_score, best_is_complete = (
-                            proc, key, score, True
-                        )
-                    elif is_complete == best_is_complete:
-                        if score > best_score:
-                            best_proc, best_key, best_score, best_is_complete = (
-                                proc, key, score, is_complete
-                            )
-                        elif (
-                            score == best_score
-                            and best_proc is not None
-                            and len(proc.points) > len(best_proc.points)
-                        ):
-                            best_proc, best_key, best_score, best_is_complete = (
-                                proc, key, score, is_complete
-                            )
-
-            return best_proc, best_key, best_score
-
-        used_procs: Dict[str, Tuple[str, Procedure]] = {}
-
-        def _fill_gaps_for_conn(
-            route: List[Tuple[str, str, int]],
-            conn: AirportConnection,
-            edge_label: str,
-        ):
-            nonlocal used_procs
-            result: List[Tuple[str, str, int]] = []
-            i = 0
-            while i < len(route):
-                edge_name, node_name, iid = route[i]
-
-                if edge_name != edge_label:
-                    result.append((edge_name, node_name, iid))
-                    i += 1
-                    continue
-
-                # Collect the entire contiguous run of this edge_label
-                run: List[Tuple[str, str, int]] = [
-                    (edge_name, node_name, iid)
-                ]
-                j = i + 1
-                while j < len(route) and route[j][0] == edge_label:
-                    run.append(route[j])
-                    j += 1
-
-                run_node_names = [n[1] for n in run]
-
-                # Also consider the node immediately before the run, as it may
-                # be the procedure entry point reached via an airway edge.
-                prev_node = route[i - 1] if i > 0 else None
-                candidate_names = list(run_node_names)
-                if prev_node is not None:
-                    candidate_names.insert(0, prev_node[1])
-
-                best_proc, best_key, score = _best_proc_for_run(
-                    candidate_names, conn, edge_label
-                )
-
-                if best_proc and score >= 2:
-                    proc_names = [p[0] for p in best_proc.points]
-
-                    # Determine if the route entered via a transition.
-                    # Prefer the transition whose start point is in the route
-                    # and that shares the most nodes with the candidate names.
-                    # Skip runway transitions (final approach paths) as they are
-                    # subsumed by the main procedure points.
-                    active_trans_points = None
-                    best_trans_score = 0
-                    for t_name, t_pts in best_proc.transitions:
-                        if t_name.startswith("RW"):
-                            continue
-                        t_pt_names = [p[0] for p in t_pts]
-                        if not t_pt_names or t_pt_names[0] not in candidate_names:
-                            continue
-                        score = sum(
-                            1 for name in candidate_names if name in t_pt_names
-                        )
-                        if score > best_trans_score:
-                            best_trans_score = score
-                            active_trans_points = t_pts
-
-                    if active_trans_points:
-                        t_names = [p[0] for p in active_trans_points]
-                        # Remove overlap between transition and main points.
-                        # Transition may precede points (t[-1] == p[0]) or
-                        # follow points (p[-1] == t[0]).
-                        if t_names and proc_names:
-                            if t_names[-1] == proc_names[0]:
-                                all_names = t_names + proc_names[1:]
-                            elif proc_names[-1] == t_names[0]:
-                                all_names = proc_names + t_names[1:]
-                            else:
-                                all_names = t_names + proc_names
-                        else:
-                            all_names = t_names + proc_names
-                    else:
-                        all_names = proc_names
-
-                    # Find first and last matching node indices
-                    match_indices = []
-                    for name in candidate_names:
-                        if name in all_names:
-                            match_indices.append(all_names.index(name))
-
-                    if len(match_indices) >= 2:
-                        first_idx = min(match_indices)
-                        last_idx = max(match_indices)
-
-                        # Determine where the procedure path should start/end.
-                        # For SID, always extend to the first point (airport side).
-                        # For STAR, always extend to the last point (airport side).
-                        # This prevents A* from entering/exiting at internal nodes.
-                        prev_is_first = (
-                            prev_node is not None
-                            and prev_node[1] == all_names[first_idx]
-                        )
-                        if edge_label == "SID":
-                            start_idx = 0
-                            end_idx = max(last_idx, len(all_names) - 1)
-                        else:
-                            start_idx = first_idx + 1 if prev_is_first else first_idx
-                            end_idx = len(all_names) - 1
-
-                        # Record the procedure actually used for this run so
-                        # the caller can report the correct procedure key
-                        # instead of guessing via _find_procedure_key_for_node.
-                        used_procs[edge_label] = (best_key, best_proc)
-
-                        # Build a lookup for nodes already in the run or prev_node
-                        known_iids = {n_name: n_iid for _, n_name, n_iid in run}
-                        if prev_node is not None:
-                            known_iids[prev_node[1]] = prev_node[2]
-
-                        proc_path: List[Tuple[str, str, int]] = []
-                        for k in range(start_idx, end_idx + 1):
-                            pt_name = all_names[k]
-                            pt_iid = known_iids.get(pt_name)
-                            if pt_iid is None:
-                                mid_node = self._get_node_by_name(
-                                    pt_name, sid_conn, star_conn
-                                )
-                                if mid_node is not None:
-                                    pt_iid = mid_node.iid
-                            if pt_iid is not None:
-                                proc_path.append((edge_label, pt_name, pt_iid))
-
-                        # Keep run nodes that are NOT in the procedure but ARE
-                        # the airport (e.g. final connection to airport). Drop
-                        # all other "alien" nodes from mixed procedures.
-                        airport_name = conn.airport_node.name
-                        suffix: List[Tuple[str, str, int]] = []
-                        for e_name, n_name, n_iid in run:
-                            if n_name not in all_names and n_name == airport_name:
-                                suffix.append((e_name, n_name, n_iid))
-
-                        result.extend(proc_path)
-                        result.extend(suffix)
-                    else:
-                        result.extend(run)
-                else:
-                    result.extend(run)
-
-                i = j
-
-            return result
-
-        route_list = _fill_gaps_for_conn(route_list, sid_conn, "SID")
-        route_list = _fill_gaps_for_conn(route_list, star_conn, "STAR")
-        return route_list, used_procs
-
-    def _get_node_by_name(
-        self,
-        name: str,
-        sid_conn: AirportConnection,
-        star_conn: AirportConnection,
-    ) -> Optional[Node]:
-        """Find node by name across all known nodes."""
-        # Check temp nodes first
-        for node in sid_conn.temp_nodes:
-            if node.name == name:
-                return node
-        for node in star_conn.temp_nodes:
-            if node.name == name:
-                return node
-        # Check global node list
-        for node in self.node_list:
-            if node is not None and node.name == name:
-                return node
-        return None
-
-    def _find_transition_name(
-        self,
-        edge: Edge,
-        sid_conn: AirportConnection,
-        star_conn: AirportConnection,
-        is_sid: bool = True,
-        route_node_names: Optional[set] = None,
-    ) -> Optional[str]:
-        """Find transition name from a transition edge by matching endpoint names.
-
-        When route_node_names is provided and multiple transitions share the same
-        endpoint, we disambiguate by picking the transition whose procedure's main
-        leg points best match the actual route nodes.
-        """
-        if is_sid:
-            end_node = self._get_node(edge.nend, sid_conn, star_conn)
-            if not end_node:
-                return None
-            matches = []
-            for proc_list in sid_conn.procedures.values():
-                for proc in proc_list:
-                    for t_name, t_points in proc.transitions:
-                        if t_points and t_points[-1][0] == end_node.name:
-                            score = 0
-                            if route_node_names:
-                                for pt in proc.points:
-                                    if pt[0] in route_node_names:
-                                        score += 1
-                            matches.append((score, t_name))
-            if matches:
-                matches.sort(key=lambda x: -x[0])
-                return matches[0][1]
-        else:
-            start_node = self._get_node(edge.nfrom, sid_conn, star_conn)
-            if not start_node:
-                return None
-            matches = []
-            for proc_list in star_conn.procedures.values():
-                for proc in proc_list:
-                    for t_name, t_points in proc.transitions:
-                        if t_points and t_points[0][0] == start_node.name:
-                            score = 0
-                            if route_node_names:
-                                for pt in proc.points:
-                                    if pt[0] in route_node_names:
-                                        score += 1
-                            matches.append((score, t_name))
-            if matches:
-                matches.sort(key=lambda x: -x[0])
-                return matches[0][1]
         return None
 
     def _sort_route(self, orig: str, route_list: List[Tuple[str, str, int]]) -> str:

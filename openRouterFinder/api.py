@@ -428,7 +428,7 @@ async def post_route(req: RouteRequest):
 
     time_min = None
     try:
-        time_min = float(result.get("total_time", 0))
+        time_min = float(result.get("total_time", 0)) / 1000.0
     except (ValueError, TypeError):
         pass
 

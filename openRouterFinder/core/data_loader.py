@@ -323,6 +323,15 @@ def _get_airport_detail_from_fb(nav, icao: str) -> Optional[dict]:
     }
 
 
+from threading import Lock
+
+# Module-level caches for airport connections. AirportConnection objects are
+# read-only after construction, so they are safe to share across requests.
+_sid_cache: dict = {}
+_star_cache: dict = {}
+_cache_lock = Lock()
+
+
 def search_route(orig: str, dest: str, sid_exit: Optional[str] = None, star_entry: Optional[str] = None, cycle: Optional[str] = None) -> Optional[dict]:
     """Thread-safe route search. Each call gets isolated state."""
     from openRouterFinder.core.airport import FlatbuffersAirportConnector
@@ -338,16 +347,34 @@ def search_route(orig: str, dest: str, sid_exit: Optional[str] = None, star_entr
     if nav.get_airport(orig) is None or nav.get_airport(dest) is None:
         return None
 
+    # Use cached AirportConnection when available to avoid rebuilding
+    # procedures on every request.
     connector = FlatbuffersAirportConnector(nav)
-    sid_conn = connector.build_sid(orig, filter_name=sid_exit)
-    star_conn = connector.build_star(dest, filter_name=star_entry)
+
+    # Build unfiltered connections so the engine can fall back to auto-selected
+    # procedures when a filtered entry is unreachable via the airway graph.
+    sid_key = (cycle, orig)
+    with _cache_lock:
+        sid_conn = _sid_cache.get(sid_key)
+    if sid_conn is None:
+        sid_conn = connector.build_sid(orig, filter_name=None)
+        with _cache_lock:
+            _sid_cache[sid_key] = sid_conn
+
+    star_key = (cycle, dest)
+    with _cache_lock:
+        star_conn = _star_cache.get(star_key)
+    if star_conn is None:
+        star_conn = connector.build_star(dest, filter_name=None)
+        with _cache_lock:
+            _star_cache[star_key] = star_conn
 
     if sid_conn is None or star_conn is None:
         return None
     if not sid_conn.connections or not star_conn.connections:
         return None
 
-    engine = RouteEngine(nav.node_list, nav.cycle)
+    engine = RouteEngine(nav.node_list, nav.cycle, node_index=nav.node_index)
     result_json = engine.search(
         orig, dest, sid_conn, star_conn,
         connector.get_airport_names(orig) + connector.get_airport_names(dest),

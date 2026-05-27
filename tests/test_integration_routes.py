@@ -163,13 +163,20 @@ def _find_best_procedure_key(nodes: list, procedures: dict) -> str | None:
     """
     best_key = None
     best_score = 0
-    for key, proc_list in procedures.items():
+    # Sort keys alphabetically so tie-breaking is deterministic and
+    # independent of dict insertion order.
+    for key, proc_list in sorted(procedures.items()):
         for proc in proc_list:
             proc_names = [p[0] for p in proc[2]]
             score = sum(1 for n in nodes if n in proc_names)
             if score > best_score:
                 best_score = score
                 best_key = key
+            elif score == best_score and best_key is not None:
+                # Tie-break: prefer key whose name appears in the route nodes
+                # (more specific procedure over generic superset)
+                if key in nodes and best_key not in nodes:
+                    best_key = key
     return best_key if best_score >= 2 else None
 
 
@@ -207,6 +214,8 @@ def _check_procedure_continuity(
         return
 
     # Find the single procedure that contains the *most* route nodes.
+    # When two procedures tie (e.g. RUK01A vs RUK02A under key RUKLI),
+    # prefer the shorter one — it is the more specific match.
     best_proc = None
     best_subseq = []
     for proc in proc_list:
@@ -215,6 +224,10 @@ def _check_procedure_continuity(
         if len(subseq) > len(best_subseq):
             best_subseq = subseq
             best_proc = proc
+        elif len(subseq) == len(best_subseq) and len(subseq) >= 2:
+            if best_proc is None or len(proc[2]) < len(best_proc[2]):
+                best_subseq = subseq
+                best_proc = proc
 
     if best_proc is None or len(best_subseq) < 2:
         return
@@ -1773,6 +1786,164 @@ def test_star_transition_points_are_not_skipped_by_airway(orig, dest):
             if missing:
                 failures.append(
                     f"{orig}→{dest} STAR={star_key} transition={active_trans}: "
+                    f"skipped transition points {missing}"
+                )
+
+    assert not failures, "\n".join(failures)
+
+
+# ---------------------------------------------------------------------------
+# 3.17 Standard route assertions — must produce known-correct routes
+# ---------------------------------------------------------------------------
+
+def test_standard_route_rjbb_rjtt():
+    """RJBB→RJTT must produce the standard route via SHTLE transition.
+
+    Regression test for a bug where SID transitions were skipped, causing
+    the airway to start from the bridge node instead of the transition end.
+    """
+    response = client.post(
+        "/api/route",
+        json={
+            "orig": "RJBB",
+            "dest": "RJTT",
+            "validCode": "",
+            "validToken": "",
+            "sidExit": "",
+            "starEntry": "",
+            "cycle": "2604",
+        },
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["route"] != "No result.", "RJBB→RJTT: no route found"
+
+    route = data["route"]
+    assert "SHTLE" in route, (
+        f"RJBB→RJTT must include SHTLE SID transition, got: {route}"
+    )
+    assert "Y71" in route, (
+        f"RJBB→RJTT must include Y71 airway, got: {route}"
+    )
+    assert data.get("activeSIDTransition") == "SHTLE", (
+        f"RJBB→RJTT active SID transition must be SHTLE, got: {data.get('activeSIDTransition')}"
+    )
+
+
+def test_standard_route_klax_kjfk():
+    """KLAX→KJFK must produce the standard route via BEALE transition.
+
+    Regression test for a bug where bearing-based transition selection
+    picked MISEN (geographically closer to KLAX but on the wrong airway)
+    instead of BEALE (on J146, the direct airway toward KJFK).
+
+    The fix uses the main procedure's last point (GARDY) as the bearing
+    reference, so transitions are scored by direction from the common
+    endpoint rather than from the airport.
+    """
+    response = client.post(
+        "/api/route",
+        json={
+            "orig": "KLAX",
+            "dest": "KJFK",
+            "validCode": "",
+            "validToken": "",
+            "sidExit": "",
+            "starEntry": "",
+            "cycle": "2604",
+        },
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["route"] != "No result.", "KLAX→KJFK: no route found"
+
+    route = data["route"]
+    # The exact route string depends on A* tie-breaking; key invariants are:
+    # - SID transition is BEALE
+    # - STAR transition is WLKES (PUCKY1)
+    # - Airway contains J146, J554, Q476
+    assert "BEALE" in route, (
+        f"KLAX→KJFK must include BEALE SID transition, got: {route}"
+    )
+    assert "WLKES" in route, (
+        f"KLAX→KJFK must include WLKES STAR transition, got: {route}"
+    )
+    assert "J146" in route, (
+        f"KLAX→KJFK must include J146 airway, got: {route}"
+    )
+    assert "J554" in route, (
+        f"KLAX→KJFK must include J554 airway, got: {route}"
+    )
+    assert "Q476" in route, (
+        f"KLAX→KJFK must include Q476 airway, got: {route}"
+    )
+    assert data.get("activeSIDTransition") == "BEALE", (
+        f"KLAX→KJFK active SID transition must be BEALE, got: {data.get('activeSIDTransition')}"
+    )
+    assert data.get("activeSTARTransition") == "WLKES", (
+        f"KLAX→KJFK active STAR transition must be WLKES, got: {data.get('activeSTARTransition')}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 3.18 SID transition continuity — points must not be skipped
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("orig,dest", AIRPORT_PAIRS)
+def test_sid_transition_points_are_not_skipped_by_airway(orig, dest):
+    """When A* exits a SID via a transition, the route must contain every
+    transition point.  If A* takes an airway shortcut, the skipped
+    transition points cause the frontend sid-line to fork from the route.
+    """
+    response = client.post(
+        "/api/route",
+        json={
+            "orig": orig,
+            "dest": dest,
+            "validCode": "",
+            "validToken": "",
+            "sidExit": "",
+            "starEntry": "",
+            "cycle": "2604",
+        },
+    )
+    if response.status_code != 200:
+        return
+    data = response.json()
+    if data.get("route") == "No result.":
+        return
+
+    active_trans = data.get("activeSIDTransition")
+    sid_key = data.get("sidNodeName")
+    if not active_trans or not sid_key:
+        return
+
+    nodes = [n["name"] for n in data.get("nodes", [])]
+    sid_procs = data.get("SID", {})
+
+    failures = []
+    for proc in sid_procs.get(sid_key, []):
+        for t_name, t_pts in proc[3]:
+            if t_name != active_trans:
+                continue
+            trans_names = [p[0] for p in t_pts]
+            if not trans_names:
+                continue
+
+            # Skip runway transitions
+            if t_name.startswith("RW"):
+                continue
+
+            # The transition start must be present in the route
+            start_name = trans_names[0]
+            if start_name not in nodes:
+                continue
+
+            # Every transition point must appear in the route
+            missing = [n for n in trans_names if n not in nodes]
+            if missing:
+                failures.append(
+                    f"{orig}→{dest} SID={sid_key} transition={active_trans}: "
                     f"skipped transition points {missing}"
                 )
 

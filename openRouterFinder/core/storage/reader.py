@@ -91,6 +91,16 @@ class MmappedNavData:
                 )
                 self._node_by_iid[nfrom].next_list.append(ge)
 
+        # Build node_list array once and cache it
+        if self._node_by_iid:
+            max_iid = max(self._node_by_iid.keys())
+            arr: List[Optional[GraphNode]] = [None] * (max_iid + 1)
+            for iid, node in self._node_by_iid.items():
+                arr[iid] = node
+            self._node_list_cache = tuple(arr)
+        else:
+            self._node_list_cache = ()
+
         # Airport index by ICAO
         for i in range(self._nav.AirportsLength()):
             ap = self._nav.Airports(i)
@@ -182,15 +192,7 @@ class MmappedNavData:
 
     @property
     def node_list(self) -> Tuple[Optional[GraphNode], ...]:
-        # Build array where node_list[iid] returns the node with that iid.
-        # Handles both 0-based (new builds) and 1-based (legacy) iids.
-        if not self._node_by_iid:
-            return ()
-        max_iid = max(self._node_by_iid.keys())
-        arr: List[Optional[GraphNode]] = [None] * (max_iid + 1)
-        for iid, node in self._node_by_iid.items():
-            arr[iid] = node
-        return tuple(arr)
+        return self._node_list_cache
 
     @property
     def node_index(self) -> Dict[tuple, GraphNode]:
