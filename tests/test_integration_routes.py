@@ -1799,8 +1799,7 @@ def test_star_transition_points_are_not_skipped_by_airway(orig, dest):
 def test_standard_route_rjbb_rjtt():
     """RJBB→RJTT must produce the standard route via SHTLE transition.
 
-    Regression test for a bug where SID transitions were skipped, causing
-    the airway to start from the bridge node instead of the transition end.
+    Standard answer: RJBB SID SHTLE Y71 XAC STAR RJTT
     """
     response = client.post(
         "/api/route",
@@ -1819,11 +1818,11 @@ def test_standard_route_rjbb_rjtt():
     assert data["route"] != "No result.", "RJBB→RJTT: no route found"
 
     route = data["route"]
-    assert "SHTLE" in route, (
-        f"RJBB→RJTT must include SHTLE SID transition, got: {route}"
-    )
-    assert "Y71" in route, (
-        f"RJBB→RJTT must include Y71 airway, got: {route}"
+    expected = "RJBB SID SHTLE Y71 XAC STAR RJTT"
+    assert route == expected, (
+        f"RJBB→RJTT route mismatch.\n"
+        f"Expected: {expected}\n"
+        f"Got:      {route}"
     )
     assert data.get("activeSIDTransition") == "SHTLE", (
         f"RJBB→RJTT active SID transition must be SHTLE, got: {data.get('activeSIDTransition')}"
@@ -1831,15 +1830,9 @@ def test_standard_route_rjbb_rjtt():
 
 
 def test_standard_route_klax_kjfk():
-    """KLAX→KJFK must produce the standard route via BEALE transition.
+    """KLAX→KJFK must produce the standard route via BEALE/WLKES transitions.
 
-    Regression test for a bug where bearing-based transition selection
-    picked MISEN (geographically closer to KLAX but on the wrong airway)
-    instead of BEALE (on J146, the direct airway toward KJFK).
-
-    The fix uses the main procedure's last point (GARDY) as the bearing
-    reference, so transitions are scored by direction from the common
-    endpoint rather than from the airport.
+    Standard answer: KLAX SID BEALE J146 GIJ J554 JHW J70 HOXIE Q476 WLKES STAR KJFK
     """
     response = client.post(
         "/api/route",
@@ -1858,24 +1851,11 @@ def test_standard_route_klax_kjfk():
     assert data["route"] != "No result.", "KLAX→KJFK: no route found"
 
     route = data["route"]
-    # The exact route string depends on A* tie-breaking; key invariants are:
-    # - SID transition is BEALE
-    # - STAR transition is WLKES (PUCKY1)
-    # - Airway contains J146, J554, Q476
-    assert "BEALE" in route, (
-        f"KLAX→KJFK must include BEALE SID transition, got: {route}"
-    )
-    assert "WLKES" in route, (
-        f"KLAX→KJFK must include WLKES STAR transition, got: {route}"
-    )
-    assert "J146" in route, (
-        f"KLAX→KJFK must include J146 airway, got: {route}"
-    )
-    assert "J554" in route, (
-        f"KLAX→KJFK must include J554 airway, got: {route}"
-    )
-    assert "Q476" in route, (
-        f"KLAX→KJFK must include Q476 airway, got: {route}"
+    expected = "KLAX SID BEALE J146 GIJ J554 JHW J70 HOXIE Q476 WLKES STAR KJFK"
+    assert route == expected, (
+        f"KLAX→KJFK route mismatch.\n"
+        f"Expected: {expected}\n"
+        f"Got:      {route}"
     )
     assert data.get("activeSIDTransition") == "BEALE", (
         f"KLAX→KJFK active SID transition must be BEALE, got: {data.get('activeSIDTransition')}"
