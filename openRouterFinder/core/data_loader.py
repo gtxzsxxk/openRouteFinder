@@ -1,5 +1,6 @@
 """Data loading and NavGraph singleton."""
 
+import dataclasses
 import pickle
 import sys
 from typing import Tuple, Dict, Optional, List
@@ -360,6 +361,10 @@ def search_route(orig: str, dest: str, sid_exit: Optional[str] = None, star_entr
         sid_conn = connector.build_sid(orig, filter_name=None)
         with _cache_lock:
             _sid_cache[sid_key] = sid_conn
+    else:
+        # Each request must have isolated temp_nodes so that post-A* point
+        # insertion does not pollute the shared cache.
+        sid_conn = dataclasses.replace(sid_conn, temp_nodes=[])
 
     star_key = (cycle, dest)
     with _cache_lock:
@@ -368,6 +373,8 @@ def search_route(orig: str, dest: str, sid_exit: Optional[str] = None, star_entr
         star_conn = connector.build_star(dest, filter_name=None)
         with _cache_lock:
             _star_cache[star_key] = star_conn
+    else:
+        star_conn = dataclasses.replace(star_conn, temp_nodes=[])
 
     if sid_conn is None or star_conn is None:
         return None

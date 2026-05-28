@@ -27,6 +27,22 @@ def great_circle_distance_km(lat1: float, lon1: float, lat2: float, lon2: float)
     return s * EARTH_RADIUS
 
 
+def _haversine_a(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Return the haversine 'a' value (sin²(Δlat/2) + cos(lat1)*cos(lat2)*sin²(Δlon/2)).
+
+    This is proportional to the great-circle distance (via monotonic asin(sqrt(a))),
+    but avoids the expensive asin and sqrt calls. Use for comparison-only scenarios.
+    """
+    rlat1 = rad(lat1)
+    rlat2 = rad(lat2)
+    dlat = rlat1 - rlat2
+    dlon = rad(lon1) - rad(lon2)
+    return (
+        math.sin(dlat / 2) ** 2
+        + math.cos(rlat1) * math.cos(rlat2) * math.sin(dlon / 2) ** 2
+    )
+
+
 def heuristic_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """A* heuristic: straight-line distance."""
     return great_circle_distance_km(lat1, lon1, lat2, lon2)
