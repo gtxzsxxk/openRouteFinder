@@ -448,7 +448,7 @@ class FlatbuffersAirportConnector:
             segments.append(self._dedup_consecutive(current))
         return segments
 
-    RUNWAY_RE = re.compile(r'^\d+[LRC]?$')
+    RUNWAY_RE = re.compile(r'^(0[1-9]|[12]\d|3[0-6])[LRC]?$')
 
     @staticmethod
     def _infer_runway_from_points(points: List[Tuple[str, float, float]], default: str = "") -> str:
@@ -657,7 +657,13 @@ class FlatbuffersAirportConnector:
                     common_segments[proc_name] = (anchor_node, points, transitions)
                 else:
                     # Runway-specific segment
-                    runway_segments.append((proc_name, runway, anchor_node, points, transitions, True))
+                    # Skip runway-heading SIDs (single DERxx/DExx point) — they have
+                    # no meaningful route structure and steal A* selection from
+                    # real SID procedures that share the same runway endpoint.
+                    if proc_type == 1 and len(points) <= 1 and _RUNWAY_ENDPOINT_RE.match(points[0][0]):
+                        pass  # Drop runway-heading SID
+                    else:
+                        runway_segments.append((proc_name, runway, anchor_node, points, transitions, True))
 
                 # Also generate runway segments from transitions so the full
                 # runway->network path is available for display and edge building.

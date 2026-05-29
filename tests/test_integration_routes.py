@@ -40,6 +40,16 @@ AIRPORT_PAIRS = [
     ("ZBAA", "ZGSZ"),
 ]
 
+# 需要跑完整 SID × STAR 笛卡尔积的航线
+EXHAUSTIVE_CARTESIAN_PAIRS = [
+    ("ZBAA", "ZGGG"),
+    ("RJTT", "RJBB"),
+    ("RJBB", "RJTT"),
+    ("KLAX", "KSEA"),
+    ("KLAX", "KJFK"),
+    ("ZBAA", "TNCM"),
+]
+
 TEST_AIRPORTS = sorted(set(icao for pair in AIRPORT_PAIRS for icao in pair))
 
 
@@ -971,7 +981,7 @@ def _get_star_entries(icao: str) -> list:
     return [e["name"] for e in data.get("star", {}).get("entries", [])]
 
 
-@pytest.mark.parametrize("orig,dest", AIRPORT_PAIRS)
+@pytest.mark.parametrize("orig,dest", EXHAUSTIVE_CARTESIAN_PAIRS)
 def test_exhaustive_sid_star_combinations(orig, dest):
     """For each airport pair, test every SID x STAR combination.
 

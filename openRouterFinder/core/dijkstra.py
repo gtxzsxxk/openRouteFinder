@@ -373,29 +373,32 @@ class RouteEngine:
         if node is None:
             return None
 
-        # If node has outgoing airway edges, it's already an airway node
+        # Node has outgoing airway edges — it's already a valid boundary.
         if node.next_list:
             return node
 
-        # Node is isolated (temp) – follow bridge_edges
-        if is_sid:
-            # SID bridge: temp -> airway
-            for edge in conn.bridge_edges:
+        # Node has no outgoing edges.  Try bridge_edges to find the
+        # connected airway node.  SID and STAR use opposite directions.
+        for edge in conn.bridge_edges:
+            if is_sid:
+                # SID bridge: temp -> airway (nfrom = node, nend = airway)
                 if edge.nfrom == node.iid:
                     if 0 <= edge.nend < self.num_nodes:
                         airway_node = self.node_list[edge.nend]
                         if airway_node is not None:
                             return airway_node
-        else:
-            # STAR bridge: airway -> temp
-            for edge in conn.bridge_edges:
+            else:
+                # STAR bridge: airway -> temp (nfrom = airway, nend = node)
                 if edge.nend == node.iid:
                     if 0 <= edge.nfrom < self.num_nodes:
                         airway_node = self.node_list[edge.nfrom]
                         if airway_node is not None:
                             return airway_node
 
-        return None
+        # No outgoing edges and no bridge edge.
+        # SID: exit point is a dead-end — A* cannot continue on airway.
+        # STAR: entry point is an airway terminus — A* only needs to reach it.
+        return None if is_sid else node
 
     def _select_sid_transition(
         self,

@@ -25,12 +25,36 @@ def setup_module(module):
 
 client = TestClient(app)
 
-# All airports involved in the integration test pairs
-TEST_AIRPORTS = [
-    "ZBAA", "ZGGG", "ZGHA", "ZJSY", "ZSPD", "ZSSS",
-    "RKSI", "RKPC", "ZBAD", "RJTT", "RJBB",
-    "KLAX", "KSEA", "KJFK", "TNCM", "ZGSZ",
-]
+
+def _get_all_airports_with_procedures() -> list:
+    """动态获取 navdata 中所有有 SID 或 STAR procedure 的机场 ICAO。"""
+    data_path = Path(__file__).parent.parent / "data" / "navdata_2604.fb.zst"
+    if not data_path.exists():
+        return []
+    nav = MmappedNavData(data_path)
+    try:
+        has_sid = set()
+        has_star = set()
+        for i in range(nav._nav.AirportsLength()):
+            ap = nav._nav.Airports(i)
+            icao = ap.Icao().decode("utf-8") if ap.Icao() else ""
+            if not icao:
+                continue
+            n = ap.ProceduresLength()
+            for j in range(n):
+                p = ap.Procedures(j)
+                t = p.Type()
+                if t == 1:  # SID
+                    has_sid.add(icao)
+                elif t == 2:  # STAR
+                    has_star.add(icao)
+        return sorted(has_sid | has_star)
+    finally:
+        nav.close()
+
+
+# 所有在 navdata 中有 SID 或 STAR procedure 的机场
+TEST_AIRPORTS = _get_all_airports_with_procedures()
 
 # International airports with longer oceanic/continental legs
 INTL_AIRPORTS = {"KLAX", "KSEA", "KJFK", "TNCM"}
