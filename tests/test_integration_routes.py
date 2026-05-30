@@ -1889,7 +1889,74 @@ def test_standard_route_klax_kjfk():
 
 
 # ---------------------------------------------------------------------------
-# 3.18 SID transition continuity — points must not be skipped
+# 3.18 Standard routes from rfinder — must match known optimal answers
+# ---------------------------------------------------------------------------
+
+# Helpers for distance parsing
+def _parse_distance_nm(dist_str: str) -> float:
+    """Extract nautical-mile value from 'xxx.xx nm / yyy.yy km' string."""
+    if not dist_str:
+        return 0.0
+    parts = dist_str.split()
+    if parts and parts[0].replace(".", "", 1).replace("-", "", 1).isdigit():
+        return float(parts[0])
+    return 0.0
+
+
+STANDARD_ROUTES = [
+    # (orig, dest, expected_route, expected_dist_nm)
+    ("ZBAA", "ZGGG", "ZBAA SID OMDEK W37 VIKEB V66 VESUX W45 IKAVO STAR ZGGG", 1031.5),
+    ("ZBAA", "ZGHA", "ZBAA SID OMDEK W37 GUSIV STAR ZGHA", 742.9),
+    ("ZGHA", "ZJSY", "ZGHA SID OLTUS R343 ENKUS W120 IVPUB W159 BHY W70 NYB G221 UPRIS STAR ZJSY", 702.3),
+    ("ZBAA", "ZSPD", "ZBAA SID ELKUR W40 YQG W142 DALIM A593 VMB W161 SASAN STAR ZSPD", 637.6),
+    ("RJTT", "RJBB", "RJTT SID LAXAS Y56 TOHME Y54 KOHWA Y544 DUBKA STAR RJBB", 254.4),
+    ("KLAX", "KSEA", "KLAX SID EHF J5 LKV STAR KSEA", 832.3),
+    ("RKPC", "ZBAD", "RKPC SID LIMDI Y677 TOLIS Y655 NONOS Z55 AGAVO A591 IKEKA W4 HCH W200 DOVIV W55 DUMAP STAR ZBAD", 718.5),
+    ("ZBAA", "RKSI", "ZBAA SID MUGLO W34 ANRAT A326 DONVO G597 AGAVO Y644 GONAV STAR RKSI", 520.8),
+]
+
+
+@pytest.mark.parametrize("orig,dest,expected_route,expected_dist_nm", STANDARD_ROUTES)
+def test_standard_route_from_rfinder(orig, dest, expected_route, expected_dist_nm):
+    """Route must exactly match the known optimal answer from rfinder.
+
+    Per CLAUDE.md: test failure means our bug — never skip.
+    """
+    response = client.post(
+        "/api/route",
+        json={
+            "orig": orig,
+            "dest": dest,
+            "validCode": "",
+            "validToken": "",
+            "sidExit": "",
+            "starEntry": "",
+            "cycle": "2604",
+        },
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["route"] != "No result.", f"{orig}→{dest}: no route found"
+
+    route = data["route"]
+    dist_str = data.get("distance", "")
+    actual_dist_nm = _parse_distance_nm(dist_str)
+
+    assert route == expected_route, (
+        f"{orig}→{dest} route mismatch.\n"
+        f"Expected: {expected_route}\n"
+        f"Got:      {route}\n"
+        f"Distance: {dist_str} (optimal: {expected_dist_nm} nm)"
+    )
+    # Allow 1 % tolerance for distance calculation differences
+    assert actual_dist_nm <= expected_dist_nm * 1.01, (
+        f"{orig}→{dest} distance too long.\n"
+        f"Expected <= {expected_dist_nm * 1.01:.1f} nm, got {actual_dist_nm:.1f} nm"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 3.19 SID transition continuity — points must not be skipped
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("orig,dest", AIRPORT_PAIRS)
