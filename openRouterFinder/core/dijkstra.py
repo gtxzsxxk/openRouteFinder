@@ -1134,10 +1134,28 @@ class RouteEngine:
         sid_conn: AirportConnection,
         star_conn: AirportConnection,
     ) -> float:
-        """Calculate total distance in km."""
+        """Calculate total distance in km using compressed route nodes.
+
+        Airways contain many intermediate waypoints.  Summing every small
+        great-circle leg yields a larger total than the published airway
+        distance (which is effectively the direct great-circle between the
+        airway-change points).  To align with standard flight-planning
+        tools such as rfinder, we compress consecutive nodes on the same
+        airway — exactly the same logic as _sort_route — and then sum
+        only the direct great-circle distances between the compressed
+        points.
+        """
+        # Compress consecutive nodes on same airway (same logic as _sort_route)
+        compressed: List[Tuple[str, str, int]] = []
+        for item in route_list:
+            if compressed and compressed[-1][0] == item[0]:
+                compressed[-1] = item
+                continue
+            compressed.append(item)
+
         dist_km = 0.0
         prev_node = sid_conn.airport_node
-        for _, _, iid in route_list:
+        for _, _, iid in compressed:
             node = self._get_node(iid, sid_conn, star_conn)
             if node is not None:
                 dist_km += great_circle_distance_km(
