@@ -510,12 +510,12 @@ def _simulate_frontend_procedure_selection(seg_nodes: list, proc_list: list, lab
     for i, proc in enumerate(proc_list):
         point_names = set(p[0] for p in proc[2])
         score = sum(1 for name in point_names if name in route_node_names)
-        # Also consider transitions
+        # Also consider transitions: add unique transition points
         for t in proc[3]:
             t_point_names = set(p[0] for p in t[1])
-            t_score = sum(1 for name in t_point_names if name in route_node_names)
-            if t_score > score:
-                score = t_score
+            for name in t_point_names:
+                if name in route_node_names and name not in point_names:
+                    score += 1
         score = score * 1000 + len(proc[2])
         if score > best_score:
             best_score = score

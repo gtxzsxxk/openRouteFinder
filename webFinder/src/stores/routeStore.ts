@@ -113,16 +113,14 @@ export const useRouteStore = defineStore('route', () => {
       for (const name of pointNames) {
         if (routeNodeNames.has(name)) score += 1
       }
-      // Also consider transitions: if any transition matches better, use its score
+      // Also consider transitions: add unique transition points
       const transitions = proc[3] || []
       for (const t of transitions) {
         const tPointNames = new Set(t[1].map((p: any) => p[0]))
-        let tScore = 0
         for (const name of tPointNames) {
-          if (routeNodeNames.has(name)) tScore += 1
-        }
-        if (tScore > score) {
-          score = tScore
+          if (routeNodeNames.has(name) && !pointNames.has(name)) {
+            score += 1
+          }
         }
       }
       // Bonus for matching more unique points; tie-break by preferring more points total

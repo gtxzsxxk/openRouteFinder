@@ -120,7 +120,13 @@ class RouteEngine:
         if sid_transition_result is not None:
             _, sid_transition_pts, sid_boundary = sid_transition_result
 
-        # Phase 3: Collect STAR candidates and select by A* distance
+        # Phase 3+4: Alternating optimization of STAR and SID.
+        # A single pass (select STAR then re-select SID) is greedy and can
+        # lock into a local optimum.  Iterating until convergence finds the
+        # true best (SID, STAR) pair.
+        sid_candidates = self._collect_procedure_candidates(
+            sid_conn, is_sid=True, filter_name=sid_exit
+        )
         star_candidates = self._collect_procedure_candidates(
             star_conn, is_sid=False, filter_name=star_entry,
             sid_conn=sid_conn, star_conn=star_conn
@@ -132,7 +138,8 @@ class RouteEngine:
                 None, {}, {}, [],
             )
 
-        star_proc, star_boundary, _ = self._select_procedure_astar(
+        # Initial STAR selection before entering the alternating loop.
+        star_proc, star_boundary, star_t_name = self._select_procedure_astar(
             star_candidates, sid_boundary.iid, is_sid=False, conn=star_conn
         )
         if star_proc is None or star_boundary is None:
@@ -142,30 +149,34 @@ class RouteEngine:
                 None, {}, {}, [],
             )
 
-        # Phase 4: Re-evaluate SID choice using A* airway distance.
-        # Bearing-based selection (Phase 1) can pick a SID whose exit direction
-        # aligns well with the destination but whose airway path is much longer
-        # than an alternative.  _select_procedure_astar adds the actual airway
-        # distance to the SID length, so it finds the true shortest total route.
-        # Transition candidates are included so the full runway->exit distance
-        # is considered, not just the main procedure distance.
-        sid_candidates = self._collect_procedure_candidates(
-            sid_conn, is_sid=True, filter_name=sid_exit
-        )
-        if sid_candidates:
-            astar_sid, astar_sid_boundary, astar_sid_t_name = self._select_procedure_astar(
-                sid_candidates, star_boundary.iid, is_sid=True, conn=sid_conn
+        for _ in range(5):
+            prev_sid_name = sid_proc.name
+            prev_sid_t = sid_transition_result[0] if sid_transition_result else None
+            prev_star_name = star_proc.name if star_proc else None
+            prev_star_t = star_t_name
+
+            # Select best STAR for current SID boundary
+            star_proc, star_boundary, star_t_name = self._select_procedure_astar(
+                star_candidates, sid_boundary.iid, is_sid=False, conn=star_conn
             )
-            if astar_sid is not None and astar_sid_boundary is not None:
-                changed = (
-                    astar_sid.name != sid_proc.name
-                    or astar_sid_t_name != (sid_transition_result[0] if sid_transition_result else None)
+            if star_proc is None or star_boundary is None:
+                return build_route_info(
+                    self.data_version, "0.00",
+                    "No result.", "0.00 nm / 0.00 km",
+                    None, {}, {}, [],
                 )
-                if changed:
+            prev_star_t = star_t_name
+
+            # Select best SID for current STAR boundary
+            if sid_candidates:
+                astar_sid, astar_sid_boundary, astar_sid_t_name = self._select_procedure_astar(
+                    sid_candidates, star_boundary.iid, is_sid=True, conn=sid_conn
+                )
+                if astar_sid is not None and astar_sid_boundary is not None:
                     sid_proc = astar_sid
                     sid_boundary = astar_sid_boundary
                     if astar_sid_t_name is not None:
-                        # Use the A*-selected transition directly
+                        sid_transition_result = (astar_sid_t_name, None, sid_boundary)
                         for t_name, t_pts in sid_proc.transitions:
                             if t_name == astar_sid_t_name:
                                 sid_transition_pts = list(t_pts)
@@ -173,7 +184,6 @@ class RouteEngine:
                         else:
                             sid_transition_pts = None
                     else:
-                        # No transition selected by A*; fall back to bearing-based
                         sid_transition_result = self._select_sid_transition(
                             sid_proc, sid_conn, star_conn, star_conn.airport_node
                         )
@@ -181,6 +191,12 @@ class RouteEngine:
                             _, sid_transition_pts, sid_boundary = sid_transition_result
                         else:
                             sid_transition_pts = None
+
+            # Check convergence
+            curr_sid_t = sid_transition_result[0] if sid_transition_result else None
+            if (sid_proc.name == prev_sid_name and curr_sid_t == prev_sid_t and
+                star_proc.name == prev_star_name and star_t_name == prev_star_t):
+                break
 
         if star_proc is None or star_boundary is None or sid_boundary is None:
             return build_route_info(
@@ -192,12 +208,21 @@ class RouteEngine:
         # Phase 5: Airway A* (zero-copy, pure airway graph).
         # Forbid passing through SID/STAR procedure nodes to prevent cycles
         # where the airway revisits a procedure waypoint.
-        def _build_forbidden(sid_p, star_p):
+        def _build_forbidden(sid_p, star_p, sid_t_pts=None):
             forbidden = set()
             for pt in sid_p.points:
                 node = self._find_node_for_point(pt, sid_conn, star_conn)
                 if node is not None:
                     forbidden.add(node.iid)
+            # Also forbid SID transition waypoints (except the boundary which
+            # is the airway start) so the airway cannot backtrack through
+            # transition nodes (e.g. LAXX1 OCN transition then airway V165
+            # returning to DANAH).
+            if sid_t_pts is not None:
+                for pt in sid_t_pts:
+                    node = self._find_node_for_point(pt, sid_conn, star_conn)
+                    if node is not None and node.iid != sid_boundary.iid:
+                        forbidden.add(node.iid)
             for pt in star_p.points:
                 node = self._find_node_for_point(pt, sid_conn, star_conn)
                 if node is not None:
@@ -205,7 +230,7 @@ class RouteEngine:
             forbidden.discard(sid_boundary.iid)
             return forbidden
 
-        forbidden_iids = _build_forbidden(sid_proc, star_proc)
+        forbidden_iids = _build_forbidden(sid_proc, star_proc, sid_transition_pts)
         forbidden_iids.discard(star_boundary.iid)
 
         airway_route = self._astar_airway(
@@ -224,7 +249,7 @@ class RouteEngine:
                 fallback_candidates, sid_boundary.iid, is_sid=False
             )
             if fallback_proc is not None and fallback_boundary is not None:
-                forbidden_iids = _build_forbidden(sid_proc, fallback_proc)
+                forbidden_iids = _build_forbidden(sid_proc, fallback_proc, sid_transition_pts)
                 forbidden_iids.discard(fallback_boundary.iid)
                 airway_route = self._astar_airway(
                     sid_boundary.iid, fallback_boundary.iid, forbidden_iids
@@ -604,19 +629,7 @@ class RouteEngine:
                     next_node.px, next_node.py,
                 )
 
-                # Tie-breaking: when distances are equal, prefer switching
-                # to a different airway.  This prevents a single airway
-                # from "hijacking" a physical path that is also served by
-                # the next airway in the route (e.g. V621 continuing from
-                # MEBKI to CONGA when V631 is the correct onward airway).
-                prev = prev_edge[edge.nend]
-                prev_name = prev[1] if prev is not None else ""
-                curr_name = prev_edge[curr][1] if prev_edge[curr] is not None else ""
-                if nd < dists[edge.nend] or (
-                    nd == dists[edge.nend]
-                    and edge.name != curr_name
-                    and prev_name == curr_name
-                ):
+                if nd < dists[edge.nend]:
                     dists[edge.nend] = nd
                     prev_edge[edge.nend] = (curr, edge.name)
                     h = heuristic_km(next_node.px, next_node.py, end_lat, end_lon)
@@ -799,6 +812,14 @@ class RouteEngine:
             boundary_iids = {b.iid for _, b, _, _ in candidates}
             filtered = []
             for proc, boundary, key, t_name in candidates:
+                # Transition candidates are always valid airway entry points
+                # (the transition's network-side exit).  Skipping them here
+                # caused GARDY4(BEALE) to be discarded because BEALE->LAS
+                # is a normal J146 leg and LAS is another candidate.
+                if t_name is not None:
+                    filtered.append((proc, boundary, key, t_name))
+                    continue
+
                 skip = False
                 for edge in boundary.next_list:
                     if edge.nend in boundary_iids and edge.nend != boundary.iid:
@@ -884,7 +905,26 @@ class RouteEngine:
                 dist = self._astar_airway_distance(other_boundary_iid, boundary.iid)
 
             if dist is not None and conn is not None:
-                proc_dist = self._calc_procedure_distance(proc, conn, t_name)
+                if is_sid:
+                    # SID: use actual procedure+transition distance.
+                    # GC distance from airport to boundary is too optimistic and
+                    # can pick a short transition whose airway later backtracks
+                    # through transition waypoints (e.g. LAXX1 OCN transition
+                    # then airway V165 returns to DANAH).
+                    proc_dist = self._calc_procedure_distance(
+                        proc, conn, transition_name=t_name
+                    )
+                else:
+                    # STAR: use GC distance from boundary to airport.
+                    # _calc_procedure_distance sums every waypoint leg, which
+                    # overestimates curved STARs (e.g. HAWKZ8 LKV transition
+                    # sums to 325 nm but the compressed route distance is
+                    # 308 nm).  GC aligns with _calc_route_distance which
+                    # compresses consecutive STAR nodes into a single segment.
+                    proc_dist = great_circle_distance_km(
+                        boundary.px, boundary.py,
+                        conn.airport_node.px, conn.airport_node.py,
+                    )
                 dist += proc_dist
 
             if dist is not None and dist < best_dist:
