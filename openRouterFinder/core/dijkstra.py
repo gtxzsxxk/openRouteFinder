@@ -237,6 +237,11 @@ class RouteEngine:
             sid_boundary.iid, star_boundary.iid, forbidden_iids
         )
 
+        if airway_route is not None:
+            airway_route = self._reassign_airways(
+                airway_route, sid_boundary.iid
+            )
+
         # Fallback: if filtered STAR is unreachable via pure airway graph,
         # try auto-selected STAR (matches old mixed-graph behaviour where
         # all procedures were implicitly available).
@@ -582,7 +587,7 @@ class RouteEngine:
         end_iid: int,
         forbidden_iids: Optional[set] = None,
     ) -> Optional[List[Tuple[str, str, int]]]:
-        """Zero-copy A* on the pure airway graph (node.next_list only).
+        """Zero-copy Dijkstra on the pure airway graph (node.next_list only).
 
         Returns route_list of (edge_name, node_name, node_iid) or None.
         """
@@ -595,15 +600,14 @@ class RouteEngine:
         if start_node is None or end_node is None:
             return None
 
-        end_lat, end_lon = end_node.px, end_node.py
         dists[start_iid] = 0.0
 
         queue = []
-        # Use (f_score, g_score, node_iid) for tie-breaking consistency with Dijkstra
+        # Use (dist, dist, node_iid) for deterministic tie-breaking
         heapq.heappush(queue, (0.0, 0.0, start_iid))
 
         while queue:
-            f_score, g_score, curr = heapq.heappop(queue)
+            _dist, g_score, curr = heapq.heappop(queue)
 
             if curr == end_iid:
                 break
@@ -632,8 +636,7 @@ class RouteEngine:
                 if nd < dists[edge.nend]:
                     dists[edge.nend] = nd
                     prev_edge[edge.nend] = (curr, edge.name)
-                    h = heuristic_km(next_node.px, next_node.py, end_lat, end_lon)
-                    heapq.heappush(queue, (nd + h, nd, edge.nend))
+                    heapq.heappush(queue, (nd, nd, edge.nend))
 
         if dists[end_iid] == INF:
             return None
@@ -654,7 +657,7 @@ class RouteEngine:
         end_iid: int,
         forbidden_iids: Optional[set] = None,
     ) -> Optional[float]:
-        """Run A* and return only the total distance (no path reconstruction)."""
+        """Run Dijkstra and return only the total distance (no path reconstruction)."""
         INF = float('inf')
         dists = [INF] * self.num_nodes
         prev_edge: List[Optional[Tuple[int, str]]] = [None] * self.num_nodes
@@ -700,8 +703,7 @@ class RouteEngine:
                 if nd < dists[edge.nend]:
                     dists[edge.nend] = nd
                     prev_edge[edge.nend] = (curr, edge.name)
-                    h = heuristic_km(next_node.px, next_node.py, end_lat, end_lon)
-                    heapq.heappush(queue, (nd + h, nd, edge.nend))
+                    heapq.heappush(queue, (nd, nd, edge.nend))
 
         if dists[end_iid] == INF:
             return None
@@ -1176,28 +1178,19 @@ class RouteEngine:
     ) -> float:
         """Calculate total distance in km using compressed route nodes.
 
-        Airways contain many intermediate waypoints.  Summing every small
-        great-circle leg yields a larger total than the published airway
-        distance (which is effectively the direct great-circle between the
-        airway-change points).  To align with standard flight-planning
-        tools such as rfinder, we compress consecutive nodes on the same
-        airway — exactly the same logic as _sort_route — and then sum
-        only the direct great-circle distances between the compressed
-        points.
+        Unlike _compress_route (used for route-string display) which drops
+        intermediate airway nodes, the distance version keeps both the entry
+        and exit of each airway segment.  This ensures the summed great-circle
+        legs follow the actual airway path rather than taking a shortcut
+        between arbitrary waypoints, matching standard flight-planning tools.
         """
-        # Compress consecutive nodes on same airway (same logic as _sort_route)
-        compressed: List[Tuple[str, str, int]] = []
-        for item in route_list:
-            if compressed and compressed[-1][0] == item[0]:
-                compressed[-1] = item
-                continue
-            compressed.append(item)
+        compressed = self._compress_route_for_distance(route_list)
 
         dist_km = 0.0
         prev_node = sid_conn.airport_node
         for _, _, iid in compressed:
             node = self._get_node(iid, sid_conn, star_conn)
-            if node is not None:
+            if node is not None and node.iid != prev_node.iid:
                 dist_km += great_circle_distance_km(
                     prev_node.px, prev_node.py,
                     node.px, node.py,
@@ -1279,16 +1272,139 @@ class RouteEngine:
                 return node
         return None
 
+    def _reassign_airways(
+        self,
+        airway_route: List[Tuple[str, str, int]],
+        start_iid: int,
+    ) -> List[Tuple[str, str, int]]:
+        """Reassign airway names to prefer airway switching at waypoints.
+
+        When two consecutive waypoints are connected by multiple airways,
+        prefer the airway that differs from the previous segment, but only
+        when A* itself has switched airways.  If A* stayed on the same
+        airway, keep that name so intermediate nodes do not get fragmented
+        into spurious airway changes.
+        """
+        if not airway_route:
+            return []
+
+        result: List[Tuple[str, str, int]] = []
+        prev_iid = start_iid
+
+        for orig_edge_name, node_name, curr_iid in airway_route:
+            prev_node = self.node_list[prev_iid]
+            airways: set[str] = set()
+            for edge in prev_node.next_list:
+                if edge.nend == curr_iid:
+                    airways.add(edge.name)
+
+            if len(airways) == 1:
+                best_airway = airways.pop()
+            elif len(airways) > 1:
+                prev_airway = result[-1][0] if result else None
+                # If A* itself stayed on this airway, honour its choice so
+                # intermediate nodes inside a long airway are not split into
+                # spurious airway changes (e.g. J146 -> J60 -> J146 ...).
+                if orig_edge_name in airways:
+                    best_airway = orig_edge_name
+                elif prev_airway is not None:
+                    different = {a for a in airways if a != prev_airway}
+                    if different:
+                        best_airway = min(different)
+                    else:
+                        best_airway = min(airways)
+                else:
+                    best_airway = min(airways)
+            else:
+                # No airway found (should not happen); keep original
+                best_airway = orig_edge_name
+
+            result.append((best_airway, node_name, curr_iid))
+            prev_iid = curr_iid
+
+        return result
+
+    def _compress_route(
+        self, route_list: List[Tuple[str, str, int]]
+    ) -> List[Tuple[str, str, int]]:
+        """Compress airway nodes to match rfinder SortRoute conventions.
+
+        Each group (SID, airway, STAR, or bridge) keeps its *last* node,
+        matching the original SortRoute behaviour where consecutive entries
+        on the same airway replace the previous one.
+        """
+        compressed: List[Tuple[str, str, int]] = []
+        current_group: Optional[str] = None
+        group_nodes: List[Tuple[str, str, int]] = []
+
+        for item in route_list:
+            edge_name = item[0]
+
+            if edge_name != current_group:
+                # Flush previous group: keep last node
+                if group_nodes:
+                    compressed.append(group_nodes[-1])
+                    group_nodes = []
+                current_group = edge_name
+
+            group_nodes.append(item)
+
+        # Flush final group: keep last node
+        if group_nodes:
+            compressed.append(group_nodes[-1])
+
+        return compressed
+
+    def _compress_route_for_distance(
+        self, route_list: List[Tuple[str, str, int]]
+    ) -> List[Tuple[str, str, int]]:
+        """Compress route for distance calculation.
+
+        Unlike _compress_route which drops intermediate airway nodes for
+        route-string display, this keeps both the entry and exit of each
+        airway segment so the summed great-circle legs match the actual
+        airway path.
+        """
+        compressed: List[Tuple[str, str, int]] = []
+        current_group: Optional[str] = None
+        group_nodes: List[Tuple[str, str, int]] = []
+
+        for item in route_list:
+            edge_name = item[0]
+            if edge_name != current_group:
+                if group_nodes:
+                    if current_group in ("SID", "STAR", ""):
+                        compressed.append(group_nodes[-1])
+                    else:
+                        # airway: keep entry and exit
+                        compressed.append(group_nodes[0])
+                        if len(group_nodes) > 1:
+                            compressed.append(group_nodes[-1])
+                    group_nodes = []
+                current_group = edge_name
+            group_nodes.append(item)
+
+        if group_nodes:
+            if current_group in ("SID", "STAR", ""):
+                compressed.append(group_nodes[-1])
+            else:
+                compressed.append(group_nodes[0])
+                if len(group_nodes) > 1:
+                    compressed.append(group_nodes[-1])
+
+        # Remove consecutive duplicates by iid
+        deduped: List[Tuple[str, str, int]] = []
+        for item in compressed:
+            if not deduped or deduped[-1][2] != item[2]:
+                deduped.append(item)
+
+        return deduped
+
     def _sort_route(self, orig: str, route_list: List[Tuple[str, str, int]]) -> str:
         """Merge consecutive edges on same airway."""
-        stack = []
-        for item in route_list:
-            if stack and stack[-1][0] == item[0]:
-                stack[-1] = item
-                continue
-            stack.append(item)
+        compressed = self._compress_route(route_list)
         parts = [orig]
-        for edge_name, node_name, _ in stack:
+        for edge_name, node_name, _ in compressed:
             parts.extend([edge_name, node_name])
         return " ".join(parts)
 
