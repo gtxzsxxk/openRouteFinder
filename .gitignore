@@ -10,3 +10,6 @@ webFinder/dist/
 .superpowers/
 .vscode/
 
+*.zip
+.ruff_cache
+Navdata

@@ -150,8 +150,8 @@ def _add_network_bridges(self, conn: AirportConnection, proc_type: int)
 
 - **SID**: for each unique exit node, if it has zero outgoing edges, find the nearest navdata node with `next_list > 0` and add `exit -> connected_node`
 - **STAR**: for each unique entry node, if it has zero outgoing edges, add `connected_node -> entry`
-- Bridges are added to `internal_edges` and participate in A* adjacency like any other edge
-- Distance is calculated on-the-fly from coordinates; no explicit distance field on the edge
+- Bridges are added to `bridge_edges` (not `internal_edges`) so they do not pollute the pooled procedure graph used for integrity checks
+- Bridge edges carry precomputed `dist` like all other edges
 
 ## Continuous Path Guarantee
 

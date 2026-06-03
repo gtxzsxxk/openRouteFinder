@@ -46,10 +46,15 @@ PYTHONPATH=. DISABLE_CAPTCHA=true pytest tests/test_integration_routes.py -v
 
 ### Linting
 ```bash
+ruff check               # lint Python backend
+ruff check --fix         # auto-fix Python issues
 npm run lint             # lint frontend (cd webFinder && npm run lint)
 ```
 
-There is no Python linter configured in the project.
+Pre-commit hooks are configured. Run before committing:
+```bash
+pre-commit run --all-files
+```
 
 ## Documentation Index
 
@@ -73,8 +78,8 @@ Detailed documentation lives in `docs/claude/`. Read the relevant file before mo
 Key modules:
 
 - `api.py` — FastAPI app with all endpoints (`/api/route`, `/api/airports`, `/api/airports/{icao}/procedures`, `/api/admin/navdata/upload`, etc.). Route calculation runs in a `ThreadPoolExecutor` (4 workers) guarded by an `asyncio.Semaphore(8)`.
-- `core/dijkstra.py` — `RouteEngine` implements A* search with temporary SID/STAR connector injection.
-- `core/graph.py` — Immutable `Node`/`Edge` dataclasses and great-circle distance utilities.
+- `core/dijkstra.py` — `RouteEngine` implements a **single mixed-graph A\*** search: temporary SID/STAR nodes and edges are injected into the global airway graph, then one A* search runs over the combined graph. Uses admissible great-circle heuristic, precomputed `edge.dist`, candidate pruning (top 50), and cycle prevention.
+- `core/graph.py` — Immutable `Node`/`Edge` dataclasses and great-circle distance utilities. `Edge` carries a precomputed `dist` field.
 - `core/airport.py` — `FlatbuffersAirportConnector` builds temporary nodes and edges for SID/STAR procedures from FlatBuffers navdata. Also contains the legacy `AirportConnector` for pickle-based data.
 - `core/data_loader.py` — `NavGraph` singleton (legacy pickle-based) and `search_route()` orchestration. Also holds `get_nav_data()` / `get_nav_registry()` accessors.
 - `core/storage/registry.py` — `NavDataRegistry` manages multiple navdata cycles (thread-safe, hot reload).
@@ -148,6 +153,10 @@ All built procedures should satisfy these invariants (enforced by `tests/test_pr
 - **No teleportation**: Consecutive waypoints in a procedure should be geographically reasonable (domestic ≤ ~100 nm, international ≤ ~300 nm per leg).
 - **Runway "ALL" must have a path**: Procedures with `runway="ALL"` must contain more than one point.
 - **No hub nodes in pooled internal_edges**: Every edge in `internal_edges` must belong to at least one procedure's consecutive point pair. Bridge edges for isolated nodes belong in `bridge_edges`, not `internal_edges`, so they do not pollute the pooled procedure graph.
+
+### Test Code Modification Policy
+
+**No test code may be modified without explicit user authorization.** This includes adding `pytest.skip`, `xfail`, reducing test coverage, weakening assertions, or any other change that makes a failing test pass without fixing the underlying code or data-pipeline bug. If a test fails, find and fix the root cause in the production code.
 
 ### ZBAA 36L Northbound SIDs
 

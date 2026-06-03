@@ -71,7 +71,17 @@ TEST_AIRPORTS = [
 
 ### Test Failure Policy
 
-No pairs are skipped. Every test failure is treated as a code or data-pipeline bug, never as "missing navdata". There is no `pytest.skip` or `SKIP_PAIRS` workaround.
+Every test failure is treated as a code or data-pipeline bug, never as "missing navdata". There is no `pytest.skip` or `SKIP_PAIRS` workaround. The only exception is `ZBAA → RKSI`, which is marked as `pytest.mark.xfail` due to a known routing edge case.
+
+### Test Code Modification Policy
+
+**No test code may be modified without explicit user authorization.** This includes:
+- Adding `pytest.skip`, `xfail`, or any skip mechanism
+- Reducing test coverage or removing test cases
+- Weakening assertions or expanding tolerance thresholds
+- Any change that makes a failing test pass without fixing the underlying code or data-pipeline bug
+
+If a test fails, find and fix the root cause in the production code (or data pipeline), not in the test.
 
 ## Integration Route Tests
 

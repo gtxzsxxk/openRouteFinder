@@ -113,21 +113,34 @@ class RouteEngine:
                star_entry: Optional[str] = None) -> str  # JSON string
 ```
 
-### A* Search Logic
+### A* Search Logic (Single Mixed-Graph A*)
 
-1. Start node = SID airport node (`iid=-1`), end node = STAR airport node (`iid=-2`)
-2. Priority queue ordered by `f_score = g_score + heuristic`
-3. Heuristic = great-circle distance to destination (admissible)
-4. Edge weight = great-circle distance, with **0.5x multiplier** for SID/STAR edges to prefer procedures
-5. Tracks `dists` dict for best-known distances
+`RouteEngine.search()` builds a **single mixed graph** per request: all airway nodes/edges plus the temporary SID/STAR nodes and edges from `FlatbuffersAirportConnector`, then runs one A* search over the combined graph.
+
+1. **Candidate selection** — For each available SID/STAR procedure, calculate the boundary point's great-circle distance to the opposite airport. Keep the top 50 candidates (sorted by distance) and prune the rest. This is a simple distance-based filter, not algorithmic pruning; 50 candidates cover all standard routes without losing optimality.
+2. **Start/end nodes** — SID airport node (`iid=-1`) and STAR airport node (`iid=-2`)
+3. **Priority queue** — Ordered by `f_score = g_score + heuristic`
+4. **Heuristic** — Great-circle distance to STAR airport node (admissible; satisfies triangle inequality on sphere). Inlined into the A* hot loop to avoid function call overhead.
+5. **Edge weight** — Uses precomputed `edge.dist` (great-circle distance in km) with a **0.5× multiplier** for SID/STAR edges to prefer procedures over raw airways.
+6. **Forbidden-node filtering** — Airway nodes that share names with SID/STAR procedure points (excluding STAR boundary points) are added to a `forbidden_names` set. A* skips edges whose target node name is in this set, preventing the airway from revisiting procedure waypoints.
+7. **T-route filtering** — Edges on T-routes (`T123`) are skipped when the current node has at least one non-T outgoing edge. This is evaluated via a precomputed `_node_has_non_t` bitmask (O(1) lookup, no string scanning per edge).
+8. **Cycle removal** — After backtracking the optimal path, duplicate airway node IIDs are removed to prevent cycles where the airway re-enters the same node.
+9. **Tracks `dists` dict** for best-known distances.
 
 ### SID/STAR Connector Injection
 
-`_build_adjacency()` copies the entire shared network into a new dict per request, then:
-- Adds temp nodes from `sid_conn.temp_nodes` and `star_conn.temp_nodes`
-- Injects SID edges: airport → connections, internal edges, transition edges
-- Injects STAR edges: connections → airport, internal edges, transition edges
+`_build_adjacency()` builds a per-request adjacency dict that merges:
+- The global airway network (read-only, shared)
+- SID temp nodes and edges: airport → boundary, internal edges, transition edges
+- STAR temp nodes and edges: boundary → airport, internal edges, transition edges
 - Temp nodes use negative IIDs (starting at -3)
+
+Temp node boundary points are mapped to their corresponding airway nodes by **name** (not IID), avoiding negative-indexing bugs when the temp node's negative IID is used as a list index.
+
+### Pseudo-Edge Weights
+
+- **SID pseudo-edge** (airport → boundary): weight = `_calc_procedure_distance(proc) + calc_transition_distance(trans)` — follows the actual procedure geometry.
+- **STAR pseudo-edge** (boundary → airport): weight = `great_circle_distance_km(boundary, airport)` — uses straight-line distance because STAR paths are often curved and `_calc_procedure_distance` would overestimate.
 
 ### Transition Detection
 
@@ -135,7 +148,7 @@ class RouteEngine:
 
 ### Output
 
-Returns a **JSON string** (not dict) for historical compatibility. Caller in `api.py` parses it with `json.loads()`.
+Returns a **JSON string** via `orjson` (not stdlib `json`) for faster serialization. Caller in `api.py` parses it with `json.loads()`.
 
 ---
 
@@ -148,6 +161,7 @@ class Edge:
     nend: int       # target IID
     name: str       # airway name (or "SID"/"STAR")
     color: Tuple[int, int, int]  # RGB
+    dist: float = 0.0   # precomputed great-circle distance (km)
 
 @dataclass(slots=True)
 class Node:
@@ -171,6 +185,7 @@ class SearchingNode:
 
 - `EARTH_RADIUS = 6378.137` km (WGS-84)
 - `great_circle_distance_km()` uses Haversine formula
+- `Edge.dist` is precomputed at navdata load time to avoid trigonometric recalculation during every A* edge relaxation
 
 ---
 
