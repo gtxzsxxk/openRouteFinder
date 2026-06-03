@@ -54,6 +54,7 @@ class Edge:
     nfrom: int  # source node IID
     nend: int   # target node IID
     name: str   # airway name
+    dist: float = 0.0  # precomputed great-circle distance (km)
     color: Tuple[int, int, int] = (0, 0, 0)
 
 
