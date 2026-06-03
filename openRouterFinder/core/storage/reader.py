@@ -1,12 +1,10 @@
 """mmap-based FlatBuffers reader for NavData files."""
 
-import io
 import mmap
 import os
 import sys
 import tempfile
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 import zstandard as zstd
 
@@ -15,12 +13,10 @@ _storage_dir = Path(__file__).parent
 if str(_storage_dir) not in sys.path:
     sys.path.insert(0, str(_storage_dir))
 
-from openRouterFinder.core.storage.NavData.NavData import NavData
-from openRouterFinder.core.storage.NavData.Node import Node as FBNode
-from openRouterFinder.core.storage.NavData.Edge import Edge as FBEdge
+from openRouterFinder.core.graph import Edge as GraphEdge
+from openRouterFinder.core.graph import Node as GraphNode
 from openRouterFinder.core.storage.NavData.Airport import Airport as FBAirport
-from openRouterFinder.core.storage.NavData.AirwayLevel import AirwayLevel
-from openRouterFinder.core.graph import Node as GraphNode, Edge as GraphEdge
+from openRouterFinder.core.storage.NavData.NavData import NavData
 
 
 class MmappedNavData:
@@ -32,7 +28,7 @@ class MmappedNavData:
 
     def __init__(self, fb_path: Path):
         self._path = fb_path
-        self._tmp_path: Optional[Path] = None
+        self._tmp_path: Path | None = None
 
         actual_path = fb_path
         if str(fb_path).endswith(".fb.zst"):
@@ -40,9 +36,8 @@ class MmappedNavData:
             tmp_fd, tmp_name = tempfile.mkstemp(suffix=".fb", prefix="navdata_")
             try:
                 dctx = zstd.ZstdDecompressor()
-                with open(fb_path, "rb") as zst_in:
-                    with dctx.stream_reader(zst_in) as reader:
-                        while True:
+                with open(fb_path, "rb") as zst_in, dctx.stream_reader(zst_in) as reader:
+                    while True:
                             chunk = reader.read(1024 * 1024)
                             if not chunk:
                                 break
@@ -52,15 +47,15 @@ class MmappedNavData:
             actual_path = Path(tmp_name)
             self._tmp_path = actual_path
 
-        self._file = open(actual_path, "rb")
+        self._file = open(actual_path, "rb")  # noqa: SIM115
         self._mmap = mmap.mmap(self._file.fileno(), 0, access=mmap.ACCESS_READ)
         self._nav = NavData.GetRootAs(self._mmap, 0)
 
         # Build O(1) lookups
-        self._node_index: Dict[tuple, GraphNode] = {}
-        self._node_by_iid: Dict[int, GraphNode] = {}
-        self._airport_by_icao: Dict[str, int] = {}  # icao -> index in _nav.Airports()
-        self._navaid_by_ident: Dict[str, List[int]] = {}
+        self._node_index: dict[tuple, GraphNode] = {}
+        self._node_by_iid: dict[int, GraphNode] = {}
+        self._airport_by_icao: dict[str, int] = {}  # icao -> index in _nav.Airports()
+        self._navaid_by_ident: dict[str, list[int]] = {}
 
         self._build_indices()
 
@@ -90,6 +85,16 @@ class MmappedNavData:
                     name=name,
                 )
                 self._node_by_iid[nfrom].next_list.append(ge)
+
+        # Build node_list array once and cache it
+        if self._node_by_iid:
+            max_iid = max(self._node_by_iid.keys())
+            arr: list[GraphNode | None] = [None] * (max_iid + 1)
+            for iid, node in self._node_by_iid.items():
+                arr[iid] = node
+            self._node_list_cache = tuple(arr)
+        else:
+            self._node_list_cache = ()
 
         # Airport index by ICAO
         for i in range(self._nav.AirportsLength()):
@@ -156,7 +161,7 @@ class MmappedNavData:
     def num_airport_comms(self) -> int:
         return self._nav.AirportCommsLength()
 
-    def get_airport(self, icao: str) -> Optional[FBAirport]:
+    def get_airport(self, icao: str) -> FBAirport | None:
         """Get airport by ICAO code."""
         icao = icao.upper()
         idx = self._airport_by_icao.get(icao)
@@ -164,36 +169,28 @@ class MmappedNavData:
             return self._nav.Airports(idx)
         return None
 
-    def list_airport_icaos(self) -> List[str]:
+    def list_airport_icaos(self) -> list[str]:
         """Return sorted list of all airport ICAO codes."""
         return sorted(self._airport_by_icao.keys())
 
-    def get_navaids(self, ident: str) -> List:
+    def get_navaids(self, ident: str) -> list:
         """Get navaid(s) by ident."""
         indices = self._navaid_by_ident.get(ident, [])
         return [self._nav.Navaids(i) for i in indices]
 
-    def find_node(self, name: str, lat: float, lon: float) -> Optional[GraphNode]:
+    def find_node(self, name: str, lat: float, lon: float) -> GraphNode | None:
         key = (name, round(lat, 6), round(lon, 6))
         return self._node_index.get(key)
 
-    def find_nodes_by_name(self, name: str) -> List[GraphNode]:
+    def find_nodes_by_name(self, name: str) -> list[GraphNode]:
         return [n for n in self._node_by_iid.values() if n.name == name]
 
     @property
-    def node_list(self) -> Tuple[Optional[GraphNode], ...]:
-        # Build array where node_list[iid] returns the node with that iid.
-        # Handles both 0-based (new builds) and 1-based (legacy) iids.
-        if not self._node_by_iid:
-            return ()
-        max_iid = max(self._node_by_iid.keys())
-        arr: List[Optional[GraphNode]] = [None] * (max_iid + 1)
-        for iid, node in self._node_by_iid.items():
-            arr[iid] = node
-        return tuple(arr)
+    def node_list(self) -> tuple[GraphNode | None, ...]:
+        return self._node_list_cache
 
     @property
-    def node_index(self) -> Dict[tuple, GraphNode]:
+    def node_index(self) -> dict[tuple, GraphNode]:
         return self._node_index
 
     def close(self):
@@ -205,5 +202,5 @@ class MmappedNavData:
     def __enter__(self):
         return self
 
-    def __exit__(self, *args):
+    def __exit__(self, *args: object) -> None:
         self.close()

@@ -37,6 +37,8 @@ export function useMap(
   const map = ref<any>(null)
   const isMapReady = ref(false)
   const isUpdating = ref(false)
+  const pendingUpdate = ref(false)
+  const updateTimer = ref<ReturnType<typeof setTimeout> | null>(null)
   const currentStyle = ref(isDarkMode() ? STYLE_DARK : STYLE_LIGHT)
 
   function getColors() {
@@ -109,18 +111,46 @@ export function useMap(
   }
 
   function safeRemoveLayer(m: any, id: string) {
-    try {
-      if (m.getLayer(id)) m.removeLayer(id)
-    } catch {
-      // ignore
+    if (m.getLayer(id)) {
+      try {
+        m.removeLayer(id)
+      } catch {
+        // ignore
+      }
     }
   }
 
   function safeRemoveSource(m: any, id: string) {
-    try {
-      if (m.getSource(id)) m.removeSource(id)
-    } catch {
-      // ignore
+    if (m.getSource(id)) {
+      try {
+        m.removeSource(id)
+      } catch {
+        // ignore: source may still be referenced
+      }
+    }
+  }
+
+  // Explicit list of all application layer and source IDs.
+  // Used to ensure complete cleanup on every update.
+  const APP_LAYERS = [
+    'route-glow', 'route-line', 'route-segment-labels', 'all-points', 'all-labels',
+    'sid-line', 'sid-labels', 'sid-active-runway',
+    'star-line', 'star-labels', 'star-active-runway',
+    'runways', 'runway-labels', 'runway-ends', 'runway-end-labels',
+  ]
+  const APP_SOURCES = [
+    'route', 'route-segments', 'all-points',
+    'sid', 'sid-points', 'star', 'star-points',
+    'runways', 'runway-ends',
+    'sid-active-runway', 'star-active-runway',
+  ]
+
+  function _clearMapLayers(m: any) {
+    for (const id of APP_LAYERS) {
+      safeRemoveLayer(m, id)
+    }
+    for (const id of APP_SOURCES) {
+      safeRemoveSource(m, id)
     }
   }
 
@@ -186,32 +216,27 @@ export function useMap(
 
   function updateMap() {
     if (!map.value || !isMapReady.value || !routeResult.value) return
-    if (isUpdating.value) return
-    isUpdating.value = true
+    if (isUpdating.value) {
+      pendingUpdate.value = true
+      return
+    }
 
-    try {
-      const m = map.value
-      const nodes = routeResult.value.nodes
-      if (nodes.length === 0) return
+    do {
+      pendingUpdate.value = false
+      isUpdating.value = true
 
-      const c = getColors()
+      try {
+        const m = map.value
+        const nodes = routeResult.value.nodes
+          if (nodes.length === 0) {
+          // Clear everything even when there are no nodes
+          _clearMapLayers(m)
+          return
+        }
 
-      const allLayers = [
-        'route-glow', 'route-line', 'route-segment-labels', 'all-points', 'all-labels',
-        'sid-line', 'sid-labels',
-        'star-line', 'star-labels',
-        'runways', 'runway-labels', 'runway-ends', 'runway-end-labels',
-        'sid-active-runway', 'star-active-runway',
-      ]
-      const allSources = [
-        'route', 'route-segments', 'all-points',
-        'sid', 'sid-points', 'star', 'star-points',
-        'runways', 'runway-ends',
-        'sid-active-runway', 'star-active-runway',
-      ]
+        const c = getColors()
 
-      allLayers.forEach(id => safeRemoveLayer(m, id))
-      allSources.forEach(id => safeRemoveSource(m, id))
+        _clearMapLayers(m)
 
       const origRunways = routeResult.value.origRunways || []
       const destRunways = routeResult.value.destRunways || []
@@ -323,19 +348,42 @@ export function useMap(
         })
       }
 
-      const routeFeatures = nodes.map((n, i) => ({
-        type: 'Feature' as const,
-        geometry: { type: 'Point' as const, coordinates: [n.lon, n.lat] },
-        properties: {
-          name: n.name,
-          isEndpoint: i === 0 || i === nodes.length - 1,
-          isSidStar: false,
-        },
-      }))
+      // Build route coordinates excluding SID/STAR procedure points.
+      // SID/STAR segments are drawn separately as dashed lines.
+      // sidRouteNodeName / starRouteNodeName are the actual nodes in the
+      // route that belong to the procedure; they may differ from the
+      // procedure key (sidNodeName / starNodeName) when A* routes through
+      // the interior of a procedure rather than its anchor point.
+      const sidRouteName = routeResult.value?.sidRouteNodeName || routeResult.value?.sidNodeName
+      const starRouteName = routeResult.value?.starRouteNodeName || routeResult.value?.starNodeName
+      const sidIdx = nodes.findIndex(n => n.name === sidRouteName)
+      const starIdx = nodes.findIndex(n => n.name === starRouteName)
 
-      const routeCoords = nodes.length > 2
-        ? nodes.slice(1, -1).map(n => [n.lon, n.lat])
-        : []
+      // Route point features: exclude SID/STAR internal points so the map only
+      // shows the user-selected procedure points, not the A* route's internal ones.
+      const routeFeatures = nodes
+        .map((n, i) => ({
+          type: 'Feature' as const,
+          geometry: { type: 'Point' as const, coordinates: [n.lon, n.lat] },
+          properties: {
+            name: n.name,
+            isEndpoint: i === 0 || i === nodes.length - 1,
+            isSidStar: false,
+          },
+        }))
+        .filter((_f, i) => {
+          // Keep endpoints (airports) always
+          if (i === 0 || i === nodes.length - 1) return true
+          // Exclude SID internal points (before sidNodeName)
+          if (sidIdx >= 0 && i < sidIdx) return false
+          // Exclude STAR internal points (after starNodeName)
+          if (starIdx >= 0 && i > starIdx) return false
+          return true
+        })
+
+      const routeCoords = routeFeatures
+        .filter(f => !f.properties.isEndpoint)
+        .map(f => f.geometry.coordinates)
 
       if (routeCoords.length > 0) {
         m.addSource('route', {
@@ -417,18 +465,27 @@ export function useMap(
           ? [sidEnd.lon, sidEnd.lat]
           : [nodes[0].lon, nodes[0].lat]
 
-        const sidRawCoords: number[][] = [sidStart]
+        let sidRawCoords: number[][] = [sidStart]
 
         // Main SID points (airport->network order)
         sidRawCoords.push(...sidPoints.map(p => [p.lon, p.lat]))
 
-        // Transition segment points (append after main points, skipping duplicates)
+        // Transition segment points
         if (selectedSIDTransition.value) {
           const transPoints = selectedSIDTransition.value.points
           const mainNames = new Set(sidPoints.map(p => p.name))
-          for (const tp of transPoints) {
-            if (!mainNames.has(tp.name)) {
-              sidRawCoords.push([tp.lon, tp.lat])
+          // For transition-only procedures, the transition's first point is not
+          // in the main points (each option is a full runway->network path).
+          // In that case, replace the main path with the transition path.
+          if (transPoints.length > 0 && !mainNames.has(transPoints[0].name)) {
+            sidRawCoords = [sidStart]
+            sidRawCoords.push(...transPoints.map(p => [p.lon, p.lat]))
+          } else {
+            // Normal case: append non-overlapping transition points after main points
+            for (const tp of transPoints) {
+              if (!mainNames.has(tp.name)) {
+                sidRawCoords.push([tp.lon, tp.lat])
+              }
             }
           }
         }
@@ -455,26 +512,22 @@ export function useMap(
           },
         })
 
-        sidFeatures = sidPoints.map(p => ({
+        // Determine which points to display: if transition replaces the main
+        // path, show transition points instead of main points.
+        let displayedSidPoints = sidPoints
+        if (selectedSIDTransition.value) {
+          const transPoints = selectedSIDTransition.value.points
+          const mainNames = new Set(sidPoints.map(p => p.name))
+          if (transPoints.length > 0 && !mainNames.has(transPoints[0].name)) {
+            displayedSidPoints = transPoints
+          }
+        }
+
+        sidFeatures = displayedSidPoints.map(p => ({
           type: 'Feature' as const,
           geometry: { type: 'Point' as const, coordinates: [p.lon, p.lat] },
           properties: { name: p.name, isEndpoint: false, isSidStar: true, kind: 'SID' },
         }))
-
-        // Add transition points as features
-        if (selectedSIDTransition.value) {
-          const transPoints = selectedSIDTransition.value.points
-          const mainNames = new Set(sidPoints.map(p => p.name))
-          for (const tp of transPoints) {
-            if (!mainNames.has(tp.name)) {
-              sidFeatures.push({
-                type: 'Feature' as const,
-                geometry: { type: 'Point' as const, coordinates: [tp.lon, tp.lat] },
-                properties: { name: tp.name, isEndpoint: false, isSidStar: true, kind: 'SID' },
-              })
-            }
-          }
-        }
 
         if (sidFeatures.length > 0) {
           m.addSource('sid-points', {
@@ -535,20 +588,41 @@ export function useMap(
           ? [starEnd.lon, starEnd.lat]
           : [nodes[nodes.length - 1].lon, nodes[nodes.length - 1].lat]
 
-        const starRawCoords: number[][] = []
-
         // Main STAR points (network->airport order)
         const mainNames = new Set(starPoints.map(p => p.name))
-        starRawCoords.push(...starPoints.map(p => [p.lon, p.lat]))
+        const routeNodeNames = new Set(nodes.map(n => n.name))
 
-        // Transition segment points (network->airport order; append after main, skipping duplicates)
+        // Transition segment points (network->airport order)
+        let starRawCoords: number[][] = []
         if (selectedSTARTransition.value) {
           const transPoints = selectedSTARTransition.value.points
-          for (const tp of transPoints) {
-            if (!mainNames.has(tp.name)) {
-              starRawCoords.push([tp.lon, tp.lat])
+          // For transition-only procedures, the transition's last point is not
+          // in the main points (each option is a full network->runway path).
+          // In that case, replace the main path with the transition path.
+          if (transPoints.length > 0 && !mainNames.has(transPoints[transPoints.length - 1].name)) {
+            starRawCoords = [...transPoints.map(p => [p.lon, p.lat])]
+          } else {
+            // Normal case: prepend non-overlapping transition points before main points,
+            // but only from the first point that also appears in the route.
+            // This prevents visual forks when the route takes an airway shortcut
+            // into the transition at a midpoint (e.g., EHF->LHS instead of EHF->ARVIN).
+            let startIdx = 0
+            for (let i = 0; i < transPoints.length; i++) {
+              if (routeNodeNames.has(transPoints[i].name)) {
+                startIdx = i
+                break
+              }
             }
+            const transitionCoords: number[][] = []
+            for (let i = startIdx; i < transPoints.length; i++) {
+              if (!mainNames.has(transPoints[i].name)) {
+                transitionCoords.push([transPoints[i].lon, transPoints[i].lat])
+              }
+            }
+            starRawCoords = [...transitionCoords, ...starPoints.map(p => [p.lon, p.lat])]
           }
+        } else {
+          starRawCoords = [...starPoints.map(p => [p.lon, p.lat])]
         }
 
         // Connect directly to runway end
@@ -597,26 +671,37 @@ export function useMap(
           })
         }
 
-        starFeatures = starPoints.map(p => ({
+        // Determine which points to display: if transition replaces the main
+        // path, show transition points instead of main points.
+        let displayedStarPoints = starPoints
+        if (selectedSTARTransition.value) {
+          const transPoints = selectedSTARTransition.value.points
+          const mainNames = new Set(starPoints.map(p => p.name))
+          if (transPoints.length > 0 && !mainNames.has(transPoints[transPoints.length - 1].name)) {
+            displayedStarPoints = transPoints
+          } else {
+            let startIdx = 0
+            for (let i = 0; i < transPoints.length; i++) {
+              if (routeNodeNames.has(transPoints[i].name)) {
+                startIdx = i
+                break
+              }
+            }
+            const visibleTransPoints = []
+            for (let i = startIdx; i < transPoints.length; i++) {
+              if (!mainNames.has(transPoints[i].name)) {
+                visibleTransPoints.push(transPoints[i])
+              }
+            }
+            displayedStarPoints = [...visibleTransPoints, ...starPoints]
+          }
+        }
+
+        starFeatures = displayedStarPoints.map(p => ({
           type: 'Feature' as const,
           geometry: { type: 'Point' as const, coordinates: [p.lon, p.lat] },
           properties: { name: p.name, isEndpoint: false, isSidStar: true, kind: 'STAR' },
         }))
-
-        // Add transition points as features
-        if (selectedSTARTransition.value) {
-          const transPoints = selectedSTARTransition.value.points
-          const mainNames = new Set(starPoints.map(p => p.name))
-          for (const tp of transPoints) {
-            if (!mainNames.has(tp.name)) {
-              starFeatures.push({
-                type: 'Feature' as const,
-                geometry: { type: 'Point' as const, coordinates: [tp.lon, tp.lat] },
-                properties: { name: tp.name, isEndpoint: false, isSidStar: true, kind: 'STAR' },
-              })
-            }
-          }
-        }
 
         if (starFeatures.length > 0) {
           m.addSource('star-points', {
@@ -726,14 +811,29 @@ export function useMap(
       destRunways.forEach(r => r.thresholds.forEach(t => bounds.extend([t.lon, t.lat])))
 
       m.fitBounds(bounds, { padding: 60, maxZoom: 12, duration: 1500 })
+    } catch (err) {
+      console.error('[useMap] updateMap error:', err)
     } finally {
       isUpdating.value = false
     }
+  } while (pendingUpdate.value)
+}
+
+  function scheduleUpdate() {
+    if (updateTimer.value) {
+      clearTimeout(updateTimer.value)
+    }
+    updateTimer.value = setTimeout(() => {
+      updateTimer.value = null
+      updateMap()
+    }, 50)
   }
 
-  watch([routeResult, selectedSID, selectedSTAR, selectedSIDTransition, selectedSTARTransition], () => {
-    updateMap()
-  }, { deep: true })
+  watch(routeResult, () => { scheduleUpdate() })
+  watch(selectedSID, () => { scheduleUpdate() })
+  watch(selectedSTAR, () => { scheduleUpdate() })
+  watch(selectedSIDTransition, () => { scheduleUpdate() })
+  watch(selectedSTARTransition, () => { scheduleUpdate() })
 
   return { map, isMapReady, initMap, updateMap }
 }

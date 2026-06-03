@@ -1,10 +1,8 @@
 """Application configuration using pydantic-settings."""
 
-import os
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
 
 # Project root is parent of openRouterFinder/
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
@@ -27,6 +25,7 @@ class Settings(BaseSettings):
     navdat_cycle: str = "AUTO"
 
     local_asdata_path: str = ""
+    disable_captcha: bool = False
 
     @property
     def navdat_full_path(self) -> Path:

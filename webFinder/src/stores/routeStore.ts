@@ -103,6 +103,56 @@ export const useRouteStore = defineStore('route', () => {
   const parsedWeather = computed(() => routeResult.value?.parsedWeather ?? null)
   const routeSegments = computed(() => routeResult.value?.routeSegments ?? [])
 
+  function _matchProcedureIndex(procedures: ProcedureTuple[], routeNodeNames: Set<string>): number {
+    let bestIdx = 0
+    let bestScore = -1
+    for (let i = 0; i < procedures.length; i++) {
+      const proc = procedures[i]
+      const pointNames = new Set(proc[2].map(p => p[0]))
+      let score = 0
+      for (const name of pointNames) {
+        if (routeNodeNames.has(name)) score += 1
+      }
+      // Also consider transitions: add unique transition points
+      const transitions = proc[3] || []
+      for (const t of transitions) {
+        const tPointNames = new Set(t[1].map((p: any) => p[0]))
+        for (const name of tPointNames) {
+          if (routeNodeNames.has(name) && !pointNames.has(name)) {
+            score += 1
+          }
+        }
+      }
+      // Bonus for matching more unique points; tie-break by preferring more points total
+      score = score * 1000 + proc[2].length
+      if (score > bestScore) {
+        bestScore = score
+        bestIdx = i
+      }
+    }
+    return bestIdx
+  }
+
+  function _matchTransitionIndex(transitions: any[], routeNodeNames: Set<string>): number {
+    let bestIdx = -1
+    let bestScore = -1
+    for (let i = 0; i < transitions.length; i++) {
+      const t = transitions[i]
+      const tPoints = t[1] as any[]
+      const pointNames = new Set(tPoints.map(p => p[0]))
+      let score = 0
+      for (const name of pointNames) {
+        if (routeNodeNames.has(name)) score += 1
+      }
+      score = score * 1000 + tPoints.length
+      if (score > bestScore) {
+        bestScore = score
+        bestIdx = i
+      }
+    }
+    return bestIdx
+  }
+
   function setRouteResult(result: RouteResult | null) {
     routeResult.value = result
     selectedSIDIndex.value = 0
@@ -113,27 +163,48 @@ export const useRouteStore = defineStore('route', () => {
 
     if (!result) return
 
-    // Auto-select active transitions returned by A*
+    const routeNodeNames = new Set(result.nodes.map(n => n.name))
+
+    // Auto-select SID procedure that best matches the route
     const sidKey = result.sidNodeName || result.nodes[1]?.name
     if (sidKey) {
       const sidProcs = result.SID[sidKey] || []
-      if (sidProcs.length > 0 && result.activeSIDTransition) {
-        const transitions = sidProcs[0][3] || []
-        const idx = transitions.findIndex(t => t[0] === result.activeSIDTransition)
-        if (idx >= 0) {
-          selectedSIDTransitionIndex.value = idx
+      if (sidProcs.length > 0) {
+        selectedSIDIndex.value = _matchProcedureIndex(sidProcs, routeNodeNames)
+        const transitions = sidProcs[selectedSIDIndex.value]?.[3] || []
+        if (result.activeSIDTransition) {
+          const idx = transitions.findIndex(t => t[0] === result.activeSIDTransition)
+          if (idx >= 0) {
+            selectedSIDTransitionIndex.value = idx
+          }
+        } else if (transitions.length > 0) {
+          // Auto-select transition that best matches the route
+          const bestIdx = _matchTransitionIndex(transitions, routeNodeNames)
+          if (bestIdx >= 0) {
+            selectedSIDTransitionIndex.value = bestIdx
+          }
         }
       }
     }
 
+    // Auto-select STAR procedure that best matches the route
     const starKey = result.starNodeName || result.nodes[result.nodes.length - 2]?.name
     if (starKey) {
       const starProcs = result.STAR[starKey] || []
-      if (starProcs.length > 0 && result.activeSTARTransition) {
-        const transitions = starProcs[0][3] || []
-        const idx = transitions.findIndex(t => t[0] === result.activeSTARTransition)
-        if (idx >= 0) {
-          selectedSTARTransitionIndex.value = idx
+      if (starProcs.length > 0) {
+        selectedSTARIndex.value = _matchProcedureIndex(starProcs, routeNodeNames)
+        const transitions = starProcs[selectedSTARIndex.value]?.[3] || []
+        if (result.activeSTARTransition) {
+          const idx = transitions.findIndex(t => t[0] === result.activeSTARTransition)
+          if (idx >= 0) {
+            selectedSTARTransitionIndex.value = idx
+          }
+        } else if (transitions.length > 0) {
+          // Auto-select transition that best matches the route
+          const bestIdx = _matchTransitionIndex(transitions, routeNodeNames)
+          if (bestIdx >= 0) {
+            selectedSTARTransitionIndex.value = bestIdx
+          }
         }
       }
     }

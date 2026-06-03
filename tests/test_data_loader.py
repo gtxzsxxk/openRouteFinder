@@ -1,5 +1,5 @@
-from openRouterFinder.core.graph import Node
 from openRouterFinder.core.data_loader import NavGraph
+from openRouterFinder.core.graph import Node
 
 
 def test_nav_graph_node_index():

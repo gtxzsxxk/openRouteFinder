@@ -1,5 +1,5 @@
-import pytest
 from fastapi.testclient import TestClient
+
 from openRouterFinder.api import app
 
 client = TestClient(app)
@@ -21,12 +21,15 @@ def test_get_airport_procedures_not_found():
 
 def test_post_route_accepts_constraint_fields():
     """RouteRequest schema should accept sidExit and starEntry without 422."""
-    response = client.post("/api/route", json={
-        "orig": "ZGHA",
-        "dest": "ZJSY",
-        "validCode": "9999",
-        "validToken": "fake-token",
-        "sidExit": "PIMOL",
-        "starEntry": "IGPAR",
-    })
+    response = client.post(
+        "/api/route",
+        json={
+            "orig": "ZGHA",
+            "dest": "ZJSY",
+            "validCode": "9999",
+            "validToken": "fake-token",
+            "sidExit": "PIMOL",
+            "starEntry": "IGPAR",
+        },
+    )
     assert response.status_code != 422

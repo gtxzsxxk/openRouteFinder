@@ -1,5 +1,7 @@
-import pytest
 from pathlib import Path
+
+import pytest
+
 from openRouterFinder.core.storage.builder import build_from_fenix
 
 
@@ -17,6 +19,7 @@ def test_build_from_sample_fenix():
 
     # Verify by reading back
     from openRouterFinder.core.storage.NavData.NavData import NavData
+
     nav = NavData.GetRootAs(raw, 0)
     assert nav.Cycle().decode() == "2604"
     assert nav.NodesLength() > 100000

@@ -1,7 +1,7 @@
 __pycache__
 .pytest_cache/
 image.png
-docs/
+docs/superpowers/
 .claude/
 data/*
 !data/*.fb.zst
@@ -10,3 +10,6 @@ webFinder/dist/
 .superpowers/
 .vscode/
 
+*.zip
+.ruff_cache
+Navdata

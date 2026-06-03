@@ -1,16 +1,16 @@
 """FastAPI application with thread-pooled A* route search."""
 
 import asyncio
+import contextlib
+import json
 import os
 import shutil
 import time
 import uuid
-import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Header, Query, Request, UploadFile, File, Form
+from fastapi import FastAPI, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -18,22 +18,148 @@ from pydantic import BaseModel
 
 from openRouterFinder.config import settings
 from openRouterFinder.core.admin import (
+    get_stats as get_admin_stats,
+)
+from openRouterFinder.core.admin import (
+    record_error,
     record_request,
     record_route_search,
-    record_error,
-    get_stats as get_admin_stats,
 )
 from openRouterFinder.core.data_loader import (
     get_data_version,
-    get_airport_maps,
-    search_route,
-    get_nav_registry,
-    has_registry,
     get_nav_data,
+    get_nav_registry,
+    search_route,
 )
+from openRouterFinder.core.storage.builder import build_from_fenix
 from openRouterFinder.utils.metar import read_metar, start_metar_updater
 from openRouterFinder.utils.validcode import generate_captcha_b64
-from openRouterFinder.core.storage.builder import build_from_fenix
+
+# --- Procedure response filtering ---
+
+
+def _filter_runway_all_from_response(data: dict) -> dict:
+    """Remove or rename runway='ALL' variants when specific runway variants exist.
+
+    When a procedure name has both an 'ALL' variant and exactly one specific
+    runway variant (e.g. KIMMO3 has only 24R), the ALL variant is renamed to
+    that specific runway.  This preserves the common-segment points (needed
+    for _fill_procedure_gaps and route-segment tests) while showing the correct
+    runway label in the frontend.
+
+    When multiple specific runways exist (e.g. ANJLL4 has 24L/24R/25L/25R),
+    the ALL variant is dropped — the runway-specific procedures already carry
+    the full path via their transitions.
+
+    Operates on API response dicts where procedures are either Procedure objects
+    or serialized tuples [name, runway, points, transitions].
+    """
+    for label in ("SID", "STAR"):
+        if label not in data:
+            continue
+        procs = data[label]
+        if not isinstance(procs, dict):
+            continue
+
+        # Collect all (name, runway) pairs
+        name_runways: dict = {}
+        for proc_list in procs.values():
+            for proc in proc_list:
+                if hasattr(proc, "name"):
+                    proc_name = proc.name
+                    proc_runway = proc.runway
+                else:
+                    proc_name = proc[0]
+                    proc_runway = proc[1]
+                name_runways.setdefault(proc_name, set()).add(proc_runway)
+
+        # Rename ALL to the single specific runway; drop ALL when ambiguous.
+        filtered: dict = {}
+        for key, proc_list in procs.items():
+            filtered_list = []
+            for proc in proc_list:
+                if hasattr(proc, "name"):
+                    proc_name = proc.name
+                    proc_runway = proc.runway
+                else:
+                    proc_name = proc[0]
+                    proc_runway = proc[1]
+
+                specific_runways = name_runways.get(proc_name, set()) - {"ALL"}
+                if proc_runway == "ALL" and specific_runways:
+                    if len(specific_runways) == 1:
+                        rw = next(iter(specific_runways))
+                        if hasattr(proc, "name"):
+                            proc.runway = rw
+                            filtered_list.append(proc)
+                        else:
+                            new_proc = list(proc)
+                            new_proc[1] = rw
+                            filtered_list.append(tuple(new_proc))
+                    # Multiple specific runways: drop the ambiguous ALL variant.
+                else:
+                    filtered_list.append(proc)
+            if filtered_list:
+                filtered[key] = filtered_list
+        data[label] = filtered
+
+    return data
+
+
+def _rename_single_runway_all(data: dict) -> dict:
+    """Rename runway='ALL' to the single specific runway; keep ALL when ambiguous.
+
+    Unlike _filter_runway_all_from_response, this preserves ALL variants when
+    multiple specific runways exist (e.g. MARNR8 with 6 runways).  The entry
+    points (VIXOR, TOU, etc.) are needed so starNodeName remains a valid key.
+
+    Operates on API response dicts where procedures are either Procedure objects
+    or serialized tuples [name, runway, points, transitions].
+    """
+    for label in ("SID", "STAR"):
+        if label not in data:
+            continue
+        procs = data[label]
+        if not isinstance(procs, dict):
+            continue
+
+        name_runways: dict = {}
+        for proc_list in procs.values():
+            for proc in proc_list:
+                if hasattr(proc, "name"):
+                    proc_name = proc.name
+                    proc_runway = proc.runway
+                else:
+                    proc_name = proc[0]
+                    proc_runway = proc[1]
+                name_runways.setdefault(proc_name, set()).add(proc_runway)
+
+        for key, proc_list in procs.items():
+            new_list = []
+            for proc in proc_list:
+                if hasattr(proc, "name"):
+                    proc_name = proc.name
+                    proc_runway = proc.runway
+                else:
+                    proc_name = proc[0]
+                    proc_runway = proc[1]
+
+                specific_runways = name_runways.get(proc_name, set()) - {"ALL"}
+                if proc_runway == "ALL" and len(specific_runways) == 1:
+                    rw = next(iter(specific_runways))
+                    if hasattr(proc, "name"):
+                        proc.runway = rw
+                        new_list.append(proc)
+                    else:
+                        new_proc = list(proc)
+                        new_proc[1] = rw
+                        new_list.append(tuple(new_proc))
+                else:
+                    new_list.append(proc)
+            procs[key] = new_list
+
+    return data
+
 
 # --- Concurrency controls ---
 _dijkstra_pool = ThreadPoolExecutor(max_workers=4)
@@ -63,7 +189,9 @@ def _build_airport_index():
                 continue
             name = ap.Name()
             name = name.decode("utf-8") if isinstance(name, bytes) else (name or icao)
-            airports.append({"icao": icao, "name": name, "lat": float(ap.Lat()), "lon": float(ap.Lon())})
+            airports.append(
+                {"icao": icao, "name": name, "lat": float(ap.Lat()), "lon": float(ap.Lon())}
+            )
 
     _airport_list = airports
 
@@ -99,14 +227,15 @@ def _search_airports(q: str, limit: int = 50) -> list:
 
 # --- Pydantic Models ---
 
+
 class RouteRequest(BaseModel):
     orig: str
     dest: str
     validCode: str
     validToken: str
-    sidExit: Optional[str] = None
-    starEntry: Optional[str] = None
-    cycle: Optional[str] = None
+    sidExit: str | None = None
+    starEntry: str | None = None
+    cycle: str | None = None
 
 
 # --- FastAPI App ---
@@ -155,14 +284,20 @@ def get_cycles():
     for cycle in cycles:
         info = reg.get_cycle_info(cycle)
         if info:
-            result.append({
-                "cycle": info["cycle"],
-            })
-    return {"cycles": result, "default": result[-1]["cycle"] if result else None}
+            result.append(
+                {
+                    "cycle": info["cycle"],
+                }
+            )
+    return {
+        "cycles": result,
+        "default": result[-1]["cycle"] if result else None,
+        "disableCaptcha": settings.disable_captcha,
+    }
 
 
 @app.get("/api/airports")
-def get_airports(q: Optional[str] = None):
+def get_airports(q: str | None = None):
     q = (q or "").strip()
     if not q:
         return {"airports": _airport_list[:50]}
@@ -170,7 +305,7 @@ def get_airports(q: Optional[str] = None):
 
 
 @app.get("/api/airports/{icao}")
-def get_airport(icao: str, cycle: Optional[str] = None):
+def get_airport(icao: str, cycle: str | None = None):
     icao = icao.upper()
     nav = get_nav_data(cycle)
     if nav is None:
@@ -189,10 +324,11 @@ def get_airport(icao: str, cycle: Optional[str] = None):
 
 
 @app.get("/api/airports/{icao}/procedures")
-def get_airport_procedures(icao: str, cycle: Optional[str] = None):
+def get_airport_procedures(icao: str, cycle: str | None = None, detail: bool = False):
     icao = icao.upper()
 
     from openRouterFinder.core.airport import FlatbuffersAirportConnector
+
     nav = get_nav_data(cycle)
     if nav is None:
         raise HTTPException(status_code=503, detail="Navdata not available")
@@ -210,10 +346,12 @@ def get_airport_procedures(icao: str, cycle: Optional[str] = None):
             if exit_name in seen:
                 continue
             seen.add(exit_name)
-            sid_exits.append({
-                "name": exit_name,
-                "procedures": list(dict.fromkeys(p.name for p in proc_list)),
-            })
+            sid_exits.append(
+                {
+                    "name": exit_name,
+                    "procedures": list(dict.fromkeys(p.name for p in proc_list)),
+                }
+            )
 
     star_entries = []
     if star_conn and star_conn.procedures:
@@ -222,36 +360,78 @@ def get_airport_procedures(icao: str, cycle: Optional[str] = None):
             if entry_name in seen:
                 continue
             seen.add(entry_name)
-            star_entries.append({
-                "name": entry_name,
-                "procedures": list(dict.fromkeys(p.name for p in proc_list)),
-            })
+            star_entries.append(
+                {
+                    "name": entry_name,
+                    "procedures": list(dict.fromkeys(p.name for p in proc_list)),
+                }
+            )
 
-    return {
+    result = {
         "icao": icao,
         "sid": {"exits": sid_exits},
         "star": {"entries": star_entries},
     }
 
+    if detail and (sid_conn or star_conn):
+        # Return full procedure tuples (same shape as /api/route SID/STAR fields)
+        def _proc_tuple(proc):
+            return [
+                proc.name,
+                proc.runway,
+                [[p[0], p[1], p[2]] for p in proc.points],
+                [[t[0], [[p[0], p[1], p[2]] for p in t[1]]] for t in proc.transitions],
+            ]
+
+        if sid_conn and sid_conn.procedures:
+            result["sidDetails"] = {
+                key: [_proc_tuple(p) for p in proc_list]
+                for key, proc_list in sid_conn.procedures.items()
+            }
+        if star_conn and star_conn.procedures:
+            result["starDetails"] = {
+                key: [_proc_tuple(p) for p in proc_list]
+                for key, proc_list in star_conn.procedures.items()
+            }
+
+    if detail:
+        if "sidDetails" in result:
+            result["sidDetails"] = _filter_runway_all_from_response(
+                {"SID": result["sidDetails"]}
+            ).get("SID", {})
+        if "starDetails" in result:
+            result["starDetails"] = _filter_runway_all_from_response(
+                {"STAR": result["starDetails"]}
+            ).get("STAR", {})
+
+    return result
+
 
 @app.post("/api/route")
 async def post_route(req: RouteRequest):
-    # Validate captcha
-    if req.validToken not in _valid_codes:
-        raise HTTPException(status_code=401, detail="验证码已过期")
-    if _valid_codes[req.validToken] != req.validCode:
-        raise HTTPException(status_code=401, detail="验证码错误")
-    del _valid_codes[req.validToken]
+    # Validate captcha (skip if disabled via config)
+    if not settings.disable_captcha:
+        if req.validToken not in _valid_codes:
+            raise HTTPException(status_code=401, detail="验证码已过期")
+        if _valid_codes[req.validToken] != req.validCode:
+            raise HTTPException(status_code=401, detail="验证码错误")
+        del _valid_codes[req.validToken]
 
     try:
         async with _route_semaphore:
             result = await asyncio.get_event_loop().run_in_executor(
                 _dijkstra_pool,
-                lambda: search_route(req.orig, req.dest, sid_exit=req.sidExit, star_entry=req.starEntry, cycle=req.cycle),
+                lambda: search_route(
+                    req.orig,
+                    req.dest,
+                    sid_exit=req.sidExit,
+                    star_entry=req.starEntry,
+                    cycle=req.cycle,
+                ),
             )
     except Exception as e:
         record_error(f"Route calculation failed: {e}", "/api/route", "POST", 500)
-        raise HTTPException(status_code=500, detail=f"Route calculation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Route calculation failed: {e}") from e
 
     if result is None:
         record_error(f"No route found: {req.orig} → {req.dest}", "/api/route", "POST", 404)
@@ -260,17 +440,13 @@ async def post_route(req: RouteRequest):
     # Extract stats before mutating result
     distance_raw = result.get("distance", "")
     distance = None
-    try:
+    with contextlib.suppress(ValueError, IndexError):
         # "676.59 nm / 1253.05 km" -> 676.59
         distance = float(distance_raw.split()[0]) if distance_raw else None
-    except (ValueError, IndexError):
-        pass
 
     time_min = None
-    try:
-        time_min = float(result.get("total_time", 0))
-    except (ValueError, TypeError):
-        pass
+    with contextlib.suppress(ValueError, TypeError):
+        time_min = float(result.get("total_time", 0)) / 1000.0
 
     nodeinformation = result.get("nodeinformation", [])
     nodes_count = len([n for n in nodeinformation if len(n) >= 3]) if nodeinformation else 0
@@ -290,9 +466,7 @@ async def post_route(req: RouteRequest):
         raw_nodes = result.pop("nodeinformation")
         if raw_nodes:
             result["nodes"] = [
-                {"name": n[0], "lat": n[1], "lon": n[2]}
-                for n in raw_nodes
-                if len(n) >= 3
+                {"name": n[0], "lat": n[1], "lon": n[2]} for n in raw_nodes if len(n) >= 3
             ]
         else:
             result["nodes"] = []
@@ -330,7 +504,11 @@ async def post_route(req: RouteRequest):
         _metar_to_dict(parse_metar(read_metar(req.dest))),
     ]
 
-    return result
+    # Rename single-runway ALL variants (e.g. KIMMO3 ALL → 24R) so the
+    # frontend shows the correct runway.  Multi-runway ALL variants are
+    # kept because their entry-point keys are needed for starNodeName.
+    return _rename_single_runway_all(result)
+
 
 
 @app.get("/api/metar/{icao}")
@@ -341,6 +519,7 @@ def get_metar(icao: str):
 @app.get("/api/validcode")
 def get_valid_code():
     import random
+
     num = random.randint(1000, 9999)
     token = str(uuid.uuid4())
     _valid_codes[token] = str(num)
@@ -447,7 +626,9 @@ def _validate_fenix_db(db_path: Path) -> dict:
     missing = required - tables
     if missing:
         conn.close()
-        raise ValueError(f"Missing required tables: {', '.join(missing)}. Not a valid Fenix A320 navdata.")
+        raise ValueError(
+            f"Missing required tables: {', '.join(missing)}. Not a valid Fenix A320 navdata."
+        )
 
     # Extract cycle info from config table — column names vary by Fenix version
     cursor.execute("PRAGMA table_info(config)")
@@ -458,9 +639,8 @@ def _validate_fenix_db(db_path: Path) -> dict:
         conn.close()
         raise ValueError(f"Config table has unexpected schema: columns={cols}")
 
-    cursor.execute(
-        f"SELECT {key_col}, {val_col} FROM config WHERE {key_col} IN ('CycleName', 'CycleStartDate', 'CycleEndDate')"
-    )
+    in_clause = "'CycleName', 'CycleStartDate', 'CycleEndDate'"
+    cursor.execute(f"SELECT {key_col}, {val_col} FROM config WHERE {key_col} IN ({in_clause})")
     config = {row[0]: row[1] for row in cursor.fetchall()}
     conn.close()
 
@@ -488,6 +668,7 @@ def _do_build_navdata(
     tmp_dir: str,
 ) -> None:
     """Run FlatBuffers build in background thread and update progress."""
+
     def progress(step: str, current: int, total: int) -> None:
         _build_tasks[build_id] = {
             "status": "building",
@@ -506,6 +687,7 @@ def _do_build_navdata(
             progress=progress,
         )
         import zstandard as zstd
+
         cctx = zstd.ZstdCompressor(level=12)
         compressed = cctx.compress(raw)
         fb_path = data_dir / f"navdata_{cycle}.fb.zst"
@@ -518,9 +700,15 @@ def _do_build_navdata(
             "cycle": cycle,
             "info": info,
         }
-        print(f"[build {build_id}] done: cycle={cycle}, fb={fb_path} ({len(compressed)/1024/1024:.1f}MB / {len(raw)/1024/1024:.1f}MB)")
+        size_mb = len(compressed) / 1024 / 1024
+        raw_mb = len(raw) / 1024 / 1024
+        print(
+            f"[build {build_id}] done: cycle={cycle}, fb={fb_path} "
+            f"({size_mb:.1f}MB / {raw_mb:.1f}MB)"
+        )
     except Exception as e:
         import traceback
+
         detail = f"{type(e).__name__}: {e}"
         print(f"[build {build_id}] error: {detail}")
         traceback.print_exc()
@@ -560,7 +748,7 @@ async def upload_navdata(
             zf.extractall(tmp_dir)
 
         # Find .db3 file (Fenix navdata)
-        for root, dirs, files in os.walk(tmp_dir):
+        for root, _dirs, files in os.walk(tmp_dir):
             for name in files:
                 if name.lower().endswith(".db3"):
                     db_path = Path(root) / name
@@ -569,7 +757,9 @@ async def upload_navdata(
                 break
 
         if db_path is None:
-            record_error("Upload failed: no .db3 file found in zip", "/api/admin/navdata/upload", "POST", 400)
+            record_error(
+                "Upload failed: no .db3 file found in zip", "/api/admin/navdata/upload", "POST", 400
+            )
             raise HTTPException(status_code=400, detail="No .db3 file found in uploaded zip")
 
         # Validate and extract cycle info from db
@@ -577,7 +767,7 @@ async def upload_navdata(
             cycle_info = _validate_fenix_db(db_path)
         except ValueError as e:
             record_error(f"Upload validation failed: {e}", "/api/admin/navdata/upload", "POST", 400)
-            raise HTTPException(status_code=400, detail=str(e))
+            raise HTTPException(status_code=400, detail=str(e)) from e
 
         cycle = cycle_info["cycle"]
 
@@ -588,7 +778,13 @@ async def upload_navdata(
 
         # Start background build
         build_id = str(uuid.uuid4())
-        _build_tasks[build_id] = {"status": "building", "step": "starting", "current": 0, "total": 1, "percent": 0}
+        _build_tasks[build_id] = {
+            "status": "building",
+            "step": "starting",
+            "current": 0,
+            "total": 1,
+            "percent": 0,
+        }
 
         loop = asyncio.get_event_loop()
         loop.run_in_executor(
@@ -611,7 +807,7 @@ async def upload_navdata(
     except Exception as e:
         shutil.rmtree(tmp_dir, ignore_errors=True)
         record_error(f"Upload failed: {e}", "/api/admin/navdata/upload", "POST", 500)
-        raise HTTPException(status_code=500, detail=f"Upload processing failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Upload processing failed: {e}") from e
 
 
 @app.get("/api/admin/navdata/build-progress/{build_id}")

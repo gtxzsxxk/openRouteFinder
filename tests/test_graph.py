@@ -1,10 +1,9 @@
-import math
 from openRouterFinder.core.graph import (
+    Edge,
+    Node,
+    SearchingNode,
     great_circle_distance_km,
     heuristic_km,
-    Node,
-    Edge,
-    SearchingNode,
 )
 
 

@@ -1,6 +1,6 @@
-from openRouterFinder.core.graph import Node, Edge
 from openRouterFinder.core.airport import AirportConnection
 from openRouterFinder.core.dijkstra import RouteEngine
+from openRouterFinder.core.graph import Node
 
 
 def test_sort_route():
@@ -33,12 +33,13 @@ def test_build_node_info():
 
 def test_route_engine_search_accepts_constraint_params():
     """RouteEngine.search should accept sid_exit and star_entry without error."""
-    from openRouterFinder.core.data_loader import get_nav_data
     from openRouterFinder.core.airport import FlatbuffersAirportConnector
+    from openRouterFinder.core.data_loader import get_nav_data
 
     nav = get_nav_data()
     if nav is None:
         import pytest
+
         pytest.skip("Navdata not available")
 
     connector = FlatbuffersAirportConnector(nav)
@@ -47,11 +48,15 @@ def test_route_engine_search_accepts_constraint_params():
 
     if sid_conn is None or star_conn is None:
         import pytest
+
         pytest.skip("Need both airports to have data")
 
     engine = RouteEngine(nav.node_list, nav.cycle)
     result = engine.search(
-        "ZGHA", "ZJSY", sid_conn, star_conn,
+        "ZGHA",
+        "ZJSY",
+        sid_conn,
+        star_conn,
         connector.get_airport_names("ZGHA") + connector.get_airport_names("ZJSY"),
         sid_exit=None,
         star_entry=None,

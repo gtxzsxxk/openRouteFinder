@@ -1,0 +1,76 @@
+[project]
+name = "openRouteFinder"
+requires-python = ">=3.10"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+indent-width = 4
+
+[tool.ruff.lint]
+select = [
+    # Pyflakes
+    "F",
+    # pycodestyle
+    "E", "W",
+    # isort
+    "I",
+    # flake8-bugbear
+    "B",
+    # flake8-simplify
+    "SIM",
+    # pyupgrade
+    "UP",
+    # pydocstyle
+    "D",
+    # flake8-annotations
+    "ANN",
+    # flake8-comprehensions
+    "C4",
+    # flake8-return
+    "RET",
+    # flake8-use-pathlib
+    "PTH",
+    # flake8-pyi
+    "PYI",
+    # Ruff-specific rules
+    "RUF",
+]
+ignore = [
+    # Allow missing docstrings in test files and __init__.py
+    "D100", "D101", "D102", "D103", "D104", "D105", "D107",
+    # Allow TODO comments without issue links
+    "TD003",
+    # Allow blanket noqa comments
+    "PGH004",
+    # Allow print statements (legacy codebase)
+    "T201",
+    # Allow broad exception handling (legacy codebase)
+    "BLE001",
+    # Allow missing type annotations in tests
+    "ANN001", "ANN201", "ANN202", "ANN204", "ANN401",
+    # Allow implicit string concatenation
+    "ISC001",
+    # Allow unused loop control variables (legacy codebase)
+    "B007",
+    # Allow Chinese punctuation in comments/docstrings/strings
+    "RUF001", "RUF002", "RUF003",
+    # Allow os.path/pathlib mix (legacy codebase)
+    "PTH107", "PTH108", "PTH110", "PTH118", "PTH120", "PTH123",
+    # Allow FastAPI File/Query/Header in default arguments
+    "B008",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S", "D", "ANN"]
+"openRouterFinder/core/storage/NavData/**/*.py" = ["ALL"]
+"openRouterFinder/core/storage/reader.py" = ["E402"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"

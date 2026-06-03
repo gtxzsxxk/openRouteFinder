@@ -1,10 +1,8 @@
 """Multi-version navigation data registry with hot reload support."""
 
-import os
 import re
 import threading
 from pathlib import Path
-from typing import Dict, List, Optional
 
 from openRouterFinder.core.storage.reader import MmappedNavData
 
@@ -16,7 +14,7 @@ class NavDataRegistry:
 
     def __init__(self, data_dir: Path):
         self._data_dir = data_dir
-        self._versions: Dict[str, MmappedNavData] = {}
+        self._versions: dict[str, MmappedNavData] = {}
         self._lock = threading.RLock()
         self._scan_and_load()
 
@@ -40,10 +38,10 @@ class NavDataRegistry:
             self._versions[cycle] = MmappedNavData(path)
             print(f"Loaded navdata cycle {cycle} from {path}")
 
-    def get(self, cycle: Optional[str] = None) -> Optional[MmappedNavData]:
+    def get(self, cycle: str | None = None) -> MmappedNavData | None:
         """Get navdata for a specific cycle, or the latest if None."""
         with self._lock:
-            if cycle is None:
+            if cycle is None or cycle == "":
                 if not self._versions:
                     return None
                 # Return highest cycle number
@@ -51,7 +49,7 @@ class NavDataRegistry:
                 return self._versions[latest]
             return self._versions.get(cycle)
 
-    def list_cycles(self) -> List[str]:
+    def list_cycles(self) -> list[str]:
         """Return sorted list of available cycle numbers."""
         with self._lock:
             return sorted(self._versions.keys())
@@ -71,7 +69,7 @@ class NavDataRegistry:
                 self._versions[cycle].close()
                 del self._versions[cycle]
 
-    def get_cycle_info(self, cycle: str) -> Optional[dict]:
+    def get_cycle_info(self, cycle: str) -> dict | None:
         """Get summary info for a cycle."""
         nav = self.get(cycle)
         if nav is None:

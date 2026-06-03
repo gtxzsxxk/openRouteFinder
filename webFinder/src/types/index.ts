@@ -97,6 +97,8 @@ export interface RouteResult {
   routeSegments?: RouteSegment[]
   sidNodeName?: string
   starNodeName?: string
+  sidRouteNodeName?: string
+  starRouteNodeName?: string
 }
 
 export interface ValidCode {
