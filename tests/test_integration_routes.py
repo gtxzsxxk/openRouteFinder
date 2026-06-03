@@ -7,7 +7,9 @@ os.environ["DISABLE_CAPTCHA"] = "true"
 
 import pytest
 from fastapi.testclient import TestClient
+
 from openRouterFinder.api import app
+
 
 def setup_module(module):
     """Trigger FastAPI startup events to build airport index."""
@@ -64,6 +66,7 @@ SKIP_PAIRS = set()
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _node_degrees(segments: list) -> dict:
     """Build {node_name: degree} from routeSegments."""
@@ -262,6 +265,7 @@ def _check_procedure_continuity(
 # 3.1 Basic route query
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("orig,dest", AIRPORT_PAIRS)
 def test_route_query_returns_valid_route(orig, dest):
     """Each airport pair must return a valid route with auto-selected SID/STAR."""
@@ -288,6 +292,7 @@ def test_route_query_returns_valid_route(orig, dest):
 # ---------------------------------------------------------------------------
 # 3.2 Route topology — no branching (each node ≤ 2 edges)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("orig,dest", AIRPORT_PAIRS)
 def test_route_topology_no_branching(orig, dest):
@@ -329,9 +334,7 @@ def test_route_topology_no_branching(orig, dest):
     seg_degree = _node_degrees(route_segments)
     for node, deg in seg_degree.items():
         if deg > 2:
-            errors.append(
-                f"{orig}→{dest} routeSegments: node {node} has degree {deg} > 2"
-            )
+            errors.append(f"{orig}→{dest} routeSegments: node {node} has degree {deg} > 2")
     seg_endpoints = [n for n, d in seg_degree.items() if d == 1]
     if len(seg_endpoints) != 2:
         errors.append(
@@ -366,6 +369,7 @@ def test_route_topology_no_branching(orig, dest):
 # ---------------------------------------------------------------------------
 # 3.3 Procedure path continuity — no skipped nodes
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("orig,dest", AIRPORT_PAIRS)
 def test_route_procedure_segments_continuous(orig, dest):
@@ -416,6 +420,7 @@ def test_route_procedure_segments_continuous(orig, dest):
 # ---------------------------------------------------------------------------
 # 3.4 SID/STAR node name consistency
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("orig,dest", AIRPORT_PAIRS)
 def test_route_sid_star_node_name_matches_procedure(orig, dest):
@@ -496,6 +501,7 @@ def test_route_sid_star_node_name_matches_procedure(orig, dest):
 # ---------------------------------------------------------------------------
 # 3.4.1 Frontend procedure selection simulation
 # ---------------------------------------------------------------------------
+
 
 def _simulate_frontend_procedure_selection(seg_nodes: list, proc_list: list, label: str = "SID"):
     """模拟前端 _matchProcedureIndex + _matchTransitionIndex 的选择逻辑。
@@ -655,6 +661,7 @@ def test_frontend_procedure_selection_matches_route(orig, dest):
 # 3.5 Exhaustive SID exits — every exit must produce a valid route
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("orig,dest", AIRPORT_PAIRS)
 def test_all_sid_exits_produce_valid_routes(orig, dest):
     """穷举 orig 的所有 SID exit points，每个 exit 都应生成有效 route。
@@ -712,9 +719,7 @@ def test_all_sid_exits_produce_valid_routes(orig, dest):
                 failures.append(f"SID={sid}: node {node} degree {deg} > 2")
         seg_endpoints = [n for n, d in seg_degree.items() if d == 1]
         if len(seg_endpoints) != 2 and len(seg_endpoints) != 0:
-            failures.append(
-                f"SID={sid}: expected 2 endpoints, got {len(seg_endpoints)}"
-            )
+            failures.append(f"SID={sid}: expected 2 endpoints, got {len(seg_endpoints)}")
 
         # SID procedure continuity — exhaustively find best-matching procedure
         sid_nodes = _extract_airway_nodes(route_segments, "SID")
@@ -725,9 +730,7 @@ def test_all_sid_exits_produce_valid_routes(orig, dest):
                 if proc_key:
                     proc_list = sid_procedures[proc_key]
                     try:
-                        _check_procedure_continuity(
-                            sid_nodes, proc_list, "SID", orig, dest
-                        )
+                        _check_procedure_continuity(sid_nodes, proc_list, "SID", orig, dest)
                     except AssertionError as e:
                         failures.append(f"SID={sid}: {e}")
 
@@ -740,9 +743,7 @@ def test_all_sid_exits_produce_valid_routes(orig, dest):
                 if proc_key:
                     proc_list = star_procedures[proc_key]
                     try:
-                        _check_procedure_continuity(
-                            star_nodes, proc_list, "STAR", orig, dest
-                        )
+                        _check_procedure_continuity(star_nodes, proc_list, "STAR", orig, dest)
                     except AssertionError as e:
                         failures.append(f"SID={sid}: STAR continuity: {e}")
 
@@ -756,6 +757,7 @@ def test_all_sid_exits_produce_valid_routes(orig, dest):
 # ---------------------------------------------------------------------------
 # 3.5 Exhaustive STAR entries — every entry must produce a valid route
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("orig,dest", AIRPORT_PAIRS)
 def test_all_star_entries_produce_valid_routes(orig, dest):
@@ -812,9 +814,7 @@ def test_all_star_entries_produce_valid_routes(orig, dest):
                 failures.append(f"STAR={star}: node {node} degree {deg} > 2")
         seg_endpoints = [n for n, d in seg_degree.items() if d == 1]
         if len(seg_endpoints) != 2 and len(seg_endpoints) != 0:
-            failures.append(
-                f"STAR={star}: expected 2 endpoints, got {len(seg_endpoints)}"
-            )
+            failures.append(f"STAR={star}: expected 2 endpoints, got {len(seg_endpoints)}")
 
         sid_nodes = _extract_airway_nodes(route_segments, "SID")
         if len(sid_nodes) >= 2:
@@ -824,9 +824,7 @@ def test_all_star_entries_produce_valid_routes(orig, dest):
                 if proc_key:
                     proc_list = sid_procedures[proc_key]
                     try:
-                        _check_procedure_continuity(
-                            sid_nodes, proc_list, "SID", orig, dest
-                        )
+                        _check_procedure_continuity(sid_nodes, proc_list, "SID", orig, dest)
                     except AssertionError as e:
                         failures.append(f"STAR={star}: SID continuity: {e}")
 
@@ -838,9 +836,7 @@ def test_all_star_entries_produce_valid_routes(orig, dest):
                 if proc_key:
                     proc_list = star_procedures[proc_key]
                     try:
-                        _check_procedure_continuity(
-                            star_nodes, proc_list, "STAR", orig, dest
-                        )
+                        _check_procedure_continuity(star_nodes, proc_list, "STAR", orig, dest)
                     except AssertionError as e:
                         failures.append(f"STAR={star}: {e}")
 
@@ -854,6 +850,7 @@ def test_all_star_entries_produce_valid_routes(orig, dest):
 # ---------------------------------------------------------------------------
 # 3.6 ZBAA → KLAX procedure continuity regression test
 # ---------------------------------------------------------------------------
+
 
 def test_zbaa_klax_procedure_continuity():
     """ZBAA→KLAX STAR segment must follow a complete procedure path without
@@ -897,6 +894,7 @@ def test_zbaa_klax_procedure_continuity():
 # 3.7 Airport procedures availability
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("icao", TEST_AIRPORTS)
 def test_airport_procedures_available(icao):
     """Each test airport must have SID/STAR procedures available."""
@@ -913,11 +911,15 @@ def test_airport_procedures_available(icao):
 # 3.8 Airport autocomplete
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("query,expected_icao", [
-    ("ZB", "ZBAA"),          # ICAO prefix match
-    ("Incheon", "RKSI"),     # Name substring match
-    ("RJTT", "RJTT"),        # Exact ICAO match
-])
+
+@pytest.mark.parametrize(
+    "query,expected_icao",
+    [
+        ("ZB", "ZBAA"),  # ICAO prefix match
+        ("Incheon", "RKSI"),  # Name substring match
+        ("RJTT", "RJTT"),  # Exact ICAO match
+    ],
+)
 def test_airport_autocomplete(query, expected_icao):
     """GET /api/airports?q= must return matching airports."""
     response = client.get(f"/api/airports?q={query}")
@@ -948,6 +950,7 @@ def test_airport_autocomplete_no_query():
 # 3.9 Cycles endpoint
 # ---------------------------------------------------------------------------
 
+
 def test_cycles_endpoint():
     """GET /api/cycles must return cycle list and default cycle."""
     response = client.get("/api/cycles")
@@ -963,6 +966,7 @@ def test_cycles_endpoint():
 # ---------------------------------------------------------------------------
 # 3.10 Exhaustive SID x STAR Cartesian product
 # ---------------------------------------------------------------------------
+
 
 def _get_sid_exits(icao: str) -> list:
     """Fetch SID exit names for an airport."""
@@ -1013,13 +1017,9 @@ def test_exhaustive_sid_star_combinations(orig, dest):
                 },
             )
             if response.status_code == 500:
-                failures.append(
-                    f"{orig}→{dest} SID={sid} STAR={star}: HTTP 500"
-                )
+                failures.append(f"{orig}→{dest} SID={sid} STAR={star}: HTTP 500")
             elif response.status_code not in (200, 404):
-                failures.append(
-                    f"{orig}→{dest} SID={sid} STAR={star}: HTTP {response.status_code}"
-                )
+                failures.append(f"{orig}→{dest} SID={sid} STAR={star}: HTTP {response.status_code}")
 
     assert not failures, (
         f"{orig}→{dest}: {len(failures)}/{total} SID×STAR combinations failed:\n"
@@ -1032,7 +1032,7 @@ def test_exhaustive_sid_star_combinations(orig, dest):
 # 3.11 Complete API response structure validation
 # ---------------------------------------------------------------------------
 
-RUNWAY_RE = re.compile(r'^\d+[LRC]?$')
+RUNWAY_RE = re.compile(r"^\d+[LRC]?$")
 
 
 def _assert_api_response_structure(data: dict, orig: str, dest: str):
@@ -1046,13 +1046,24 @@ def _assert_api_response_structure(data: dict, orig: str, dest: str):
 
     # --- Top-level required fields ---
     required_top = [
-        "data_version", "total_time", "route", "distance",
-        "SID", "STAR", "airportName",
-        "sidNodeName", "starNodeName",
-        "sidRouteNodeName", "starRouteNodeName",
-        "routeSegments", "nodes",
-        "weather", "airportDetails", "parsedWeather",
-        "origRunways", "destRunways",
+        "data_version",
+        "total_time",
+        "route",
+        "distance",
+        "SID",
+        "STAR",
+        "airportName",
+        "sidNodeName",
+        "starNodeName",
+        "sidRouteNodeName",
+        "starRouteNodeName",
+        "routeSegments",
+        "nodes",
+        "weather",
+        "airportDetails",
+        "parsedWeather",
+        "origRunways",
+        "destRunways",
     ]
     for key in required_top:
         if key not in data:
@@ -1089,7 +1100,9 @@ def _assert_api_response_structure(data: dict, orig: str, dest: str):
             for proc in proc_list:
                 # proc tuple: [name, runway, points, transitions]
                 if not isinstance(proc, list) or len(proc) != 4:
-                    errors.append(f"{label}[{key!r}] procedure shape {type(proc).__name__} len={len(proc) if isinstance(proc, list) else 'N/A'}")
+                    errors.append(
+                        f"{label}[{key!r}] procedure shape {type(proc).__name__} len={len(proc) if isinstance(proc, list) else 'N/A'}"
+                    )
                     continue
                 pname, prunway, ppoints, ptrans = proc
                 if not isinstance(pname, str):
@@ -1097,7 +1110,9 @@ def _assert_api_response_structure(data: dict, orig: str, dest: str):
                 if not isinstance(prunway, str):
                     errors.append(f"{label}[{key!r}] runway type={type(prunway).__name__}")
                 elif prunway not in ("ALL", "") and not RUNWAY_RE.match(prunway):
-                    errors.append(f"{label}[{key!r}] {pname}: runway={prunway!r} is not a valid runway designator")
+                    errors.append(
+                        f"{label}[{key!r}] {pname}: runway={prunway!r} is not a valid runway designator"
+                    )
                 # points
                 if not isinstance(ppoints, list):
                     errors.append(f"{label}[{key!r}] {pname}: points type={type(ppoints).__name__}")
@@ -1107,11 +1122,15 @@ def _assert_api_response_structure(data: dict, orig: str, dest: str):
                             errors.append(f"{label}[{key!r}] {pname}: point shape {pt!r}")
                             break
                         if not isinstance(pt[0], str):
-                            errors.append(f"{label}[{key!r}] {pname}: point name type={type(pt[0]).__name__}")
+                            errors.append(
+                                f"{label}[{key!r}] {pname}: point name type={type(pt[0]).__name__}"
+                            )
                             break
                 # transitions
                 if not isinstance(ptrans, list):
-                    errors.append(f"{label}[{key!r}] {pname}: transitions type={type(ptrans).__name__}")
+                    errors.append(
+                        f"{label}[{key!r}] {pname}: transitions type={type(ptrans).__name__}"
+                    )
                 else:
                     for t in ptrans:
                         if not isinstance(t, list) or len(t) != 2:
@@ -1119,14 +1138,20 @@ def _assert_api_response_structure(data: dict, orig: str, dest: str):
                             break
                         tname, tpts = t
                         if not isinstance(tname, str):
-                            errors.append(f"{label}[{key!r}] {pname}: transition name type={type(tname).__name__}")
+                            errors.append(
+                                f"{label}[{key!r}] {pname}: transition name type={type(tname).__name__}"
+                            )
                             break
                         if not isinstance(tpts, list):
-                            errors.append(f"{label}[{key!r}] {pname}: transition points type={type(tpts).__name__}")
+                            errors.append(
+                                f"{label}[{key!r}] {pname}: transition points type={type(tpts).__name__}"
+                            )
                             break
                         for pt in tpts:
                             if not isinstance(pt, list) or len(pt) != 3:
-                                errors.append(f"{label}[{key!r}] {pname}: transition point shape {pt!r}")
+                                errors.append(
+                                    f"{label}[{key!r}] {pname}: transition point shape {pt!r}"
+                                )
                                 break
 
     # --- routeSegments ---
@@ -1198,8 +1223,17 @@ def _assert_api_response_structure(data: dict, orig: str, dest: str):
             if not isinstance(p, dict):
                 errors.append(f"parsedWeather[{i}] type={type(p).__name__} != dict")
                 continue
-            for k in ("raw", "station", "windDirection", "windSpeed",
-                      "visibility", "clouds", "temperature", "dewpoint", "qnh"):
+            for k in (
+                "raw",
+                "station",
+                "windDirection",
+                "windSpeed",
+                "visibility",
+                "clouds",
+                "temperature",
+                "dewpoint",
+                "qnh",
+            ):
                 if k not in p:
                     errors.append(f"parsedWeather[{i}] missing key '{k}'")
                     break
@@ -1221,7 +1255,9 @@ def _assert_api_response_structure(data: dict, orig: str, dest: str):
                         errors.append(f"{label}[{i}] missing key '{k}'")
                         break
                 if "thresholds" in rw and not isinstance(rw["thresholds"], list):
-                    errors.append(f"{label}[{i}]['thresholds'] type={type(rw['thresholds']).__name__}")
+                    errors.append(
+                        f"{label}[{i}]['thresholds'] type={type(rw['thresholds']).__name__}"
+                    )
 
     # --- active transitions ---
     for key in ("activeSIDTransition", "activeSTARTransition"):
@@ -1269,6 +1305,7 @@ def test_route_response_structure_complete(orig, dest):
 # ---------------------------------------------------------------------------
 # Helpers for route walking
 # ---------------------------------------------------------------------------
+
 
 def _build_full_node_sequence(segments: list) -> list:
     """Build ordered node list from routeSegments (from/to chain)."""
@@ -1429,9 +1466,7 @@ def _walk_and_verify_route(data: dict, orig: str, dest: str) -> list:
 
     # 2. Verify nodes list matches segment-derived sequence
     if nodes != seg_nodes:
-        errors.append(
-            f"nodes list mismatch: nodes={nodes} != seg_nodes={seg_nodes}"
-        )
+        errors.append(f"nodes list mismatch: nodes={nodes} != seg_nodes={seg_nodes}")
 
     # 3. Build adjacency and walk
     adj = _build_adjacency_from_segments(segments)
@@ -1441,19 +1476,13 @@ def _walk_and_verify_route(data: dict, orig: str, dest: str) -> list:
             errors.append(f"duplicate consecutive node: {a} at index {i}")
             continue
         if a not in adj or b not in adj[a]:
-            errors.append(
-                f"broken edge: {a} -> {b} not found in routeSegments"
-            )
+            errors.append(f"broken edge: {a} -> {b} not found in routeSegments")
 
     # 4. Verify start/end
     if seg_nodes[0] != orig:
-        errors.append(
-            f"route starts at {seg_nodes[0]!r}, expected {orig!r}"
-        )
+        errors.append(f"route starts at {seg_nodes[0]!r}, expected {orig!r}")
     if seg_nodes[-1] != dest:
-        errors.append(
-            f"route ends at {seg_nodes[-1]!r}, expected {dest!r}"
-        )
+        errors.append(f"route ends at {seg_nodes[-1]!r}, expected {dest!r}")
 
     # 5. No cycles: each node should appear at most once
     seen = set()
@@ -1465,15 +1494,11 @@ def _walk_and_verify_route(data: dict, orig: str, dest: str) -> list:
     # 6. Verify SID/STAR complete procedure paths
     sid_nodes = _extract_airway_nodes(segments, "SID")
     sid_procs = data.get("SID", {})
-    errors.extend(_verify_sid_star_complete_path(
-        sid_nodes, sid_procs, "SID", orig, dest
-    ))
+    errors.extend(_verify_sid_star_complete_path(sid_nodes, sid_procs, "SID", orig, dest))
 
     star_nodes = _extract_airway_nodes(segments, "STAR")
     star_procs = data.get("STAR", {})
-    errors.extend(_verify_sid_star_complete_path(
-        star_nodes, star_procs, "STAR", orig, dest
-    ))
+    errors.extend(_verify_sid_star_complete_path(star_nodes, star_procs, "STAR", orig, dest))
 
     return errors
 
@@ -1481,6 +1506,7 @@ def _walk_and_verify_route(data: dict, orig: str, dest: str) -> list:
 # ---------------------------------------------------------------------------
 # 3.12 Walk the complete route — from departure runway to destination runway
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("orig,dest", AIRPORT_PAIRS)
 def test_walk_complete_route_auto_sid_star(orig, dest):
@@ -1514,6 +1540,7 @@ def test_walk_complete_route_auto_sid_star(orig, dest):
 # ---------------------------------------------------------------------------
 # 3.13 Walk complete route for every SID exit
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("orig,dest", AIRPORT_PAIRS)
 def test_walk_complete_route_all_sid_exits(orig, dest):
@@ -1560,6 +1587,7 @@ def test_walk_complete_route_all_sid_exits(orig, dest):
 # 3.14 Walk complete route for every STAR entry
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("orig,dest", AIRPORT_PAIRS)
 def test_walk_complete_route_all_star_entries(orig, dest):
     """Walk the complete route for every STAR entry point."""
@@ -1604,6 +1632,7 @@ def test_walk_complete_route_all_star_entries(orig, dest):
 # ---------------------------------------------------------------------------
 # 3.15 Boundary node correctness — sidRouteNodeName / starRouteNodeName
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("orig,dest", AIRPORT_PAIRS)
 def test_route_boundary_nodes_are_semantically_correct(orig, dest):
@@ -1736,6 +1765,7 @@ def test_route_boundary_nodes_are_semantically_correct(orig, dest):
 # 3.16 Transition continuity — STAR transition points must not be skipped
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("orig,dest", AIRPORT_PAIRS)
 def test_star_transition_points_are_not_skipped_by_airway(orig, dest):
     """When A* enters a STAR via a transition, the route must contain every
@@ -1807,6 +1837,7 @@ def test_star_transition_points_are_not_skipped_by_airway(orig, dest):
 # 3.17 Standard route assertions — must produce known-correct routes
 # ---------------------------------------------------------------------------
 
+
 def test_standard_route_rjbb_rjtt():
     """RJBB→RJTT must produce the standard route via SHTLE transition.
 
@@ -1830,11 +1861,7 @@ def test_standard_route_rjbb_rjtt():
 
     route = data["route"]
     expected = "RJBB SID SHTLE Y71 XAC STAR RJTT"
-    assert route == expected, (
-        f"RJBB→RJTT route mismatch.\n"
-        f"Expected: {expected}\n"
-        f"Got:      {route}"
-    )
+    assert route == expected, f"RJBB→RJTT route mismatch.\nExpected: {expected}\nGot:      {route}"
     assert data.get("activeSIDTransition") == "SHTLE", (
         f"RJBB→RJTT active SID transition must be SHTLE, got: {data.get('activeSIDTransition')}"
     )
@@ -1893,6 +1920,7 @@ def test_standard_route_klax_kjfk():
 # 3.18 Standard routes from rfinder — must match known optimal answers
 # ---------------------------------------------------------------------------
 
+
 # Helpers for distance parsing
 def _parse_distance_nm(dist_str: str) -> float:
     """Extract nautical-mile value from 'xxx.xx nm / yyy.yy km' string."""
@@ -1908,16 +1936,29 @@ STANDARD_ROUTES = [
     # (orig, dest, expected_route, expected_dist_nm)
     ("ZBAA", "ZGGG", "ZBAA SID OMDEK W37 VIKEB V66 VESUX W45 IKAVO STAR ZGGG", 1031.5),
     ("ZBAA", "ZGHA", "ZBAA SID OMDEK W37 GUSIV STAR ZGHA", 742.9),
-    ("ZGHA", "ZJSY", "ZGHA SID OLTUS R343 ENKUS W120 IVPUB W159 BHY W70 NYB G221 UPRIS STAR ZJSY", 702.3),
+    (
+        "ZGHA",
+        "ZJSY",
+        "ZGHA SID OLTUS R343 ENKUS W120 IVPUB W159 BHY W70 NYB G221 UPRIS STAR ZJSY",
+        702.3,
+    ),
     ("ZBAA", "ZSPD", "ZBAA SID ELKUR W40 YQG W142 DALIM A593 VMB W161 SASAN STAR ZSPD", 637.6),
     ("RJTT", "RJBB", "RJTT SID LAXAS Y56 TOHME Y54 KOHWA Y544 DUBKA STAR RJBB", 254.4),
     ("KLAX", "KSEA", "KLAX SID EHF J5 LKV STAR KSEA", 832.3),
-    ("RKPC", "ZBAD", "RKPC SID LIMDI Y677 TOLIS Y655 NONOS Z55 AGAVO A591 IKEKA W4 HCH W200 DOVIV W55 DUMAP STAR ZBAD", 718.5),
+    (
+        "RKPC",
+        "ZBAD",
+        "RKPC SID LIMDI Y677 TOLIS Y655 NONOS Z55 AGAVO A591 IKEKA W4 HCH W200 DOVIV W55 DUMAP STAR ZBAD",
+        718.5,
+    ),
     pytest.param(
-        "ZBAA", "RKSI",
+        "ZBAA",
+        "RKSI",
         "ZBAA SID MUGLO W34 ANRAT A326 DONVO G597 AGAVO Y644 GONAV STAR RKSI",
         520.8,
-        marks=pytest.mark.xfail(reason="Mixed-graph A* finds shorter LULTA route (510 nm vs 521 nm)"),
+        marks=pytest.mark.xfail(
+            reason="Mixed-graph A* finds shorter LULTA route (510 nm vs 521 nm)"
+        ),
     ),
     ("VHHH", "RCTP", "VHHH SID DUMEP V621 CONGA V631 ENVAR M750 TONGA STAR RCTP", 491.7),
 ]
@@ -1965,6 +2006,7 @@ def test_standard_route_from_rfinder(orig, dest, expected_route, expected_dist_n
 # ---------------------------------------------------------------------------
 # 3.19 SID transition continuity — points must not be skipped
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("orig,dest", AIRPORT_PAIRS)
 def test_sid_transition_points_are_not_skipped_by_airway(orig, dest):

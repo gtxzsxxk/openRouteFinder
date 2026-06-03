@@ -13,9 +13,11 @@ os.environ["DISABLE_CAPTCHA"] = "true"
 
 import pytest
 from fastapi.testclient import TestClient
+
 from openRouterFinder.api import app
 from openRouterFinder.core.airport import FlatbuffersAirportConnector
 from openRouterFinder.core.storage.reader import MmappedNavData
+
 
 def setup_module(module):
     """Trigger FastAPI startup events to build airport index."""
@@ -68,6 +70,7 @@ INTL_MAX_LEG_NM = 300
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _get_procedures(icao: str):
     """Fetch /api/airports/{icao}/procedures?detail=true&cycle=2604 and return parsed JSON."""
     resp = client.get(f"/api/airports/{icao}/procedures?detail=true&cycle=2604")
@@ -85,7 +88,7 @@ def _nm(d_km: float) -> float:
 
 def _point_dist_km(p1, p2) -> float:
     """Great-circle distance between two [name, lat, lon] points."""
-    from math import radians, sin, cos, sqrt, atan2
+    from math import atan2, cos, radians, sin, sqrt
 
     R = 6378.137
     lat1, lon1 = radians(p1[1]), radians(p1[2])
@@ -122,6 +125,7 @@ def _all_procedure_tuples(data: dict):
 # 5.1 Illegal Points Check
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("icao", TEST_AIRPORTS)
 def test_no_synthetic_markers_in_procedures(icao):
     """D#### markers must not appear as standalone points in any procedure."""
@@ -134,20 +138,19 @@ def test_no_synthetic_markers_in_procedures(icao):
 
         for pt in points:
             assert not _is_synthetic_marker(pt[0]), (
-                f"{icao} {label} {proc_name}: "
-                f"synthetic marker {pt[0]} in points"
+                f"{icao} {label} {proc_name}: synthetic marker {pt[0]} in points"
             )
         for t_name, t_pts in transitions:
             for pt in t_pts:
                 assert not _is_synthetic_marker(pt[0]), (
-                    f"{icao} {label} {proc_name}: "
-                    f"synthetic marker {pt[0]} in transition {t_name}"
+                    f"{icao} {label} {proc_name}: synthetic marker {pt[0]} in transition {t_name}"
                 )
 
 
 # ---------------------------------------------------------------------------
 # 5.2 Edge Count Check
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("icao", TEST_AIRPORTS)
 def test_procedure_edge_counts_reasonable(icao):
@@ -263,6 +266,7 @@ def test_procedure_edge_counts_reasonable(icao):
 # 5.3 Path Quality — Teleportation Check
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("icao", TEST_AIRPORTS)
 def test_procedure_paths_no_teleportation(icao):
     """No single leg should exceed the airport-type distance threshold."""
@@ -287,6 +291,7 @@ def test_procedure_paths_no_teleportation(icao):
 # 5.4 Runway "ALL" Handling
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("icao", TEST_AIRPORTS)
 def test_no_runway_all_with_single_point(icao):
     """Procedures with runway=ALL must still have a meaningful path."""
@@ -298,8 +303,7 @@ def test_no_runway_all_with_single_point(icao):
         points = proc[2]
         if runway == "ALL":
             assert len(points) > 1, (
-                f"{icao} {label}: {proc_name} has runway=ALL "
-                f"but only {len(points)} point(s)"
+                f"{icao} {label}: {proc_name} has runway=ALL but only {len(points)} point(s)"
             )
 
 
@@ -340,9 +344,9 @@ def test_no_runway_all_when_specific_exists(icao):
 
 # Representative routes that cover airports with known ALL+specific conflicts.
 _RUNWAY_ALL_CHECK_PAIRS = [
-    ("ZBAA", "KLAX"),   # KIMMO3: ALL + 24R
-    ("ZBAA", "KSEA"),   # BASET5 / BIGBR3: ALL + multiple runways
-    ("KJFK", "KLAX"),   # ANJLL4 / DIRBY2: ALL + multiple runways
+    ("ZBAA", "KLAX"),  # KIMMO3: ALL + 24R
+    ("ZBAA", "KSEA"),  # BASET5 / BIGBR3: ALL + multiple runways
+    ("KJFK", "KLAX"),  # ANJLL4 / DIRBY2: ALL + multiple runways
 ]
 
 
@@ -398,6 +402,7 @@ def test_post_route_no_runway_all_when_specific_exists(orig, dest):
 # ---------------------------------------------------------------------------
 # 5.5 SID Runway Endpoint Consistency
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("icao", TEST_AIRPORTS)
 def test_sid_runway_endpoint_consistent(icao):
@@ -484,6 +489,7 @@ def test_zbaa_36l_sid_circles_beijing():
 # 5.6 STAR Final Approach Check
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("icao", TEST_AIRPORTS)
 def test_star_final_approach_reasonable(icao):
     """STAR procedures must have >=2 points and a connected final segment."""
@@ -495,8 +501,7 @@ def test_star_final_approach_reasonable(icao):
             points = proc[2]
             for pt in points:
                 assert not _is_synthetic_marker(pt[0]), (
-                    f"{icao} STAR {proc[0]}: "
-                    f"synthetic marker {pt[0]} in points"
+                    f"{icao} STAR {proc[0]}: synthetic marker {pt[0]} in points"
                 )
             if len(points) < 2:
                 continue
@@ -505,6 +510,7 @@ def test_star_final_approach_reasonable(icao):
 # ---------------------------------------------------------------------------
 # 5.7 ZGGG IKAVO3 Approach Bridge Check
 # ---------------------------------------------------------------------------
+
 
 def test_zggg_ikavo3_approach_bridge_exists():
     """IKAVO3 for runways 19R/20L/20R must have at least one waypoint
@@ -587,6 +593,7 @@ def test_zggg_ikavo3_approach_bridge_exists():
 # 5.8 ZGGG IKAVO3 Points Completeness Check
 # ---------------------------------------------------------------------------
 
+
 def test_zggg_ikavo3_has_complete_points():
     """IKAVO3 for all runways must have a complete approach path with >2 points.
 
@@ -631,6 +638,7 @@ def test_zggg_ikavo3_has_complete_points():
 # 5.9 No Hub Nodes in Pooled internal_edges
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(scope="module")
 def navdata_fb():
     """Load cycle 2604 FlatBuffers navdata once for all direct tests."""
@@ -674,7 +682,9 @@ def test_procedure_internal_edges_no_hub_nodes(icao, navdata_fb):
                 for t_name, t_pts in proc.transitions:
                     for i in range(len(t_pts) - 1):
                         from_node = connector._resolve_node(t_pts[i][0], t_pts[i][1], t_pts[i][2])
-                        to_node = connector._resolve_node(t_pts[i + 1][0], t_pts[i + 1][1], t_pts[i + 1][2])
+                        to_node = connector._resolve_node(
+                            t_pts[i + 1][0], t_pts[i + 1][1], t_pts[i + 1][2]
+                        )
                         expected_edges.add((from_node.iid, to_node.iid))
                         iid_to_name[from_node.iid] = from_node.name
                         iid_to_name[to_node.iid] = to_node.name
@@ -723,7 +733,7 @@ def test_procedure_internal_edges_no_hub_nodes(icao, navdata_fb):
 # 5.10 Runway Field Sanity Check
 # ---------------------------------------------------------------------------
 
-RUNWAY_RE = re.compile(r'^\d+[LRC]?$')
+RUNWAY_RE = re.compile(r"^\d+[LRC]?$")
 
 
 @pytest.mark.parametrize("icao", TEST_AIRPORTS)
@@ -755,6 +765,7 @@ def test_runway_field_is_valid(icao):
 # 5.9 No runway='ALL' in frontend procedure lists
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.parametrize("icao", TEST_AIRPORTS)
 def test_no_runway_all_in_procedure_lists(icao):
     """Frontend procedure dropdowns must never show runway='ALL'.
@@ -770,8 +781,10 @@ def test_no_runway_all_in_procedure_lists(icao):
     data = _get_procedures(icao)
     failures = []
 
-    for label, details in (("SID", data.get("sidDetails", {})),
-                           ("STAR", data.get("starDetails", {}))):
+    for label, details in (
+        ("SID", data.get("sidDetails", {})),
+        ("STAR", data.get("starDetails", {})),
+    ):
         for key, proc_list in details.items():
             for proc in proc_list:
                 proc_name = proc[0]

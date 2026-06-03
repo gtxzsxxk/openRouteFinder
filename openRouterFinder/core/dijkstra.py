@@ -4,16 +4,13 @@ import heapq
 import json
 import math
 import time
-from typing import List, Dict, Tuple, Optional
 
+from openRouterFinder.core.airport import AirportConnection, Procedure
 from openRouterFinder.core.graph import (
     Node,
-    Edge,
-    SearchingNode,
     great_circle_distance_km,
     heuristic_km,
 )
-from openRouterFinder.core.airport import AirportConnection, Procedure
 
 
 def _procs_to_dict(procs: dict) -> dict:
@@ -21,8 +18,7 @@ def _procs_to_dict(procs: dict) -> dict:
     result = {}
     for key, proc_list in procs.items():
         result[key] = [
-            [p.name, p.runway, p.points, [[t[0], t[1]] for t in p.transitions]]
-            for p in proc_list
+            [p.name, p.runway, p.points, [[t[0], t[1]] for t in p.transitions]] for p in proc_list
         ]
     return result
 
@@ -70,9 +66,9 @@ class RouteEngine:
 
     def __init__(
         self,
-        node_list: Tuple[Optional[Node], ...],
+        node_list: tuple[Node | None, ...],
         data_version: str,
-        node_index: Optional[Dict[Tuple[str, float, float], Node]] = None,
+        node_index: dict[tuple[str, float, float], Node] | None = None,
     ):
         self.node_list = node_list
         self.data_version = data_version
@@ -82,7 +78,7 @@ class RouteEngine:
         if node_index is not None:
             self._node_index = node_index
         else:
-            self._node_index: Dict[Tuple[str, float, float], Node] = {}
+            self._node_index: dict[tuple[str, float, float], Node] = {}
             for node in node_list:
                 if node is not None:
                     self._node_index[node.node_key()] = node
@@ -96,8 +92,10 @@ class RouteEngine:
                         next_node = node_list[edge.nend]
                         if next_node is not None:
                             edge.dist = great_circle_distance_km(
-                                node.px, node.py,
-                                next_node.px, next_node.py,
+                                node.px,
+                                node.py,
+                                next_node.px,
+                                next_node.py,
                             )
 
     def search(
@@ -106,10 +104,10 @@ class RouteEngine:
         dest: str,
         sid_conn: AirportConnection,
         star_conn: AirportConnection,
-        airport_names: List[str],
-        sid_exit: Optional[str] = None,
-        star_entry: Optional[str] = None,
-    ) -> Optional[str]:
+        airport_names: list[str],
+        sid_exit: str | None = None,
+        star_entry: str | None = None,
+    ) -> str | None:
         """Run mixed-graph A* search. Returns JSON string or None."""
         timestart = time.time()
 
@@ -128,9 +126,14 @@ class RouteEngine:
 
         if sid_proc is None or sid_boundary is None:
             return build_route_info(
-                self.data_version, "0.00",
-                "No result.", "0.00 nm / 0.00 km",
-                None, {}, {}, [],
+                self.data_version,
+                "0.00",
+                "No result.",
+                "0.00 nm / 0.00 km",
+                None,
+                {},
+                {},
+                [],
             )
 
         # Phase 2: SID transition selection
@@ -149,14 +152,18 @@ class RouteEngine:
             sid_conn, is_sid=True, filter_name=sid_exit
         )
         star_candidates = self._collect_procedure_candidates(
-            star_conn, is_sid=False, filter_name=star_entry,
-            sid_conn=sid_conn, star_conn=star_conn
+            star_conn, is_sid=False, filter_name=star_entry, sid_conn=sid_conn, star_conn=star_conn
         )
         if not star_candidates:
             return build_route_info(
-                self.data_version, "0.00",
-                "No result.", "0.00 nm / 0.00 km",
-                None, {}, {}, [],
+                self.data_version,
+                "0.00",
+                "No result.",
+                "0.00 nm / 0.00 km",
+                None,
+                {},
+                {},
+                [],
             )
 
         # Initial STAR selection before entering the alternating loop.
@@ -165,9 +172,14 @@ class RouteEngine:
         )
         if star_proc is None or star_boundary is None:
             return build_route_info(
-                self.data_version, "0.00",
-                "No result.", "0.00 nm / 0.00 km",
-                None, {}, {}, [],
+                self.data_version,
+                "0.00",
+                "No result.",
+                "0.00 nm / 0.00 km",
+                None,
+                {},
+                {},
+                [],
             )
 
         for _ in range(5):
@@ -182,9 +194,14 @@ class RouteEngine:
             )
             if star_proc is None or star_boundary is None:
                 return build_route_info(
-                    self.data_version, "0.00",
-                    "No result.", "0.00 nm / 0.00 km",
-                    None, {}, {}, [],
+                    self.data_version,
+                    "0.00",
+                    "No result.",
+                    "0.00 nm / 0.00 km",
+                    None,
+                    {},
+                    {},
+                    [],
                 )
             prev_star_t = star_t_name
 
@@ -215,15 +232,24 @@ class RouteEngine:
 
             # Check convergence
             curr_sid_t = sid_transition_result[0] if sid_transition_result else None
-            if (sid_proc.name == prev_sid_name and curr_sid_t == prev_sid_t and
-                star_proc.name == prev_star_name and star_t_name == prev_star_t):
+            if (
+                sid_proc.name == prev_sid_name
+                and curr_sid_t == prev_sid_t
+                and star_proc.name == prev_star_name
+                and star_t_name == prev_star_t
+            ):
                 break
 
         if star_proc is None or star_boundary is None or sid_boundary is None:
             return build_route_info(
-                self.data_version, "0.00",
-                "No result.", "0.00 nm / 0.00 km",
-                None, {}, {}, [],
+                self.data_version,
+                "0.00",
+                "No result.",
+                "0.00 nm / 0.00 km",
+                None,
+                {},
+                {},
+                [],
             )
 
         # Phase 5: Airway A* (zero-copy, pure airway graph).
@@ -254,22 +280,17 @@ class RouteEngine:
         forbidden_iids = _build_forbidden(sid_proc, star_proc, sid_transition_pts)
         forbidden_iids.discard(star_boundary.iid)
 
-        airway_route = self._astar_airway(
-            sid_boundary.iid, star_boundary.iid, forbidden_iids
-        )
+        airway_route = self._astar_airway(sid_boundary.iid, star_boundary.iid, forbidden_iids)
 
         if airway_route is not None:
-            airway_route = self._reassign_airways(
-                airway_route, sid_boundary.iid
-            )
+            airway_route = self._reassign_airways(airway_route, sid_boundary.iid)
 
         # Fallback: if filtered STAR is unreachable via pure airway graph,
         # try auto-selected STAR (matches old mixed-graph behaviour where
         # all procedures were implicitly available).
         if airway_route is None and star_entry:
             fallback_candidates = self._collect_procedure_candidates(
-                star_conn, is_sid=False, filter_name=None,
-                sid_conn=sid_conn, star_conn=star_conn
+                star_conn, is_sid=False, filter_name=None, sid_conn=sid_conn, star_conn=star_conn
             )
             fallback_proc, fallback_boundary, _ = self._select_procedure_astar(
                 fallback_candidates, sid_boundary.iid, is_sid=False
@@ -286,16 +307,26 @@ class RouteEngine:
 
         if airway_route is None:
             return build_route_info(
-                self.data_version, "0.00",
-                "No result.", "0.00 nm / 0.00 km",
-                None, {}, {}, [],
+                self.data_version,
+                "0.00",
+                "No result.",
+                "0.00 nm / 0.00 km",
+                None,
+                {},
+                {},
+                [],
             )
 
         # Phase 6: Assemble full route
         route_list = self._assemble_route(
-            sid_conn, sid_proc, airway_route, star_proc, star_conn,
-            sid_boundary=sid_boundary, star_boundary=star_boundary,
-            sid_transition_pts=sid_transition_pts
+            sid_conn,
+            sid_proc,
+            airway_route,
+            star_proc,
+            star_conn,
+            sid_boundary=sid_boundary,
+            star_boundary=star_boundary,
+            sid_transition_pts=sid_transition_pts,
         )
 
         # Recalculate distance
@@ -368,15 +399,15 @@ class RouteEngine:
         conn: AirportConnection,
         other_airport_node: Node,
         is_sid: bool,
-        filter_name: Optional[str] = None,
-    ) -> Tuple[Optional[Procedure], Optional[Node]]:
+        filter_name: str | None = None,
+    ) -> tuple[Procedure | None, Node | None]:
         """Deterministically select the best procedure and its airway boundary node.
 
         If filter_name is given, only consider procedures whose key matches.
         Otherwise pick the procedure whose exit/entry direction best aligns
         with the great-circle route to/from the other airport.
         """
-        candidates: List[Tuple[Procedure, Node, str]] = []
+        candidates: list[tuple[Procedure, Node, str]] = []
 
         effective_filter = filter_name if filter_name else None
         for key, proc_list in conn.procedures.items():
@@ -400,7 +431,7 @@ class RouteEngine:
             # SID: prefer exit bearing closest to airport -> destination
             target_bearing = self._bearing(ap_lat, ap_lon, other_lat, other_lon)
             best_proc, best_boundary = None, None
-            best_score = float('inf')
+            best_score = float("inf")
             for proc, boundary, _ in candidates:
                 if proc.points:
                     exit_lat, exit_lon = proc.points[-1][1], proc.points[-1][2]
@@ -410,28 +441,27 @@ class RouteEngine:
                         best_score = score
                         best_proc, best_boundary = proc, boundary
             return best_proc, best_boundary
-        else:
-            # STAR: prefer entry bearing closest to source -> airport
-            # (i.e. bearing from entry point toward airport)
-            target_bearing = self._bearing(other_lat, other_lon, ap_lat, ap_lon)
-            best_proc, best_boundary = None, None
-            best_score = float('inf')
-            for proc, boundary, _ in candidates:
-                if proc.points:
-                    entry_lat, entry_lon = proc.points[0][1], proc.points[0][2]
-                    entry_bearing = self._bearing(entry_lat, entry_lon, ap_lat, ap_lon)
-                    score = abs(self._angle_diff(target_bearing, entry_bearing))
-                    if score < best_score:
-                        best_score = score
-                        best_proc, best_boundary = proc, boundary
-            return best_proc, best_boundary
+        # STAR: prefer entry bearing closest to source -> airport
+        # (i.e. bearing from entry point toward airport)
+        target_bearing = self._bearing(other_lat, other_lon, ap_lat, ap_lon)
+        best_proc, best_boundary = None, None
+        best_score = float("inf")
+        for proc, boundary, _ in candidates:
+            if proc.points:
+                entry_lat, entry_lon = proc.points[0][1], proc.points[0][2]
+                entry_bearing = self._bearing(entry_lat, entry_lon, ap_lat, ap_lon)
+                score = abs(self._angle_diff(target_bearing, entry_bearing))
+                if score < best_score:
+                    best_score = score
+                    best_proc, best_boundary = proc, boundary
+        return best_proc, best_boundary
 
     def _find_boundary_node(
         self,
         conn: AirportConnection,
         proc: Procedure,
         is_sid: bool,
-    ) -> Optional[Node]:
+    ) -> Node | None:
         """Find the airway node that serves as the boundary between procedure and airway.
 
         For SID: the exit point (last point). If it is a temp node, follow
@@ -494,7 +524,7 @@ class RouteEngine:
         sid_conn: AirportConnection,
         star_conn: AirportConnection,
         dest_node: Node,
-    ) -> Optional[Tuple[str, List[Tuple[str, float, float]], Node]]:
+    ) -> tuple[str, list[tuple[str, float, float]], Node] | None:
         """Select the best SID transition and return (name, points, boundary_node).
 
         The boundary_node is the airway node connected to the transition end.
@@ -519,7 +549,7 @@ class RouteEngine:
         target_bearing = self._bearing(ref_lat, ref_lon, dest_lat, dest_lon)
 
         best = None
-        best_score = float('inf')
+        best_score = float("inf")
 
         for t_name, t_pts in sid_proc.transitions:
             if t_name.startswith("RW"):
@@ -567,7 +597,7 @@ class RouteEngine:
         """
         if not name:
             return False
-        return name[0] == 'T' and len(name) > 1 and name[1:].isdigit()
+        return name[0] == "T" and len(name) > 1 and name[1:].isdigit()
 
     def _should_skip_edge(self, curr_node, edge_name: str) -> bool:
         """Determine whether to skip an edge during A* traversal.
@@ -579,9 +609,7 @@ class RouteEngine:
         """
         if not self._is_excluded_airway(edge_name):
             return False
-        has_non_t = any(
-            not self._is_excluded_airway(e.name) for e in curr_node.next_list
-        )
+        has_non_t = any(not self._is_excluded_airway(e.name) for e in curr_node.next_list)
         return has_non_t
 
     @staticmethod
@@ -591,8 +619,8 @@ class RouteEngine:
         Extracts alphabetic prefix and numeric suffix so that J70 sorts
         before J106 (70 < 106).
         """
-        prefix = ''
-        num_str = ''
+        prefix = ""
+        num_str = ""
         for c in name:
             if c.isalpha() and not num_str:
                 prefix += c
@@ -606,15 +634,15 @@ class RouteEngine:
         self,
         start_iid: int,
         end_iid: int,
-        forbidden_iids: Optional[set] = None,
-    ) -> Optional[List[Tuple[str, str, int]]]:
+        forbidden_iids: set | None = None,
+    ) -> list[tuple[str, str, int]] | None:
         """Zero-copy Dijkstra on the pure airway graph (node.next_list only).
 
         Returns route_list of (edge_name, node_name, node_iid) or None.
         """
-        INF = float('inf')
+        INF = float("inf")
         dists = [INF] * self.num_nodes
-        prev_edge: List[Optional[Tuple[int, str]]] = [None] * self.num_nodes
+        prev_edge: list[tuple[int, str] | None] = [None] * self.num_nodes
 
         start_node = self.node_list[start_iid]
         end_node = self.node_list[end_iid]
@@ -650,8 +678,10 @@ class RouteEngine:
                     continue
 
                 nd = dists[curr] + great_circle_distance_km(
-                    curr_node.px, curr_node.py,
-                    next_node.px, next_node.py,
+                    curr_node.px,
+                    curr_node.py,
+                    next_node.px,
+                    next_node.py,
                 )
 
                 if nd < dists[edge.nend]:
@@ -676,12 +706,12 @@ class RouteEngine:
         self,
         start_iid: int,
         end_iid: int,
-        forbidden_iids: Optional[set] = None,
-    ) -> Optional[float]:
+        forbidden_iids: set | None = None,
+    ) -> float | None:
         """Run Dijkstra and return only the total distance (no path reconstruction)."""
-        INF = float('inf')
+        INF = float("inf")
         dists = [INF] * self.num_nodes
-        prev_edge: List[Optional[Tuple[int, str]]] = [None] * self.num_nodes
+        prev_edge: list[tuple[int, str] | None] = [None] * self.num_nodes
 
         start_node = self.node_list[start_iid]
         end_node = self.node_list[end_iid]
@@ -717,8 +747,10 @@ class RouteEngine:
                     continue
 
                 nd = dists[curr] + great_circle_distance_km(
-                    curr_node.px, curr_node.py,
-                    next_node.px, next_node.py,
+                    curr_node.px,
+                    curr_node.py,
+                    next_node.px,
+                    next_node.py,
                 )
 
                 if nd < dists[edge.nend]:
@@ -734,10 +766,10 @@ class RouteEngine:
         self,
         conn: AirportConnection,
         is_sid: bool,
-        filter_name: Optional[str] = None,
-        sid_conn: Optional[AirportConnection] = None,
-        star_conn: Optional[AirportConnection] = None,
-    ) -> List[Tuple[Procedure, Node, str, Optional[str]]]:
+        filter_name: str | None = None,
+        sid_conn: AirportConnection | None = None,
+        star_conn: AirportConnection | None = None,
+    ) -> list[tuple[Procedure, Node, str, str | None]]:
         """Collect all procedure candidates with their boundary nodes.
 
         For STAR, also includes transition boundaries. Transition candidates
@@ -746,7 +778,7 @@ class RouteEngine:
         Returns list of (procedure, boundary_node, key, transition_name).
         transition_name is None for main procedure boundary.
         """
-        candidates: List[Tuple[Procedure, Node, str, Optional[str]]] = []
+        candidates: list[tuple[Procedure, Node, str, str | None]] = []
         effective_filter = filter_name if filter_name else None
 
         for key, proc_list in conn.procedures.items():
@@ -858,10 +890,10 @@ class RouteEngine:
         self,
         proc: Procedure,
         conn: AirportConnection,
-        transition_name: Optional[str] = None,
+        transition_name: str | None = None,
     ) -> float:
         """Calculate total distance of a procedure and optional transition in km."""
-        points: List[Tuple[str, float, float]] = []
+        points: list[tuple[str, float, float]] = []
 
         if transition_name is not None:
             for t_name, t_pts in proc.transitions:
@@ -899,11 +931,11 @@ class RouteEngine:
 
     def _select_procedure_astar(
         self,
-        candidates: List[Tuple[Procedure, Node, str, Optional[str]]],
+        candidates: list[tuple[Procedure, Node, str, str | None]],
         other_boundary_iid: int,
         is_sid: bool,
-        conn: Optional[AirportConnection] = None,
-    ) -> Tuple[Optional[Procedure], Optional[Node], Optional[str]]:
+        conn: AirportConnection | None = None,
+    ) -> tuple[Procedure | None, Node | None, str | None]:
         """Select best procedure by total distance (airway + procedure).
 
         For SID: airway from boundary to other_boundary + SID procedure distance.
@@ -919,7 +951,7 @@ class RouteEngine:
             return candidates[0][0], candidates[0][1], candidates[0][3]
 
         best_proc, best_boundary, best_t_name = None, None, None
-        best_dist = float('inf')
+        best_dist = float("inf")
 
         for proc, boundary, key, t_name in candidates:
             if is_sid:
@@ -934,9 +966,7 @@ class RouteEngine:
                     # can pick a short transition whose airway later backtracks
                     # through transition waypoints (e.g. LAXX1 OCN transition
                     # then airway V165 returns to DANAH).
-                    proc_dist = self._calc_procedure_distance(
-                        proc, conn, transition_name=t_name
-                    )
+                    proc_dist = self._calc_procedure_distance(proc, conn, transition_name=t_name)
                 else:
                     # STAR: use GC distance from boundary to airport.
                     # _calc_procedure_distance sums every waypoint leg, which
@@ -945,8 +975,10 @@ class RouteEngine:
                     # 308 nm).  GC aligns with _calc_route_distance which
                     # compresses consecutive STAR nodes into a single segment.
                     proc_dist = great_circle_distance_km(
-                        boundary.px, boundary.py,
-                        conn.airport_node.px, conn.airport_node.py,
+                        boundary.px,
+                        boundary.py,
+                        conn.airport_node.px,
+                        conn.airport_node.py,
                     )
                 dist += proc_dist
 
@@ -964,9 +996,9 @@ class RouteEngine:
 
     def _find_insertion_transition(
         self,
-        airway_route: List[Tuple[str, str, int]],
+        airway_route: list[tuple[str, str, int]],
         star_proc: Procedure,
-    ) -> Optional[List[Tuple[str, float, float]]]:
+    ) -> list[tuple[str, float, float]] | None:
         """Find the STAR transition whose start is in the airway route.
 
         Returns the transition point list (including start and end) or None.
@@ -998,15 +1030,15 @@ class RouteEngine:
         self,
         sid_conn: AirportConnection,
         sid_proc: Procedure,
-        airway_route: List[Tuple[str, str, int]],
+        airway_route: list[tuple[str, str, int]],
         star_proc: Procedure,
         star_conn: AirportConnection,
-        sid_boundary: Optional[Node] = None,
-        star_boundary: Optional[Node] = None,
-        sid_transition_pts: Optional[List[Tuple[str, float, float]]] = None,
-    ) -> List[Tuple[str, str, int]]:
+        sid_boundary: Node | None = None,
+        star_boundary: Node | None = None,
+        sid_transition_pts: list[tuple[str, float, float]] | None = None,
+    ) -> list[tuple[str, str, int]]:
         """Assemble full route: SID -> airway -> STAR."""
-        route: List[Tuple[str, str, int]] = []
+        route: list[tuple[str, str, int]] = []
 
         # SID segment (skip first point if it's the airport itself)
         if sid_proc.points:
@@ -1052,12 +1084,7 @@ class RouteEngine:
         # This happens when _find_boundary_node followed a bridge edge
         # (e.g. RAMEN -> BIGEX) and the airway route starts from the
         # bridged node rather than the procedure's last point.
-        if (
-            sid_boundary is not None
-            and route
-            and route[-1][2] != sid_boundary.iid
-            and airway_route
-        ):
+        if sid_boundary is not None and route and route[-1][2] != sid_boundary.iid and airway_route:
             # Find bridge edge from last SID node to sid_boundary.
             # Bridge nodes are not part of the procedure itself, so they
             # are tagged with an empty airway label so frontend SID matching
@@ -1098,7 +1125,7 @@ class RouteEngine:
             start_name = transition_pts[0][0]
             for i, (_, name, _) in enumerate(filtered_airway):
                 if name == start_name:
-                    filtered_airway = filtered_airway[:i + 1]
+                    filtered_airway = filtered_airway[: i + 1]
                     break
 
         if star_proc and star_proc.points and filtered_airway:
@@ -1110,7 +1137,7 @@ class RouteEngine:
                     truncate_idx = i
                     break
             if truncate_idx is not None:
-                filtered_airway = filtered_airway[:truncate_idx + 1]
+                filtered_airway = filtered_airway[: truncate_idx + 1]
 
         route.extend(filtered_airway)
 
@@ -1143,9 +1170,7 @@ class RouteEngine:
             # STAR point (normal boundary case: airway end -> STAR start).
             if star_start_idx == 0 and last_airway_name != star_proc.points[0][0]:
                 first_star_pt = star_proc.points[0]
-                first_star_node = self._find_node_for_point(
-                    first_star_pt, sid_conn, star_conn
-                )
+                first_star_node = self._find_node_for_point(first_star_pt, sid_conn, star_conn)
                 if first_star_node is not None and first_star_node.iid != last_airway_iid:
                     for edge in star_conn.bridge_edges:
                         if edge.nfrom == last_airway_iid and edge.nend == first_star_node.iid:
@@ -1171,10 +1196,10 @@ class RouteEngine:
 
     def _find_node_for_point(
         self,
-        pt: Tuple[str, float, float],
-        sid_conn: Optional[AirportConnection] = None,
-        star_conn: Optional[AirportConnection] = None,
-    ) -> Optional[Node]:
+        pt: tuple[str, float, float],
+        sid_conn: AirportConnection | None = None,
+        star_conn: AirportConnection | None = None,
+    ) -> Node | None:
         """Find node for a procedure point (name, lat, lon)."""
         name, lat, lon = pt
         key = (name, round(lat, 6), round(lon, 6))
@@ -1193,7 +1218,7 @@ class RouteEngine:
 
     def _calc_route_distance(
         self,
-        route_list: List[Tuple[str, str, int]],
+        route_list: list[tuple[str, str, int]],
         sid_conn: AirportConnection,
         star_conn: AirportConnection,
     ) -> float:
@@ -1213,18 +1238,20 @@ class RouteEngine:
             node = self._get_node(iid, sid_conn, star_conn)
             if node is not None and node.iid != prev_node.iid:
                 dist_km += great_circle_distance_km(
-                    prev_node.px, prev_node.py,
-                    node.px, node.py,
+                    prev_node.px,
+                    prev_node.py,
+                    node.px,
+                    node.py,
                 )
                 prev_node = node
         return dist_km
 
     def _find_active_transition(
         self,
-        proc: Optional[Procedure],
+        proc: Procedure | None,
         route_node_names: set,
         is_sid: bool,
-    ) -> Optional[str]:
+    ) -> str | None:
         """Find the transition whose nodes best match the route."""
         if proc is None or not proc.transitions:
             return None
@@ -1276,7 +1303,7 @@ class RouteEngine:
         iid: int,
         sid_conn: AirportConnection,
         star_conn: AirportConnection,
-    ) -> Optional[Node]:
+    ) -> Node | None:
         if iid == sid_conn.airport_node.iid:
             return sid_conn.airport_node
         if iid == star_conn.airport_node.iid:
@@ -1295,9 +1322,9 @@ class RouteEngine:
 
     def _reassign_airways(
         self,
-        airway_route: List[Tuple[str, str, int]],
+        airway_route: list[tuple[str, str, int]],
         start_iid: int,
-    ) -> List[Tuple[str, str, int]]:
+    ) -> list[tuple[str, str, int]]:
         """Reassign airway names to prefer airway switching at waypoints.
 
         When two consecutive waypoints are connected by multiple airways,
@@ -1309,7 +1336,7 @@ class RouteEngine:
         if not airway_route:
             return []
 
-        result: List[Tuple[str, str, int]] = []
+        result: list[tuple[str, str, int]] = []
         prev_iid = start_iid
 
         for orig_edge_name, node_name, curr_iid in airway_route:
@@ -1345,18 +1372,16 @@ class RouteEngine:
 
         return result
 
-    def _compress_route(
-        self, route_list: List[Tuple[str, str, int]]
-    ) -> List[Tuple[str, str, int]]:
+    def _compress_route(self, route_list: list[tuple[str, str, int]]) -> list[tuple[str, str, int]]:
         """Compress airway nodes to match rfinder SortRoute conventions.
 
         Each group (SID, airway, STAR, or bridge) keeps its *last* node,
         matching the original SortRoute behaviour where consecutive entries
         on the same airway replace the previous one.
         """
-        compressed: List[Tuple[str, str, int]] = []
-        current_group: Optional[str] = None
-        group_nodes: List[Tuple[str, str, int]] = []
+        compressed: list[tuple[str, str, int]] = []
+        current_group: str | None = None
+        group_nodes: list[tuple[str, str, int]] = []
 
         for item in route_list:
             edge_name = item[0]
@@ -1377,8 +1402,8 @@ class RouteEngine:
         return compressed
 
     def _compress_route_for_distance(
-        self, route_list: List[Tuple[str, str, int]]
-    ) -> List[Tuple[str, str, int]]:
+        self, route_list: list[tuple[str, str, int]]
+    ) -> list[tuple[str, str, int]]:
         """Compress route for distance calculation.
 
         Unlike _compress_route which drops intermediate airway nodes for
@@ -1386,9 +1411,9 @@ class RouteEngine:
         airway segment so the summed great-circle legs match the actual
         airway path.
         """
-        compressed: List[Tuple[str, str, int]] = []
-        current_group: Optional[str] = None
-        group_nodes: List[Tuple[str, str, int]] = []
+        compressed: list[tuple[str, str, int]] = []
+        current_group: str | None = None
+        group_nodes: list[tuple[str, str, int]] = []
 
         for item in route_list:
             edge_name = item[0]
@@ -1414,14 +1439,14 @@ class RouteEngine:
                     compressed.append(group_nodes[-1])
 
         # Remove consecutive duplicates by iid
-        deduped: List[Tuple[str, str, int]] = []
+        deduped: list[tuple[str, str, int]] = []
         for item in compressed:
             if not deduped or deduped[-1][2] != item[2]:
                 deduped.append(item)
 
         return deduped
 
-    def _sort_route(self, orig: str, route_list: List[Tuple[str, str, int]]) -> str:
+    def _sort_route(self, orig: str, route_list: list[tuple[str, str, int]]) -> str:
         """Merge consecutive edges on same airway."""
         compressed = self._compress_route(route_list)
         parts = [orig]
@@ -1433,8 +1458,8 @@ class RouteEngine:
         self,
         sid_conn: AirportConnection,
         star_conn: AirportConnection,
-        route_list: List[Tuple[str, str, int]],
-    ) -> List[List]:
+        route_list: list[tuple[str, str, int]],
+    ) -> list[list]:
         """Build list of [name, lat, lon] for each node in route."""
         result = [[sid_conn.airport_node.name, sid_conn.airport_node.px, sid_conn.airport_node.py]]
         for _, _, iid in route_list:
@@ -1446,17 +1471,19 @@ class RouteEngine:
     def _build_route_segments(
         self,
         sid_conn: AirportConnection,
-        route_list: List[Tuple[str, str, int]],
-    ) -> List[dict]:
+        route_list: list[tuple[str, str, int]],
+    ) -> list[dict]:
         """Build list of route segments with airway names."""
         segments = []
         prev_name = sid_conn.airport_node.name
         for edge_name, node_name, _ in route_list:
-            segments.append({
-                "from": prev_name,
-                "to": node_name,
-                "airway": edge_name,
-            })
+            segments.append(
+                {
+                    "from": prev_name,
+                    "to": node_name,
+                    "airway": edge_name,
+                }
+            )
             prev_name = node_name
         return segments
 
@@ -1466,10 +1493,10 @@ class RouteEngine:
         dest: str,
         sid_conn: AirportConnection,
         star_conn: AirportConnection,
-        airport_names: List[str],
-        sid_exit: Optional[str] = None,
-        star_entry: Optional[str] = None,
-    ) -> Optional[str]:
+        airport_names: list[str],
+        sid_exit: str | None = None,
+        star_entry: str | None = None,
+    ) -> str | None:
         """Mixed-graph A*: single search with weighted pseudo-edges for SID/STAR.
 
         Returns JSON string or None if no route found.
@@ -1480,8 +1507,7 @@ class RouteEngine:
             sid_conn, is_sid=True, filter_name=sid_exit
         )
         star_candidates = self._collect_procedure_candidates(
-            star_conn, is_sid=False, filter_name=star_entry,
-            sid_conn=sid_conn, star_conn=star_conn
+            star_conn, is_sid=False, filter_name=star_entry, sid_conn=sid_conn, star_conn=star_conn
         )
         if not sid_candidates or not star_candidates:
             return None
@@ -1532,8 +1558,10 @@ class RouteEngine:
         star_pseudo = []
         for proc, boundary, key, t_name in star_candidates:
             weight = great_circle_distance_km(
-                boundary.px, boundary.py,
-                star_conn.airport_node.px, star_conn.airport_node.py,
+                boundary.px,
+                boundary.py,
+                star_conn.airport_node.px,
+                star_conn.airport_node.py,
             )
             source_iid = boundary.iid
             if source_iid < 0 or source_iid >= self.num_nodes:
@@ -1544,7 +1572,7 @@ class RouteEngine:
             star_pseudo.append((source_iid, weight, proc, boundary, key, t_name))
 
         # A* on mixed graph
-        INF = float('inf')
+        INF = float("inf")
         size = self.num_nodes + 2
         dists = [INF] * size
         prev = [None] * size
@@ -1671,9 +1699,14 @@ class RouteEngine:
 
         # Assemble route
         route_list = self._assemble_route(
-            sid_conn, sid_proc, airway_route, star_proc, star_conn,
-            sid_boundary=sid_boundary, star_boundary=star_boundary,
-            sid_transition_pts=sid_transition_pts
+            sid_conn,
+            sid_proc,
+            airway_route,
+            star_proc,
+            star_conn,
+            sid_boundary=sid_boundary,
+            star_boundary=star_boundary,
+            sid_transition_pts=sid_transition_pts,
         )
 
         dist_km = self._calc_route_distance(route_list, sid_conn, star_conn)

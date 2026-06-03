@@ -1,11 +1,11 @@
 """Captcha image generation utilities."""
 
-import io
 import base64
+import io
 import random
 from pathlib import Path
 
-from PIL import Image, ImageFont, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 
 
 def _get_font(size: int = 26):

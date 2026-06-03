@@ -1,116 +1,233 @@
 """Build FlatBuffers NavData from Fenix SQLite db3."""
 
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Optional
 
 import flatbuffers
 
-from openRouterFinder.core.storage.NavData.AirwayLevel import AirwayLevel
 from openRouterFinder.core.storage.NavData.Airport import (
-    AirportAddElevation, AirportAddIcao, AirportAddLat, AirportAddLon,
-    AirportAddName, AirportAddProcedures, AirportAddRunways,
-    AirportAddSpeedLimit, AirportAddSpeedLimitAltitude,
-    AirportAddTransitionAltitude, AirportAddTransitionLevel,
-    AirportEnd, AirportStart,
-    AirportStartProceduresVector, AirportStartRunwaysVector,
+    AirportAddElevation,
+    AirportAddIcao,
+    AirportAddLat,
+    AirportAddLon,
+    AirportAddName,
+    AirportAddProcedures,
+    AirportAddRunways,
+    AirportAddSpeedLimit,
+    AirportAddSpeedLimitAltitude,
+    AirportAddTransitionAltitude,
+    AirportAddTransitionLevel,
+    AirportEnd,
+    AirportStart,
+    AirportStartProceduresVector,
+    AirportStartRunwaysVector,
 )
 from openRouterFinder.core.storage.NavData.AirportComm import (
-    AirportCommAddAirportIcao, AirportCommAddAreaCode,
-    AirportCommAddCallsign, AirportCommAddCommType,
-    AirportCommAddFrequency, AirportCommAddFrequencyUnits,
-    AirportCommAddIcaoCode, AirportCommAddLat, AirportCommAddLon,
-    AirportCommAddServiceIndicator, AirportCommEnd, AirportCommStart,
+    AirportCommAddAirportIcao,
+    AirportCommAddAreaCode,
+    AirportCommAddCallsign,
+    AirportCommAddCommType,
+    AirportCommAddFrequency,
+    AirportCommAddFrequencyUnits,
+    AirportCommAddIcaoCode,
+    AirportCommAddLat,
+    AirportCommAddLon,
+    AirportCommAddServiceIndicator,
+    AirportCommEnd,
+    AirportCommStart,
 )
+from openRouterFinder.core.storage.NavData.AirwayLevel import AirwayLevel
 from openRouterFinder.core.storage.NavData.Edge import (
-    EdgeAddLevel, EdgeAddNend, EdgeAddNfrom, EdgeAddName,
-    EdgeEnd, EdgeStart,
+    EdgeAddLevel,
+    EdgeAddName,
+    EdgeAddNend,
+    EdgeAddNfrom,
+    EdgeEnd,
+    EdgeStart,
 )
 from openRouterFinder.core.storage.NavData.GLS import (
-    GLSAddAirportIcao, GLSAddApproachBearing, GLSAddApproachSlope,
-    GLSAddAreaCode, GLSAddCategory, GLSAddChannel, GLSAddIcaoCode,
-    GLSAddMagneticVariation, GLSAddRefPathIdent, GLSAddRunway,
-    GLSAddStationElevation, GLSAddStationIdent, GLSAddStationLat,
-    GLSAddStationLon, GLSAddStationType, GLSEnd, GLSStart,
+    GLSAddAirportIcao,
+    GLSAddApproachBearing,
+    GLSAddApproachSlope,
+    GLSAddAreaCode,
+    GLSAddCategory,
+    GLSAddChannel,
+    GLSAddIcaoCode,
+    GLSAddMagneticVariation,
+    GLSAddRefPathIdent,
+    GLSAddRunway,
+    GLSAddStationElevation,
+    GLSAddStationIdent,
+    GLSAddStationLat,
+    GLSAddStationLon,
+    GLSAddStationType,
+    GLSEnd,
+    GLSStart,
 )
 from openRouterFinder.core.storage.NavData.GridMora import (
-    GridMoraAddMoraValues, GridMoraAddStartLat, GridMoraAddStartLon,
-    GridMoraEnd, GridMoraStart,
+    GridMoraAddMoraValues,
+    GridMoraAddStartLat,
+    GridMoraAddStartLon,
+    GridMoraEnd,
+    GridMoraStart,
     GridMoraStartMoraValuesVector,
 )
 from openRouterFinder.core.storage.NavData.Holding import (
-    HoldingAddAreaCode, HoldingAddDuplicateIdentifier,
-    HoldingAddHoldingName, HoldingAddIcaoCode,
-    HoldingAddInboundCourse, HoldingAddLat, HoldingAddLegLengthNm,
-    HoldingAddLegTimeMin, HoldingAddLon, HoldingAddMaxAltitude,
-    HoldingAddMinAltitude, HoldingAddRegionCode,
-    HoldingAddSpeedLimit, HoldingAddTurnDirection,
-    HoldingAddWaypointIdentifier, HoldingEnd, HoldingStart,
+    HoldingAddAreaCode,
+    HoldingAddDuplicateIdentifier,
+    HoldingAddHoldingName,
+    HoldingAddIcaoCode,
+    HoldingAddInboundCourse,
+    HoldingAddLat,
+    HoldingAddLegLengthNm,
+    HoldingAddLegTimeMin,
+    HoldingAddLon,
+    HoldingAddMaxAltitude,
+    HoldingAddMinAltitude,
+    HoldingAddRegionCode,
+    HoldingAddSpeedLimit,
+    HoldingAddTurnDirection,
+    HoldingAddWaypointIdentifier,
+    HoldingEnd,
+    HoldingStart,
 )
 from openRouterFinder.core.storage.NavData.ILS import (
-    ILSAddCategory, ILSAddCrossingHeight, ILSAddElevation,
-    ILSAddFrequency, ILSAddGsAngle, ILSAddHasDme,
-    ILSAddHeading, ILSAddIdent, ILSAddLat, ILSAddLon,
-    ILSAddRunwayEnd, ILSEnd, ILSStart,
+    ILSAddCategory,
+    ILSAddCrossingHeight,
+    ILSAddElevation,
+    ILSAddFrequency,
+    ILSAddGsAngle,
+    ILSAddHasDme,
+    ILSAddHeading,
+    ILSAddIdent,
+    ILSAddLat,
+    ILSAddLon,
+    ILSAddRunwayEnd,
+    ILSEnd,
+    ILSStart,
 )
 from openRouterFinder.core.storage.NavData.Marker import (
-    MarkerAddAirportIcao, MarkerAddLat, MarkerAddLlzIdent,
-    MarkerAddLon, MarkerAddMarkerIdent, MarkerAddMarkerType,
-    MarkerAddRunwayName, MarkerEnd, MarkerStart,
+    MarkerAddAirportIcao,
+    MarkerAddLat,
+    MarkerAddLlzIdent,
+    MarkerAddLon,
+    MarkerAddMarkerIdent,
+    MarkerAddMarkerType,
+    MarkerAddRunwayName,
+    MarkerEnd,
+    MarkerStart,
 )
 from openRouterFinder.core.storage.NavData.Navaid import (
-    NavaidAddChannel, NavaidAddElevation, NavaidAddFrequency,
-    NavaidAddIdent, NavaidAddLat, NavaidAddLon,
-    NavaidAddMagneticVariation, NavaidAddName, NavaidAddRangeNm,
-    NavaidAddSlavedVar, NavaidAddType, NavaidAddUsage,
-    NavaidEnd, NavaidStart,
+    NavaidAddChannel,
+    NavaidAddElevation,
+    NavaidAddFrequency,
+    NavaidAddIdent,
+    NavaidAddLat,
+    NavaidAddLon,
+    NavaidAddMagneticVariation,
+    NavaidAddName,
+    NavaidAddRangeNm,
+    NavaidAddSlavedVar,
+    NavaidAddType,
+    NavaidAddUsage,
+    NavaidEnd,
+    NavaidStart,
 )
 from openRouterFinder.core.storage.NavData.NavData import (
-    NavDataAddAirportComms, NavDataAddAirports, NavDataAddCycle,
-    NavDataAddEdges, NavDataAddEffectiveFrom, NavDataAddEffectiveTo,
-    NavDataAddGls, NavDataAddGridMora, NavDataAddHoldings,
-    NavDataAddMarkers, NavDataAddNavaids, NavDataAddNodes,
-    NavDataEnd, NavDataStart,
-    NavDataStartAirportCommsVector, NavDataStartAirportsVector,
-    NavDataStartEdgesVector, NavDataStartGlsVector,
-    NavDataStartGridMoraVector, NavDataStartHoldingsVector,
-    NavDataStartMarkersVector, NavDataStartNavaidsVector,
+    NavDataAddAirportComms,
+    NavDataAddAirports,
+    NavDataAddCycle,
+    NavDataAddEdges,
+    NavDataAddEffectiveFrom,
+    NavDataAddEffectiveTo,
+    NavDataAddGls,
+    NavDataAddGridMora,
+    NavDataAddHoldings,
+    NavDataAddMarkers,
+    NavDataAddNavaids,
+    NavDataAddNodes,
+    NavDataEnd,
+    NavDataStart,
+    NavDataStartAirportCommsVector,
+    NavDataStartAirportsVector,
+    NavDataStartEdgesVector,
+    NavDataStartGlsVector,
+    NavDataStartGridMoraVector,
+    NavDataStartHoldingsVector,
+    NavDataStartMarkersVector,
+    NavDataStartNavaidsVector,
     NavDataStartNodesVector,
 )
 from openRouterFinder.core.storage.NavData.Node import (
-    NodeAddIid, NodeAddLat, NodeAddLon, NodeAddName,
-    NodeEnd, NodeStart,
-)
-from openRouterFinder.core.storage.NavData.ProcLeg import (
-    ProcLegAddAltRestriction, ProcLegAddArcRadius, ProcLegAddCenterLat,
-    ProcLegAddCenterLon, ProcLegAddCourse, ProcLegAddDistanceNm,
-    ProcLegAddIsFlyOver, ProcLegAddLat, ProcLegAddLon,
-    ProcLegAddName, ProcLegAddNavBearing, ProcLegAddNavDistance,
-    ProcLegAddNavLat, ProcLegAddNavLon, ProcLegAddNavReference,
-    ProcLegAddPathTerminator, ProcLegAddSpeedLimit,
-    ProcLegAddTurnDirection, ProcLegEnd, ProcLegStart,
+    NodeAddIid,
+    NodeAddLat,
+    NodeAddLon,
+    NodeAddName,
+    NodeEnd,
+    NodeStart,
 )
 from openRouterFinder.core.storage.NavData.Procedure import (
-    ProcedureAddLegs, ProcedureAddName, ProcedureAddRunway,
-    ProcedureAddTransitions, ProcedureAddType, ProcedureEnd, ProcedureStart,
-    ProcedureStartLegsVector, ProcedureStartTransitionsVector,
+    ProcedureAddLegs,
+    ProcedureAddName,
+    ProcedureAddRunway,
+    ProcedureAddTransitions,
+    ProcedureAddType,
+    ProcedureEnd,
+    ProcedureStart,
+    ProcedureStartLegsVector,
+    ProcedureStartTransitionsVector,
+)
+from openRouterFinder.core.storage.NavData.ProcLeg import (
+    ProcLegAddAltRestriction,
+    ProcLegAddArcRadius,
+    ProcLegAddCenterLat,
+    ProcLegAddCenterLon,
+    ProcLegAddCourse,
+    ProcLegAddDistanceNm,
+    ProcLegAddIsFlyOver,
+    ProcLegAddLat,
+    ProcLegAddLon,
+    ProcLegAddName,
+    ProcLegAddNavBearing,
+    ProcLegAddNavDistance,
+    ProcLegAddNavLat,
+    ProcLegAddNavLon,
+    ProcLegAddNavReference,
+    ProcLegAddPathTerminator,
+    ProcLegAddSpeedLimit,
+    ProcLegAddTurnDirection,
+    ProcLegEnd,
+    ProcLegStart,
 )
 from openRouterFinder.core.storage.NavData.ProcTransition import (
-    ProcTransitionAddLegs, ProcTransitionAddName,
-    ProcTransitionEnd, ProcTransitionStart,
+    ProcTransitionAddLegs,
+    ProcTransitionAddName,
+    ProcTransitionEnd,
+    ProcTransitionStart,
 )
 from openRouterFinder.core.storage.NavData.Runway import (
-    RunwayAddEnds, RunwayAddIls, RunwayAddLengthFt,
-    RunwayAddLighting, RunwayAddName, RunwayAddSurface,
-    RunwayAddWidthFt, RunwayEnd, RunwayStart,
-    RunwayStartEndsVector, RunwayStartIlsVector,
+    RunwayAddEnds,
+    RunwayAddIls,
+    RunwayAddLengthFt,
+    RunwayAddName,
+    RunwayAddSurface,
+    RunwayAddWidthFt,
+    RunwayEnd,
+    RunwayStart,
+    RunwayStartEndsVector,
+    RunwayStartIlsVector,
 )
 from openRouterFinder.core.storage.NavData.RunwayEnd import (
-    RunwayEndAddElevationFt, RunwayEndAddHeading,
-    RunwayEndAddLat, RunwayEndAddLon, RunwayEndAddName,
-    RunwayEndEnd, RunwayEndStart,
+    RunwayEndAddElevationFt,
+    RunwayEndAddHeading,
+    RunwayEndAddLat,
+    RunwayEndAddLon,
+    RunwayEndAddName,
+    RunwayEndEnd,
+    RunwayEndStart,
 )
-
 
 # ---------------------------------------------------------------------------
 # Builder
@@ -143,7 +260,7 @@ def build_from_fenix(
 
     # Pre-fetch waypoint names for procedure leg lookup
     cursor.execute("SELECT ID, Ident FROM Waypoints")
-    wp_names: Dict[int, str] = {row["ID"]: row["Ident"] or "" for row in cursor.fetchall()}
+    wp_names: dict[int, str] = {row["ID"]: row["Ident"] or "" for row in cursor.fetchall()}
 
     # Count rows for progress tracking
     counts = {
@@ -197,7 +314,9 @@ def build_from_fenix(
     processed += counts["grid_mora"]
     _progress("grid_mora", counts["grid_mora"], counts["grid_mora"])
 
-    airport_comms = _build_airport_comms(cursor, builder, lambda c, t: _progress("airport_comms", c, t))
+    airport_comms = _build_airport_comms(
+        cursor, builder, lambda c, t: _progress("airport_comms", c, t)
+    )
     processed += counts["airport_comms"]
     _progress("airport_comms", counts["airport_comms"], counts["airport_comms"])
 
@@ -281,7 +400,8 @@ def build_from_fenix(
 # Nodes
 # ---------------------------------------------------------------------------
 
-def _build_nodes(cursor, builder, progress=None) -> List[int]:
+
+def _build_nodes(cursor, builder, progress=None) -> list[int]:
     cursor.execute("SELECT ID, Ident, Latitude, Longtitude FROM Waypoints")
     rows = cursor.fetchall()
     total = len(rows)
@@ -305,7 +425,8 @@ def _build_nodes(cursor, builder, progress=None) -> List[int]:
 # Edges
 # ---------------------------------------------------------------------------
 
-def _build_edges(cursor, builder, progress=None) -> List[int]:
+
+def _build_edges(cursor, builder, progress=None) -> list[int]:
     cursor.execute("""
         SELECT al.Waypoint1ID, al.Waypoint2ID, aw.Ident, al.Level
         FROM AirwayLegs al
@@ -317,7 +438,9 @@ def _build_edges(cursor, builder, progress=None) -> List[int]:
     for i, row in enumerate(rows):
         name = builder.CreateString(row["Ident"] or "")
         level_str = (row["Level"] or "B").upper()
-        level = {"B": AirwayLevel.Both, "H": AirwayLevel.High, "L": AirwayLevel.Low}.get(level_str, AirwayLevel.Both)
+        level = {"B": AirwayLevel.Both, "H": AirwayLevel.High, "L": AirwayLevel.Low}.get(
+            level_str, AirwayLevel.Both
+        )
         EdgeStart(builder)
         EdgeAddNfrom(builder, (row["Waypoint1ID"] or 1) - 1)
         EdgeAddNend(builder, (row["Waypoint2ID"] or 1) - 1)
@@ -339,7 +462,8 @@ def _build_edges(cursor, builder, progress=None) -> List[int]:
 # Airports (batch-queried to avoid N+1)
 # ---------------------------------------------------------------------------
 
-def _build_airports(cursor, builder, wp_names: Dict[int, str], progress=None) -> List[int]:
+
+def _build_airports(cursor, builder, wp_names: dict[int, str], progress=None) -> list[int]:
     # 1. Fetch all airports
     cursor.execute("""
         SELECT ID, ICAO, Name, Latitude, Longtitude, Elevation,
@@ -355,7 +479,7 @@ def _build_airports(cursor, builder, wp_names: Dict[int, str], progress=None) ->
                Latitude, Longtitude, Elevation
         FROM Runways
     """)
-    runways_by_airport: Dict[int, List] = {}
+    runways_by_airport: dict[int, list] = {}
     for row in cursor.fetchall():
         runways_by_airport.setdefault(row["AirportID"], []).append(row)
 
@@ -365,7 +489,7 @@ def _build_airports(cursor, builder, wp_names: Dict[int, str], progress=None) ->
                Elevation, CrossingHeight, HasDme, Ident, RunwayID
         FROM ILSes
     """)
-    ils_by_runway: Dict[int, List] = {}
+    ils_by_runway: dict[int, list] = {}
     for row in cursor.fetchall():
         ils_by_runway.setdefault(row["RunwayID"], []).append(row)
 
@@ -373,7 +497,7 @@ def _build_airports(cursor, builder, wp_names: Dict[int, str], progress=None) ->
     cursor.execute("""
         SELECT ID, AirportID, Name, FullName, Proc, Rwy FROM Terminals
     """)
-    terminals_by_airport: Dict[int, List] = {}
+    terminals_by_airport: dict[int, list] = {}
     for row in cursor.fetchall():
         terminals_by_airport.setdefault(row["AirportID"], []).append(row)
 
@@ -387,7 +511,7 @@ def _build_airports(cursor, builder, wp_names: Dict[int, str], progress=None) ->
         FROM TerminalLegs tl
         LEFT JOIN TerminalLegsEx tle ON tl.ID = tle.ID
     """)
-    legs_by_terminal: Dict[int, List] = {}
+    legs_by_terminal: dict[int, list] = {}
     for row in cursor.fetchall():
         legs_by_terminal.setdefault(row["TerminalID"], []).append(row)
 
@@ -396,7 +520,7 @@ def _build_airports(cursor, builder, wp_names: Dict[int, str], progress=None) ->
         SELECT DISTINCT TerminalID, Transition FROM TerminalLegs
         WHERE Transition IS NOT NULL AND Transition != '' AND Transition != 'ALL'
     """)
-    transitions_by_terminal: Dict[int, List[str]] = {}
+    transitions_by_terminal: dict[int, list[str]] = {}
     for row in cursor.fetchall():
         transitions_by_terminal.setdefault(row["TerminalID"], []).append(row["Transition"])
 
@@ -409,8 +533,11 @@ def _build_airports(cursor, builder, wp_names: Dict[int, str], progress=None) ->
             builder, runways_by_airport.get(ap_id, []), ils_by_runway
         )
         procedures = _build_procedures_for_airport(
-            builder, terminals_by_airport.get(ap_id, []),
-            legs_by_terminal, transitions_by_terminal, wp_names
+            builder,
+            terminals_by_airport.get(ap_id, []),
+            legs_by_terminal,
+            transitions_by_terminal,
+            wp_names,
         )
 
         AirportStart(builder)
@@ -435,14 +562,12 @@ def _build_airports(cursor, builder, wp_names: Dict[int, str], progress=None) ->
     return airports
 
 
-def _build_runways_for_airport(
-    builder, runway_rows: List, ils_by_runway: Dict[int, List]
-) -> int:
+def _build_runways_for_airport(builder, runway_rows: list, ils_by_runway: dict[int, list]) -> int:
     if not runway_rows:
         return 0
 
-    ends_map: Dict[str, List[int]] = {}
-    ils_map: Dict[str, List[int]] = {}
+    ends_map: dict[str, list[int]] = {}
+    ils_map: dict[str, list[int]] = {}
 
     for row in runway_rows:
         end_name = builder.CreateString(row["Ident"] or "")
@@ -500,7 +625,9 @@ def _build_runways_for_airport(
             ils_vec = builder.EndVector()
 
         name = builder.CreateString(base_name)
-        first_row = next((r for r in runway_rows if _runway_base_name(r["Ident"] or "") == base_name), None)
+        first_row = next(
+            (r for r in runway_rows if _runway_base_name(r["Ident"] or "") == base_name), None
+        )
         surface = builder.CreateString(first_row["Surface"] if first_row else "")
 
         RunwayStart(builder)
@@ -569,10 +696,13 @@ def _decode_ils_freq(raw_freq) -> str:
 # Procedures (batch-queried to avoid N+1)
 # ---------------------------------------------------------------------------
 
+
 def _build_procedures_for_airport(
-    builder, terminal_rows: List,
-    legs_by_terminal: Dict[int, List], transitions_by_terminal: Dict[int, List[str]],
-    wp_names: Dict[int, str]
+    builder,
+    terminal_rows: list,
+    legs_by_terminal: dict[int, list],
+    transitions_by_terminal: dict[int, list[str]],
+    wp_names: dict[int, str],
 ) -> int:
     proc_offsets = []
     for row in terminal_rows:
@@ -590,7 +720,9 @@ def _build_procedures_for_airport(
             proc_type = 1  # SID
         else:
             proc_type = fenix_proc
-        legs = _build_procedure_legs(builder, legs_by_terminal.get(row["ID"], []), wp_names, is_main=True)
+        legs = _build_procedure_legs(
+            builder, legs_by_terminal.get(row["ID"], []), wp_names, is_main=True
+        )
         transitions = _build_procedure_transitions(
             builder, row["ID"], legs_by_terminal, transitions_by_terminal, wp_names
         )
@@ -614,7 +746,11 @@ def _build_procedures_for_airport(
 
 
 def _build_procedure_legs(
-    builder, leg_rows: List, wp_names: Dict[int, str], is_main: bool = True, transition_name: str = None
+    builder,
+    leg_rows: list,
+    wp_names: dict[int, str],
+    is_main: bool = True,
+    transition_name: str = None,
 ) -> int:
     leg_offsets = []
     for row in leg_rows:
@@ -670,9 +806,11 @@ def _build_procedure_legs(
 
 
 def _build_procedure_transitions(
-    builder, terminal_id: int,
-    legs_by_terminal: Dict[int, List], transitions_by_terminal: Dict[int, List[str]],
-    wp_names: Dict[int, str]
+    builder,
+    terminal_id: int,
+    legs_by_terminal: dict[int, list],
+    transitions_by_terminal: dict[int, list[str]],
+    wp_names: dict[int, str],
 ) -> int:
     trans_names = transitions_by_terminal.get(terminal_id, [])
     if not trans_names:
@@ -682,7 +820,10 @@ def _build_procedure_transitions(
     for trans_name in trans_names:
         name = builder.CreateString(trans_name)
         legs = _build_procedure_legs(
-            builder, legs_by_terminal.get(terminal_id, []), wp_names, is_main=False,
+            builder,
+            legs_by_terminal.get(terminal_id, []),
+            wp_names,
+            is_main=False,
             transition_name=trans_name,
         )
 
@@ -704,7 +845,8 @@ def _build_procedure_transitions(
 # Navaids
 # ---------------------------------------------------------------------------
 
-def _build_navaids(cursor, builder, progress=None) -> List[int]:
+
+def _build_navaids(cursor, builder, progress=None) -> list[int]:
     cursor.execute("""
         SELECT Ident, Name, Type, Freq, Channel, Latitude, Longtitude,
                Elevation, Range, Usage, SlavedVar, MagneticVariation
@@ -745,7 +887,8 @@ def _build_navaids(cursor, builder, progress=None) -> List[int]:
 # Holdings
 # ---------------------------------------------------------------------------
 
-def _build_holdings(cursor, builder, progress=None) -> List[int]:
+
+def _build_holdings(cursor, builder, progress=None) -> list[int]:
     cursor.execute("""
         SELECT area_code, region_code, icao_code, waypoint_identifier,
                holding_name, waypoint_latitude, waypoint_longitude,
@@ -792,7 +935,8 @@ def _build_holdings(cursor, builder, progress=None) -> List[int]:
 # Markers
 # ---------------------------------------------------------------------------
 
-def _build_markers(cursor, builder, progress=None) -> List[int]:
+
+def _build_markers(cursor, builder, progress=None) -> list[int]:
     cursor.execute("""
         SELECT m.MarkerIdent, m.Type, m.Latitude, m.Longitude,
                r.Ident as runway_ident, a.ICAO as airport_icao, llz.Ident as llz_ident
@@ -832,7 +976,8 @@ def _build_markers(cursor, builder, progress=None) -> List[int]:
 # GLS
 # ---------------------------------------------------------------------------
 
-def _build_gls(cursor, builder, progress=None) -> List[int]:
+
+def _build_gls(cursor, builder, progress=None) -> list[int]:
     cursor.execute("""
         SELECT area_code, airport_identifier, icao_code, gls_ref_path_identifier,
                gls_category, gls_channel, runway_identifier, gls_approach_bearing,
@@ -880,7 +1025,8 @@ def _build_gls(cursor, builder, progress=None) -> List[int]:
 # Grid MORA
 # ---------------------------------------------------------------------------
 
-def _build_grid_mora(cursor, builder, progress=None) -> List[int]:
+
+def _build_grid_mora(cursor, builder, progress=None) -> list[int]:
     cursor.execute("SELECT * FROM GridMora")
     rows = cursor.fetchall()
     total = len(rows)
@@ -915,7 +1061,8 @@ def _build_grid_mora(cursor, builder, progress=None) -> List[int]:
 # Airport Communications
 # ---------------------------------------------------------------------------
 
-def _build_airport_comms(cursor, builder, progress=None) -> List[int]:
+
+def _build_airport_comms(cursor, builder, progress=None) -> list[int]:
     cursor.execute("""
         SELECT area_code, icao_code, airport_identifier, communication_type,
                communication_frequency, frequency_units, service_indicator,

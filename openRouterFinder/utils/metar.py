@@ -2,10 +2,10 @@
 
 import threading
 import time
+
 import requests
 
 from openRouterFinder.config import settings
-
 
 _metar_data = ""
 _metar_lock = threading.Lock()
@@ -32,7 +32,7 @@ def fetch_metar() -> str:
         except Exception as e:
             print(f"METAR update attempt {attempt}/3 failed: {e}")
             if attempt < 3:
-                time.sleep(2 ** attempt)
+                time.sleep(2**attempt)
 
     print("METAR update failed after 3 attempts, using cached data if available")
     return ""
@@ -53,7 +53,7 @@ def read_metar(icao: str) -> str:
 
     # Fallback: read from file
     if settings.metar_full_path.exists():
-        with open(settings.metar_full_path, "r") as f:
+        with open(settings.metar_full_path) as f:
             data = f.read()
         idx = data.find(icao.upper())
         if idx >= 0:
@@ -67,6 +67,7 @@ def read_metar(icao: str) -> str:
 
 def start_metar_updater():
     """Start background METAR update thread."""
+
     def loop():
         while True:
             print(f"==== {time.strftime('%Y-%m-%d %H:%M:%S')} Updating METAR ====")

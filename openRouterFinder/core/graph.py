@@ -2,7 +2,6 @@
 
 import math
 from dataclasses import dataclass, field
-from typing import List, Tuple
 
 PI = 3.1415926535898
 EARTH_RADIUS = 6378.137
@@ -37,10 +36,7 @@ def _haversine_a(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     rlat2 = rad(lat2)
     dlat = rlat1 - rlat2
     dlon = rad(lon1) - rad(lon2)
-    return (
-        math.sin(dlat / 2) ** 2
-        + math.cos(rlat1) * math.cos(rlat2) * math.sin(dlon / 2) ** 2
-    )
+    return math.sin(dlat / 2) ** 2 + math.cos(rlat1) * math.cos(rlat2) * math.sin(dlon / 2) ** 2
 
 
 def heuristic_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -51,23 +47,25 @@ def heuristic_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 @dataclass(slots=True)
 class Edge:
     """Directed edge between two nodes."""
+
     nfrom: int  # source node IID
-    nend: int   # target node IID
-    name: str   # airway name
+    nend: int  # target node IID
+    name: str  # airway name
     dist: float = 0.0  # precomputed great-circle distance (km)
-    color: Tuple[int, int, int] = (0, 0, 0)
+    color: tuple[int, int, int] = (0, 0, 0)
 
 
 @dataclass(slots=True)
 class Node:
     """Navigation node (waypoint or airport)."""
+
     iid: int
     name: str
-    px: float   # latitude
-    py: float   # longitude
-    next_list: List[Edge] = field(default_factory=list)
+    px: float  # latitude
+    py: float  # longitude
+    next_list: list[Edge] = field(default_factory=list)
 
-    def node_key(self) -> Tuple[str, float, float]:
+    def node_key(self) -> tuple[str, float, float]:
         """Unique key for node lookup."""
         return (self.name, round(self.px, 6), round(self.py, 6))
 
@@ -75,9 +73,10 @@ class Node:
 @dataclass(slots=True)
 class SearchingNode:
     """Mutable state during A* search."""
+
     iid: int
     name: str
     route: str = ""
     dist: float = 0.0
-    route_list: List[Tuple[str, str, int]] = field(default_factory=list)
+    route_list: list[tuple[str, str, int]] = field(default_factory=list)
     # (edge_name, node_name, node_iid)

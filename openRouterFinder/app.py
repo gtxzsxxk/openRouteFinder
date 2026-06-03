@@ -2,9 +2,8 @@
 
 import uvicorn
 
-from openRouterFinder.config import settings
 from openRouterFinder.api import app
-
+from openRouterFinder.config import settings
 
 if __name__ == "__main__":
     uvicorn.run(

@@ -1,16 +1,15 @@
 """FastAPI application with thread-pooled A* route search."""
 
 import asyncio
+import json
 import os
 import shutil
 import time
 import uuid
-import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Header, Query, Request, UploadFile, File, Form
+from fastapi import FastAPI, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -18,25 +17,25 @@ from pydantic import BaseModel
 
 from openRouterFinder.config import settings
 from openRouterFinder.core.admin import (
+    get_stats as get_admin_stats,
+)
+from openRouterFinder.core.admin import (
+    record_error,
     record_request,
     record_route_search,
-    record_error,
-    get_stats as get_admin_stats,
 )
 from openRouterFinder.core.data_loader import (
     get_data_version,
-    get_airport_maps,
-    search_route,
-    get_nav_registry,
-    has_registry,
     get_nav_data,
+    get_nav_registry,
+    search_route,
 )
+from openRouterFinder.core.storage.builder import build_from_fenix
 from openRouterFinder.utils.metar import read_metar, start_metar_updater
 from openRouterFinder.utils.validcode import generate_captcha_b64
-from openRouterFinder.core.storage.builder import build_from_fenix
-
 
 # --- Procedure response filtering ---
+
 
 def _filter_runway_all_from_response(data: dict) -> dict:
     """Remove or rename runway='ALL' variants when specific runway variants exist.
@@ -189,7 +188,9 @@ def _build_airport_index():
                 continue
             name = ap.Name()
             name = name.decode("utf-8") if isinstance(name, bytes) else (name or icao)
-            airports.append({"icao": icao, "name": name, "lat": float(ap.Lat()), "lon": float(ap.Lon())})
+            airports.append(
+                {"icao": icao, "name": name, "lat": float(ap.Lat()), "lon": float(ap.Lon())}
+            )
 
     _airport_list = airports
 
@@ -225,14 +226,15 @@ def _search_airports(q: str, limit: int = 50) -> list:
 
 # --- Pydantic Models ---
 
+
 class RouteRequest(BaseModel):
     orig: str
     dest: str
     validCode: str
     validToken: str
-    sidExit: Optional[str] = None
-    starEntry: Optional[str] = None
-    cycle: Optional[str] = None
+    sidExit: str | None = None
+    starEntry: str | None = None
+    cycle: str | None = None
 
 
 # --- FastAPI App ---
@@ -281,14 +283,20 @@ def get_cycles():
     for cycle in cycles:
         info = reg.get_cycle_info(cycle)
         if info:
-            result.append({
-                "cycle": info["cycle"],
-            })
-    return {"cycles": result, "default": result[-1]["cycle"] if result else None, "disableCaptcha": settings.disable_captcha}
+            result.append(
+                {
+                    "cycle": info["cycle"],
+                }
+            )
+    return {
+        "cycles": result,
+        "default": result[-1]["cycle"] if result else None,
+        "disableCaptcha": settings.disable_captcha,
+    }
 
 
 @app.get("/api/airports")
-def get_airports(q: Optional[str] = None):
+def get_airports(q: str | None = None):
     q = (q or "").strip()
     if not q:
         return {"airports": _airport_list[:50]}
@@ -296,7 +304,7 @@ def get_airports(q: Optional[str] = None):
 
 
 @app.get("/api/airports/{icao}")
-def get_airport(icao: str, cycle: Optional[str] = None):
+def get_airport(icao: str, cycle: str | None = None):
     icao = icao.upper()
     nav = get_nav_data(cycle)
     if nav is None:
@@ -315,10 +323,11 @@ def get_airport(icao: str, cycle: Optional[str] = None):
 
 
 @app.get("/api/airports/{icao}/procedures")
-def get_airport_procedures(icao: str, cycle: Optional[str] = None, detail: bool = False):
+def get_airport_procedures(icao: str, cycle: str | None = None, detail: bool = False):
     icao = icao.upper()
 
     from openRouterFinder.core.airport import FlatbuffersAirportConnector
+
     nav = get_nav_data(cycle)
     if nav is None:
         raise HTTPException(status_code=503, detail="Navdata not available")
@@ -336,10 +345,12 @@ def get_airport_procedures(icao: str, cycle: Optional[str] = None, detail: bool 
             if exit_name in seen:
                 continue
             seen.add(exit_name)
-            sid_exits.append({
-                "name": exit_name,
-                "procedures": list(dict.fromkeys(p.name for p in proc_list)),
-            })
+            sid_exits.append(
+                {
+                    "name": exit_name,
+                    "procedures": list(dict.fromkeys(p.name for p in proc_list)),
+                }
+            )
 
     star_entries = []
     if star_conn and star_conn.procedures:
@@ -348,10 +359,12 @@ def get_airport_procedures(icao: str, cycle: Optional[str] = None, detail: bool 
             if entry_name in seen:
                 continue
             seen.add(entry_name)
-            star_entries.append({
-                "name": entry_name,
-                "procedures": list(dict.fromkeys(p.name for p in proc_list)),
-            })
+            star_entries.append(
+                {
+                    "name": entry_name,
+                    "procedures": list(dict.fromkeys(p.name for p in proc_list)),
+                }
+            )
 
     result = {
         "icao": icao,
@@ -407,7 +420,13 @@ async def post_route(req: RouteRequest):
         async with _route_semaphore:
             result = await asyncio.get_event_loop().run_in_executor(
                 _dijkstra_pool,
-                lambda: search_route(req.orig, req.dest, sid_exit=req.sidExit, star_entry=req.starEntry, cycle=req.cycle),
+                lambda: search_route(
+                    req.orig,
+                    req.dest,
+                    sid_exit=req.sidExit,
+                    star_entry=req.starEntry,
+                    cycle=req.cycle,
+                ),
             )
     except Exception as e:
         record_error(f"Route calculation failed: {e}", "/api/route", "POST", 500)
@@ -450,9 +469,7 @@ async def post_route(req: RouteRequest):
         raw_nodes = result.pop("nodeinformation")
         if raw_nodes:
             result["nodes"] = [
-                {"name": n[0], "lat": n[1], "lon": n[2]}
-                for n in raw_nodes
-                if len(n) >= 3
+                {"name": n[0], "lat": n[1], "lon": n[2]} for n in raw_nodes if len(n) >= 3
             ]
         else:
             result["nodes"] = []
@@ -506,6 +523,7 @@ def get_metar(icao: str):
 @app.get("/api/validcode")
 def get_valid_code():
     import random
+
     num = random.randint(1000, 9999)
     token = str(uuid.uuid4())
     _valid_codes[token] = str(num)
@@ -612,7 +630,9 @@ def _validate_fenix_db(db_path: Path) -> dict:
     missing = required - tables
     if missing:
         conn.close()
-        raise ValueError(f"Missing required tables: {', '.join(missing)}. Not a valid Fenix A320 navdata.")
+        raise ValueError(
+            f"Missing required tables: {', '.join(missing)}. Not a valid Fenix A320 navdata."
+        )
 
     # Extract cycle info from config table — column names vary by Fenix version
     cursor.execute("PRAGMA table_info(config)")
@@ -653,6 +673,7 @@ def _do_build_navdata(
     tmp_dir: str,
 ) -> None:
     """Run FlatBuffers build in background thread and update progress."""
+
     def progress(step: str, current: int, total: int) -> None:
         _build_tasks[build_id] = {
             "status": "building",
@@ -671,6 +692,7 @@ def _do_build_navdata(
             progress=progress,
         )
         import zstandard as zstd
+
         cctx = zstd.ZstdCompressor(level=12)
         compressed = cctx.compress(raw)
         fb_path = data_dir / f"navdata_{cycle}.fb.zst"
@@ -683,9 +705,12 @@ def _do_build_navdata(
             "cycle": cycle,
             "info": info,
         }
-        print(f"[build {build_id}] done: cycle={cycle}, fb={fb_path} ({len(compressed)/1024/1024:.1f}MB / {len(raw)/1024/1024:.1f}MB)")
+        print(
+            f"[build {build_id}] done: cycle={cycle}, fb={fb_path} ({len(compressed) / 1024 / 1024:.1f}MB / {len(raw) / 1024 / 1024:.1f}MB)"
+        )
     except Exception as e:
         import traceback
+
         detail = f"{type(e).__name__}: {e}"
         print(f"[build {build_id}] error: {detail}")
         traceback.print_exc()
@@ -734,7 +759,9 @@ async def upload_navdata(
                 break
 
         if db_path is None:
-            record_error("Upload failed: no .db3 file found in zip", "/api/admin/navdata/upload", "POST", 400)
+            record_error(
+                "Upload failed: no .db3 file found in zip", "/api/admin/navdata/upload", "POST", 400
+            )
             raise HTTPException(status_code=400, detail="No .db3 file found in uploaded zip")
 
         # Validate and extract cycle info from db
@@ -753,7 +780,13 @@ async def upload_navdata(
 
         # Start background build
         build_id = str(uuid.uuid4())
-        _build_tasks[build_id] = {"status": "building", "step": "starting", "current": 0, "total": 1, "percent": 0}
+        _build_tasks[build_id] = {
+            "status": "building",
+            "step": "starting",
+            "current": 0,
+            "total": 1,
+            "percent": 0,
+        }
 
         loop = asyncio.get_event_loop()
         loop.run_in_executor(

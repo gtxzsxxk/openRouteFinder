@@ -1,5 +1,7 @@
-import pytest
 from pathlib import Path
+
+import pytest
+
 from openRouterFinder.core.storage.builder import build_from_fenix
 from openRouterFinder.core.storage.registry import NavDataRegistry
 

@@ -8,7 +8,7 @@ import sys
 sys.path.insert(0, str(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
 
 from openRouterFinder.config import settings
-from openRouterFinder.core.graph import Node, Edge
+from openRouterFinder.core.graph import Edge, Node
 
 
 def pack_airport_data(cycle: str):
@@ -19,11 +19,11 @@ def pack_airport_data(cycle: str):
         for filename in files:
             print(filename)
             fullpath = os.path.join(home, filename)
-            with open(fullpath, "r") as f:
+            with open(fullpath) as f:
                 airport_data[filename.replace(".txt", "")] = f.read()
 
     apfile_path = os.path.join(settings.local_asdata_path, "Airports.txt")
-    with open(apfile_path, "r") as f:
+    with open(apfile_path) as f:
         airport_data["GLOBAL"] = f.readlines()
 
     output = settings.navdat_full_path.parent / f"airport_{cycle}.air"
@@ -49,7 +49,7 @@ def _build_node_list_from_asdata():
     node_index = {}  # (name, lat_rounded, lon_rounded) -> Node
 
     ats_path = os.path.join(settings.local_asdata_path, "ATS.txt")
-    with open(ats_path, "r") as f:
+    with open(ats_path) as f:
         lines = f.readlines()
 
     print("Reading nodes...")
