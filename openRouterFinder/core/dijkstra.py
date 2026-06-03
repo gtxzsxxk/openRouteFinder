@@ -1,15 +1,15 @@
 """A* route finding engine with isolated per-request state."""
 
 import heapq
-import json
 import math
 import time
+
+import orjson
 
 from openRouterFinder.core.airport import AirportConnection, Procedure
 from openRouterFinder.core.graph import (
     Node,
     great_circle_distance_km,
-    heuristic_km,
 )
 
 
@@ -58,7 +58,7 @@ def build_route_info(
     }
     if route_segments is not None:
         result["routeSegments"] = route_segments
-    return json.dumps(result)
+    return orjson.dumps(result).decode()
 
 
 class RouteEngine:
@@ -97,6 +97,20 @@ class RouteEngine:
                                 next_node.px,
                                 next_node.py,
                             )
+
+        # Precompute T-route skip cache per node for fast _should_skip_edge.
+        self._node_has_non_t: list[bool] = [False] * self.num_nodes
+        for node in node_list:
+            if node is not None:
+                self._node_has_non_t[node.iid] = any(
+                    not (
+                        e.name
+                        and e.name[0] == "T"
+                        and len(e.name) > 1
+                        and e.name[1:].isdigit()
+                    )
+                    for e in node.next_list
+                )
 
     def search(
         self,
@@ -602,9 +616,9 @@ class RouteEngine:
         (e.g. WUMOX) while preventing T-route shortcuts in the enroute
         core where J/V/Q airways are available.
         """
-        if not self._is_excluded_airway(edge_name):
+        if not edge_name or edge_name[0] != "T" or not edge_name[1:].isdigit():
             return False
-        return any(not self._is_excluded_airway(e.name) for e in curr_node.next_list)
+        return self._node_has_non_t[curr_node.iid]
 
     @staticmethod
     def _edge_sort_key(name: str) -> tuple:
@@ -671,13 +685,7 @@ class RouteEngine:
                 if self._should_skip_edge(curr_node, edge.name):
                     continue
 
-                nd = dists[curr] + great_circle_distance_km(
-                    curr_node.px,
-                    curr_node.py,
-                    next_node.px,
-                    next_node.py,
-                )
-
+                nd = dists[curr] + edge.dist
                 if nd < dists[edge.nend]:
                     dists[edge.nend] = nd
                     prev_edge[edge.nend] = (curr, edge.name)
@@ -740,13 +748,7 @@ class RouteEngine:
                 if self._should_skip_edge(curr_node, edge.name):
                     continue
 
-                nd = dists[curr] + great_circle_distance_km(
-                    curr_node.px,
-                    curr_node.py,
-                    next_node.px,
-                    next_node.py,
-                )
-
+                nd = dists[curr] + edge.dist
                 if nd < dists[edge.nend]:
                     dists[edge.nend] = nd
                     prev_edge[edge.nend] = (curr, edge.name)
@@ -1522,6 +1524,26 @@ class RouteEngine:
         for proc, boundary, key, t_name in star_candidates:
             forbidden_names.discard(boundary.name)
 
+        # Prune candidates to the most promising N per side (by boundary
+        # distance to the opposite airport) to keep A* search fast.
+        _MAX_CANDIDATES = 50
+        if len(sid_candidates) > _MAX_CANDIDATES:
+            sid_candidates = sorted(
+                sid_candidates,
+                key=lambda c: great_circle_distance_km(
+                    c[1].px, c[1].py,
+                    star_conn.airport_node.px, star_conn.airport_node.py,
+                ),
+            )[:_MAX_CANDIDATES]
+        if len(star_candidates) > _MAX_CANDIDATES:
+            star_candidates = sorted(
+                star_candidates,
+                key=lambda c: great_circle_distance_km(
+                    c[1].px, c[1].py,
+                    sid_conn.airport_node.px, sid_conn.airport_node.py,
+                ),
+            )[:_MAX_CANDIDATES]
+
         # Airport nodes with positive IIDs beyond num_nodes
         start_iid = self.num_nodes
         end_iid = self.num_nodes + 1
@@ -1568,6 +1590,17 @@ class RouteEngine:
         dists[start_iid] = 0.0
         queue = [(0.0, 0.0, start_iid)]
 
+        # Local bindings for hot loop
+        node_list = self.node_list
+        has_non_t = self._node_has_non_t
+        _PI = 3.1415926535898
+        _R = 6378.137
+        _end_rlat = end_lat * _PI / 180.0
+        _end_rlon = end_lon * _PI / 180.0
+        _ce = math.cos(_end_rlat)
+        forbidden = forbidden_names
+        num_nodes = self.num_nodes
+
         while queue:
             _f, g_score, curr = heapq.heappop(queue)
             if curr == end_iid:
@@ -1582,28 +1615,42 @@ class RouteEngine:
                     if nd < dists[target_iid]:
                         dists[target_iid] = nd
                         prev[target_iid] = (curr, "SID", key, proc, t_name, boundary)
-                        target_node = self.node_list[target_iid]
-                        h = heuristic_km(target_node.px, target_node.py, end_lat, end_lon)
+                        target_node = node_list[target_iid]
+                        _rlat = target_node.px * _PI / 180.0
+                        _rlon = target_node.py * _PI / 180.0
+                        _dlat = _rlat - _end_rlat
+                        _dlon = _rlon - _end_rlon
+                        _a = (math.sin(_dlat / 2) ** 2
+                              + math.cos(_rlat) * _ce * math.sin(_dlon / 2) ** 2)
+                        h = 2.0 * math.asin(math.sqrt(min(1.0, _a))) * _R
                         heapq.heappush(queue, (nd + h, nd, target_iid))
                 continue
 
             # Airway edges (only valid airway nodes have 0 <= iid < num_nodes)
-            if 0 <= curr < self.num_nodes:
-                curr_node = self.node_list[curr]
+            if 0 <= curr < num_nodes:
+                curr_node = node_list[curr]
                 if curr_node is not None:
                     for edge in curr_node.next_list:
-                        next_node = self.node_list[edge.nend]
-                        if next_node.name in forbidden_names:
+                        nend = edge.nend
+                        next_node = node_list[nend]
+                        if next_node.name in forbidden:
                             continue
-                        if self._should_skip_edge(curr_node, edge.name):
+                        ename = edge.name
+                        if (ename and ename[0] == "T" and len(ename) > 1
+                                and ename[1:].isdigit() and has_non_t[curr]):
                             continue
                         nd = g_score + edge.dist
-                        if nd < dists[edge.nend]:
-                            dists[edge.nend] = nd
-                            prev[edge.nend] = (curr, edge.name, None, None, None, None)
-                            next_node = self.node_list[edge.nend]
-                            h = heuristic_km(next_node.px, next_node.py, end_lat, end_lon)
-                            heapq.heappush(queue, (nd + h, nd, edge.nend))
+                        if nd < dists[nend]:
+                            dists[nend] = nd
+                            prev[nend] = (curr, ename, None, None, None, None)
+                            _rlat = next_node.px * _PI / 180.0
+                            _rlon = next_node.py * _PI / 180.0
+                            _dlat = _rlat - _end_rlat
+                            _dlon = _rlon - _end_rlon
+                            _a = (math.sin(_dlat / 2) ** 2
+                                  + math.cos(_rlat) * _ce * math.sin(_dlon / 2) ** 2)
+                            h = 2.0 * math.asin(math.sqrt(min(1.0, _a))) * _R
+                            heapq.heappush(queue, (nd + h, nd, nend))
 
             # STAR pseudo-edges to end node
             for source_iid, weight, proc, boundary, key, t_name in star_pseudo:
