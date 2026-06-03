@@ -89,7 +89,7 @@ class FlatbuffersAirportConnector:
         points and transitions is connected.
         """
         existing = {(e.nfrom, e.nend) for e in conn.internal_edges}
-        for key, proc_list in conn.procedures.items():
+        for _key, proc_list in conn.procedures.items():
             for proc in proc_list:
                 # Main procedure points
                 pts = proc.points
@@ -102,7 +102,7 @@ class FlatbuffersAirportConnector:
                         )
                         existing.add((from_node.iid, to_node.iid))
                 # Transition points
-                for t_name, t_pts in proc.transitions:
+                for _t_name, t_pts in proc.transitions:
                     for i in range(len(t_pts) - 1):
                         from_node = self._resolve_node(t_pts[i][0], t_pts[i][1], t_pts[i][2])
                         to_node = self._resolve_node(
@@ -140,12 +140,12 @@ class FlatbuffersAirportConnector:
 
         # Collect all procedure node iids for the CURRENT label
         proc_node_iids: set = set()
-        for key, proc_list in conn.procedures.items():
+        for _key, proc_list in conn.procedures.items():
             for proc in proc_list:
                 for pt in proc.points:
                     node = self._resolve_node(pt[0], pt[1], pt[2])
                     proc_node_iids.add(node.iid)
-                for t_name, t_pts in proc.transitions:
+                for _t_name, t_pts in proc.transitions:
                     for pt in t_pts:
                         node = self._resolve_node(pt[0], pt[1], pt[2])
                         proc_node_iids.add(node.iid)
@@ -158,7 +158,7 @@ class FlatbuffersAirportConnector:
             for pt in points:
                 node = self._resolve_node(pt[0], pt[1], pt[2])
                 proc_node_iids.add(node.iid)
-            for t_name, t_pts in transitions:
+            for _t_name, t_pts in transitions:
                 for pt in t_pts:
                     node = self._resolve_node(pt[0], pt[1], pt[2])
                     proc_node_iids.add(node.iid)
@@ -166,7 +166,7 @@ class FlatbuffersAirportConnector:
             for pt in points:
                 node = self._resolve_node(pt[0], pt[1], pt[2])
                 proc_node_iids.add(node.iid)
-            for t_name, t_pts in transitions:
+            for _t_name, t_pts in transitions:
                 for pt in t_pts:
                     node = self._resolve_node(pt[0], pt[1], pt[2])
                     proc_node_iids.add(node.iid)
@@ -174,7 +174,7 @@ class FlatbuffersAirportConnector:
             for pt in points:
                 node = self._resolve_node(pt[0], pt[1], pt[2])
                 proc_node_iids.add(node.iid)
-            for t_name, t_pts in transitions:
+            for _t_name, t_pts in transitions:
                 for pt in t_pts:
                     node = self._resolve_node(pt[0], pt[1], pt[2])
                     proc_node_iids.add(node.iid)
@@ -182,7 +182,7 @@ class FlatbuffersAirportConnector:
         if proc_type == 1:  # SID
             # Collect unique exit nodes from procedures
             exit_nodes: dict[int, Node] = {}
-            for key, proc_list in conn.procedures.items():
+            for _key, proc_list in conn.procedures.items():
                 for proc in proc_list:
                     if proc.points:
                         last_pt = proc.points[-1]
@@ -198,7 +198,7 @@ class FlatbuffersAirportConnector:
         else:  # STAR
             # Collect unique entry nodes from procedures
             entry_nodes: dict[int, Node] = {}
-            for key, proc_list in conn.procedures.items():
+            for _key, proc_list in conn.procedures.items():
                 for proc in proc_list:
                     if proc.points:
                         first_pt = proc.points[0]
@@ -292,12 +292,12 @@ class FlatbuffersAirportConnector:
 
         # Collect every node IID that appears in any procedure for this airport
         proc_node_iids: set = set()
-        for key, proc_list in conn.procedures.items():
+        for _key, proc_list in conn.procedures.items():
             for proc in proc_list:
                 for pt in proc.points:
                     n = self._resolve_node(pt[0], pt[1], pt[2])
                     proc_node_iids.add(n.iid)
-                for t_name, t_pts in proc.transitions:
+                for _t_name, t_pts in proc.transitions:
                     for pt in t_pts:
                         n = self._resolve_node(pt[0], pt[1], pt[2])
                         proc_node_iids.add(n.iid)
@@ -791,13 +791,13 @@ class FlatbuffersAirportConnector:
             return points[0][0] == filter_name
 
         target_procs = set()
-        for proc_name, runway, anchor_node, points, transitions, is_main in runway_segments:
+        for proc_name, _runway, _anchor_node, points, _transitions, _is_main in runway_segments:
             if _matches_filter(points):
                 target_procs.add(proc_name)
-        for proc_name, (anchor_node, points, transitions) in common_segments.items():
+        for proc_name, (_anchor_node, points, _transitions) in common_segments.items():
             if _matches_filter(points):
                 target_procs.add(proc_name)
-        for proc_name, runway, anchor_node, points, transitions, is_main in transition_segments:
+        for proc_name, _runway, _anchor_node, points, _transitions, _is_main in transition_segments:
             if _matches_filter(points):
                 target_procs.add(proc_name)
 
@@ -954,7 +954,7 @@ class FlatbuffersAirportConnector:
                             f"DER{inferred}",
                             f"DE{inferred}",
                         ):
-                            merged_points = [(re_name, re_lat, re_lon)] + list(merged_points)
+                            merged_points = [(re_name, re_lat, re_lon), *list(merged_points)]
                     proc = Procedure(
                         name=proc_name,
                         runway=inferred if inferred else "ALL",
@@ -982,7 +982,7 @@ class FlatbuffersAirportConnector:
                         f"DER{inferred}",
                         f"DE{inferred}",
                     ):
-                        merged_points = [(re_name, re_lat, re_lon)] + list(merged_points)
+                        merged_points = [(re_name, re_lat, re_lon), *list(merged_points)]
                 proc = Procedure(
                     name=proc_name,
                     runway=inferred if inferred else "ALL",
@@ -1056,9 +1056,8 @@ class FlatbuffersAirportConnector:
                 if name == f"DER{runway}":
                     runway_endpoints[runway] = (name, lat, lon)
                     break
-                if name == f"DE{runway}":
-                    if runway not in runway_endpoints:
-                        runway_endpoints[runway] = (name, lat, lon)
+                if name == f"DE{runway}" and runway not in runway_endpoints:
+                    runway_endpoints[runway] = (name, lat, lon)
             # If we found DER, stop scanning this runway (DER preferred over DE)
             if runway in runway_endpoints and runway_endpoints[runway][0] == f"DER{runway}":
                 continue
@@ -1068,7 +1067,7 @@ class FlatbuffersAirportConnector:
             if runway in runway_endpoints:
                 re_name, re_lat, re_lon = runway_endpoints[runway]
                 if not points or points[0][0] not in (f"DER{runway}", f"DE{runway}"):
-                    new_points = [(re_name, re_lat, re_lon)] + list(points)
+                    new_points = [(re_name, re_lat, re_lon), *list(points)]
                     fixed_runway_segments.append(
                         (proc_name, runway, anchor_node, new_points, transitions, is_main)
                     )
@@ -1086,8 +1085,6 @@ class FlatbuffersAirportConnector:
         # participate in routing.  Internal procedure points and transitions
         # are display-only (frontend draws them from procedures data).
         connections = []
-        internal_edges = []
-        transition_edges = []
 
         # Build procedures from runway segments.
         # Merge matching common segment points and transitions so the full
@@ -1201,7 +1198,7 @@ class FlatbuffersAirportConnector:
             merged_transitions = list(transitions)
 
             if proc_name in common_segments:
-                common_node, common_points, common_trans = common_segments[proc_name]
+                _common_node, common_points, common_trans = common_segments[proc_name]
                 seen = {p[0] for p in merged_points}
                 for cp in common_points:
                     if cp[0] not in seen:
@@ -1342,7 +1339,7 @@ class FlatbuffersAirportConnector:
             if proc.Type() != 3:
                 continue
 
-            proc_name = (
+            (
                 proc.Name().decode("utf-8")
                 if isinstance(proc.Name(), bytes)
                 else (proc.Name() or "")
@@ -1393,7 +1390,7 @@ class FlatbuffersAirportConnector:
             # after splitting), fall back to the full transition points.
             for j in range(proc.TransitionsLength()):
                 trans = proc.Transitions(j)
-                trans_name = (
+                (
                     trans.Name().decode("utf-8")
                     if isinstance(trans.Name(), bytes)
                     else (trans.Name() or "")
@@ -1483,8 +1480,6 @@ class FlatbuffersAirportConnector:
         # In the mixed-graph approach, only the STAR entry points and airport
         # participate in routing.  Internal procedure points and transitions
         # are display-only (frontend draws them from procedures data).
-        transition_edges = []
-        internal_edges = []
 
         # Build procedures from runway segments.
         # Merge matching common segment points and transitions so the full
@@ -1501,7 +1496,7 @@ class FlatbuffersAirportConnector:
         for proc_name, runway, _entry_node, _points, _transitions, _is_main in runway_segments:
             if self.RUNWAY_RE.match(runway):
                 proc_name_candidate_runways.setdefault(proc_name, set()).add(runway)
-        for proc_name, (anchor_node, points, common_trans) in common_segments.items():
+        for proc_name, (_anchor_node, points, common_trans) in common_segments.items():
             if points and approach_bridges:
                 final_point = points[-1][0]
                 for (rwy, entry), _bridge in approach_bridges.items():
@@ -1540,7 +1535,7 @@ class FlatbuffersAirportConnector:
             merged_transitions = list(transitions)
 
             if proc_name in common_segments:
-                common_node, common_points, common_trans = common_segments[proc_name]
+                _common_node, common_points, common_trans = common_segments[proc_name]
                 # Determine correct merge order for STAR:
                 # - Enroute transitions end at common path start
                 #   (e.g. PGS -> ... -> BASET, common = BASET -> DOWNE -> REEDR)
@@ -1617,10 +1612,7 @@ class FlatbuffersAirportConnector:
                 transitions=merged_transitions,
             )
             # STAR main-legs are network->airport; key by merged network-side entry point.
-            if merged_points:
-                key = merged_points[0][0]
-            else:
-                key = entry_node.name
+            key = merged_points[0][0] if merged_points else entry_node.name
             if key not in procedures:
                 procedures[key] = [proc]
             else:
@@ -1747,7 +1739,7 @@ class FlatbuffersAirportConnector:
     def _flatten_transitions(self, transition_segments):
         """Flatten transition segments into (proc_name, trans_name, from_node, to_node, points) tuples."""
         result = []
-        for proc_name, runway, anchor_node, points, transitions, is_main in transition_segments:
+        for proc_name, _runway, _anchor_node, _points, transitions, _is_main in transition_segments:
             for trans_name, t_points in transitions:
                 if not t_points:
                     continue

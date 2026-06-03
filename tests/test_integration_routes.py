@@ -53,7 +53,7 @@ EXHAUSTIVE_CARTESIAN_PAIRS = [
     ("ZBAA", "TNCM"),
 ]
 
-TEST_AIRPORTS = sorted(set(icao for pair in AIRPORT_PAIRS for icao in pair))
+TEST_AIRPORTS = sorted({icao for pair in AIRPORT_PAIRS for icao in pair})
 
 
 # Per CLAUDE.md: Test Failure = Our Bug, Not "Missing Data".
@@ -515,11 +515,11 @@ def _simulate_frontend_procedure_selection(seg_nodes: list, proc_list: list, lab
     best_proc_idx = 0
     best_score = -1
     for i, proc in enumerate(proc_list):
-        point_names = set(p[0] for p in proc[2])
+        point_names = {p[0] for p in proc[2]}
         score = sum(1 for name in point_names if name in route_node_names)
         # Also consider transitions: add unique transition points
         for t in proc[3]:
-            t_point_names = set(p[0] for p in t[1])
+            t_point_names = {p[0] for p in t[1]}
             for name in t_point_names:
                 if name in route_node_names and name not in point_names:
                     score += 1
@@ -536,7 +536,7 @@ def _simulate_frontend_procedure_selection(seg_nodes: list, proc_list: list, lab
     best_trans_score = -1
     for i, t in enumerate(transitions):
         t_points = t[1]
-        t_point_names = set(p[0] for p in t_points)
+        t_point_names = {p[0] for p in t_points}
         score = sum(1 for name in t_point_names if name in route_node_names)
         score = score * 1000 + len(t_points)
         if score > best_trans_score:
@@ -1356,11 +1356,10 @@ def _verify_sid_star_complete_path(
 
     # Find best matching procedure and check against ALL procedures
     best_proc = None
-    best_key = None
     best_score = 0
     valid_procs = []
 
-    for key, proc_list in procedures.items():
+    for _key, proc_list in procedures.items():
         for proc in proc_list:
             proc_names = [p[0] for p in proc[2]]
             all_names = set(proc_names)
@@ -1370,7 +1369,6 @@ def _verify_sid_star_complete_path(
             if score > best_score:
                 best_score = score
                 best_proc = proc
-                best_key = key
 
             # Check if this procedure fully validates the segment
             if score < 2:
@@ -1392,9 +1390,8 @@ def _verify_sid_star_complete_path(
                 continue
 
             # Check boundary conditions
-            if label == "SID" and proc_seg_nodes:
-                if proc_seg_nodes[0] != proc_names[0]:
-                    continue
+            if label == "SID" and proc_seg_nodes and proc_seg_nodes[0] != proc_names[0]:
+                continue
             if label == "STAR" and proc_seg_nodes:
                 if proc_seg_nodes[-1] != proc_names[-1]:
                     continue
@@ -1423,13 +1420,12 @@ def _verify_sid_star_complete_path(
                 f"expected {a_idx + 1}). Procedure points: {proc_names}"
             )
 
-    if label == "SID" and proc_seg_nodes and proc_names:
-        if proc_seg_nodes[0] != proc_names[0]:
-            errors.append(
-                f"{orig}->{dest} SID: first proc node {proc_seg_nodes[0]!r} != "
-                f"procedure first point {proc_names[0]!r} ({best_proc[0]} rwy={best_proc[1]}). "
-                f"SID segment: {seg_nodes}"
-            )
+    if label == "SID" and proc_seg_nodes and proc_names and proc_seg_nodes[0] != proc_names[0]:
+        errors.append(
+            f"{orig}->{dest} SID: first proc node {proc_seg_nodes[0]!r} != "
+            f"procedure first point {proc_names[0]!r} ({best_proc[0]} rwy={best_proc[1]}). "
+            f"SID segment: {seg_nodes}"
+        )
 
     if label == "STAR" and proc_seg_nodes and proc_names:
         if proc_seg_nodes[-1] != proc_names[-1]:
@@ -1706,7 +1702,7 @@ def test_route_boundary_nodes_are_semantically_correct(orig, dest):
             pts = [p[0] for p in proc[2]]
             if pts:
                 proc_last_points.add(pts[-1])
-            for t_name, t_pts in proc[3]:
+            for _t_name, t_pts in proc[3]:
                 if t_pts:
                     proc_last_points.add(t_pts[-1][0])
         if proc_last_points:

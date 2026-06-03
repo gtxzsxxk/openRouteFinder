@@ -15,7 +15,7 @@ def pack_airport_data(cycle: str):
     """Pack airport data into .air file."""
     airport_data = {}
     proc_path = os.path.join(settings.local_asdata_path, "proc")
-    for home, dirs, files in os.walk(proc_path):
+    for home, _dirs, files in os.walk(proc_path):
         for filename in files:
             print(filename)
             fullpath = os.path.join(home, filename)

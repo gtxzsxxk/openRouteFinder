@@ -274,7 +274,7 @@ def build_from_fenix(
         "grid_mora": _count_table(cursor, "GridMora"),
         "airport_comms": _count_table(cursor, "AirportComms"),
     }
-    total_rows = sum(counts.values())
+    sum(counts.values())
     processed = 0
 
     def _progress(step: str, current: int, total: int) -> None:
@@ -750,7 +750,7 @@ def _build_procedure_legs(
     leg_rows: list,
     wp_names: dict[int, str],
     is_main: bool = True,
-    transition_name: str = None,
+    transition_name: str | None = None,
 ) -> int:
     leg_offsets = []
     for row in leg_rows:

@@ -32,13 +32,13 @@ def build_route_info(
     sid: dict,
     star: dict,
     airport_name: list,
-    active_sid_transition: str = None,
-    active_star_transition: str = None,
-    route_segments: list = None,
-    sid_node_name: str = None,
-    star_node_name: str = None,
-    sid_route_node_name: str = None,
-    star_route_node_name: str = None,
+    active_sid_transition: str | None = None,
+    active_star_transition: str | None = None,
+    route_segments: list | None = None,
+    sid_node_name: str | None = None,
+    star_node_name: str | None = None,
+    sid_route_node_name: str | None = None,
+    star_route_node_name: str | None = None,
 ) -> str:
     result = {
         "data_version": data_version,
@@ -332,7 +332,7 @@ class RouteEngine:
         # Recalculate distance
         dist_km = self._calc_route_distance(route_list, sid_conn, star_conn)
         dist_nm = dist_km / 1.852
-        dist_str = "%.2f nm / %.2f km" % (dist_nm, dist_km)
+        dist_str = f"{dist_nm:.2f} nm / {dist_km:.2f} km"
 
         route_total = self._sort_route(orig, route_list)
         node_info = self._build_node_info(sid_conn, star_conn, route_list)
@@ -365,7 +365,7 @@ class RouteEngine:
                     break
 
         # Active transitions
-        route_node_names = set(node_name for _, node_name, _ in route_list)
+        route_node_names = {node_name for _, node_name, _ in route_list}
         active_sid_transition = self._find_active_transition(
             sid_proc, route_node_names, is_sid=True
         )
@@ -472,10 +472,7 @@ class RouteEngine:
         if not proc.points:
             return None
 
-        if is_sid:
-            pt = proc.points[-1]
-        else:
-            pt = proc.points[0]
+        pt = proc.points[-1] if is_sid else proc.points[0]
 
         name, lat, lon = pt
         key = (name, round(lat, 6), round(lon, 6))
@@ -500,18 +497,16 @@ class RouteEngine:
         for edge in conn.bridge_edges:
             if is_sid:
                 # SID bridge: temp -> airway (nfrom = node, nend = airway)
-                if edge.nfrom == node.iid:
-                    if 0 <= edge.nend < self.num_nodes:
-                        airway_node = self.node_list[edge.nend]
-                        if airway_node is not None:
-                            return airway_node
+                if edge.nfrom == node.iid and 0 <= edge.nend < self.num_nodes:
+                    airway_node = self.node_list[edge.nend]
+                    if airway_node is not None:
+                        return airway_node
             else:
                 # STAR bridge: airway -> temp (nfrom = airway, nend = node)
-                if edge.nend == node.iid:
-                    if 0 <= edge.nfrom < self.num_nodes:
-                        airway_node = self.node_list[edge.nfrom]
-                        if airway_node is not None:
-                            return airway_node
+                if edge.nend == node.iid and 0 <= edge.nfrom < self.num_nodes:
+                    airway_node = self.node_list[edge.nfrom]
+                    if airway_node is not None:
+                        return airway_node
 
         # No outgoing edges and no bridge edge.
         # SID: exit point is a dead-end — A* cannot continue on airway.
@@ -609,8 +604,7 @@ class RouteEngine:
         """
         if not self._is_excluded_airway(edge_name):
             return False
-        has_non_t = any(not self._is_excluded_airway(e.name) for e in curr_node.next_list)
-        return has_non_t
+        return any(not self._is_excluded_airway(e.name) for e in curr_node.next_list)
 
     @staticmethod
     def _edge_sort_key(name: str) -> tuple:
@@ -656,7 +650,7 @@ class RouteEngine:
         heapq.heappush(queue, (0.0, 0.0, start_iid))
 
         while queue:
-            _dist, g_score, curr = heapq.heappop(queue)
+            _dist, _g_score, curr = heapq.heappop(queue)
 
             if curr == end_iid:
                 break
@@ -718,14 +712,14 @@ class RouteEngine:
         if start_node is None or end_node is None:
             return None
 
-        end_lat, end_lon = end_node.px, end_node.py
+        _end_lat, _end_lon = end_node.px, end_node.py
         dists[start_iid] = 0.0
 
         queue = []
         heapq.heappush(queue, (0.0, 0.0, start_iid))
 
         while queue:
-            f_score, g_score, curr = heapq.heappop(queue)
+            _f_score, _g_score, curr = heapq.heappop(queue)
 
             if curr == end_iid:
                 break
@@ -953,7 +947,7 @@ class RouteEngine:
         best_proc, best_boundary, best_t_name = None, None, None
         best_dist = float("inf")
 
-        for proc, boundary, key, t_name in candidates:
+        for proc, boundary, _key, t_name in candidates:
             if is_sid:
                 dist = self._astar_airway_distance(boundary.iid, other_boundary_iid)
             else:
@@ -1132,7 +1126,7 @@ class RouteEngine:
             star_node_names = {p[0] for p in star_proc.points}
             # If an internal airway node is also in STAR, truncate airway there
             truncate_idx = None
-            for i, (edge_name, node_name, iid) in enumerate(filtered_airway):
+            for i, (_edge_name, node_name, _iid) in enumerate(filtered_airway):
                 if node_name in star_node_names and i < len(filtered_airway) - 1:
                     truncate_idx = i
                     break
@@ -1357,10 +1351,7 @@ class RouteEngine:
                     best_airway = orig_edge_name
                 elif prev_airway is not None:
                     different = {a for a in airways if a != prev_airway}
-                    if different:
-                        best_airway = min(different)
-                    else:
-                        best_airway = min(airways)
+                    best_airway = min(different) if different else min(airways)
                 else:
                     best_airway = min(airways)
             else:
@@ -1519,13 +1510,13 @@ class RouteEngine:
         for proc, boundary, key, t_name in sid_candidates:
             for pt in proc.points:
                 forbidden_names.add(pt[0])
-            for trans_name, trans_pts in proc.transitions:
+            for _trans_name, trans_pts in proc.transitions:
                 for pt in trans_pts:
                     forbidden_names.add(pt[0])
         for proc, boundary, key, t_name in star_candidates:
             for pt in proc.points:
                 forbidden_names.add(pt[0])
-            for trans_name, trans_pts in proc.transitions:
+            for _trans_name, trans_pts in proc.transitions:
                 for pt in trans_pts:
                     forbidden_names.add(pt[0])
 
@@ -1681,13 +1672,13 @@ class RouteEngine:
 
         sid_proc = sid_info[2]
         sid_boundary = sid_info[4]
-        sid_key = sid_info[1]
+        sid_info[1]
         sid_t_name = sid_info[3]
 
         star_proc = star_info[2]
         star_boundary = star_info[4]
-        star_key = star_info[1]
-        star_t_name = star_info[3]
+        star_info[1]
+        star_info[3]
 
         # Get SID transition points
         sid_transition_pts = None
@@ -1711,7 +1702,7 @@ class RouteEngine:
 
         dist_km = self._calc_route_distance(route_list, sid_conn, star_conn)
         dist_nm = dist_km / 1.852
-        dist_str = "%.2f nm / %.2f km" % (dist_nm, dist_km)
+        dist_str = f"{dist_nm:.2f} nm / {dist_km:.2f} km"
         route_total = self._sort_route(orig, route_list)
         node_info = self._build_node_info(sid_conn, star_conn, route_list)
         route_segments = self._build_route_segments(sid_conn, route_list)
@@ -1736,7 +1727,7 @@ class RouteEngine:
                     star_route_node_name = node_name
                     break
 
-        route_node_names = set(node_name for _, node_name, _ in route_list)
+        route_node_names = {node_name for _, node_name, _ in route_list}
         active_sid_transition = self._find_active_transition(
             sid_proc, route_node_names, is_sid=True
         )

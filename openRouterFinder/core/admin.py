@@ -21,9 +21,7 @@ _SKIP_PATHS = frozenset({"/api/validcode", "/api/admin", "/health", "/favicon.ic
 def _should_log(path: str) -> bool:
     if path in _SKIP_PATHS:
         return False
-    if path.startswith("/assets/") or path.startswith("/static/"):
-        return False
-    return True
+    return not (path.startswith("/assets/") or path.startswith("/static/"))
 
 
 def record_request(ip: str, method: str, path: str, status: int, duration_ms: float) -> None:

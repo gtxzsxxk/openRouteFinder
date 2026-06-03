@@ -131,7 +131,7 @@ def test_no_synthetic_markers_in_procedures(icao):
     """D#### markers must not appear as standalone points in any procedure."""
     data = _get_procedures(icao)
 
-    for label, key, proc in _all_procedure_tuples(data):
+    for label, _key, proc in _all_procedure_tuples(data):
         proc_name = proc[0]
         points = proc[2]
         transitions = proc[3]
@@ -273,7 +273,7 @@ def test_procedure_paths_no_teleportation(icao):
     data = _get_procedures(icao)
     max_leg = INTL_MAX_LEG_NM if icao in INTL_AIRPORTS else DOMESTIC_MAX_LEG_NM
 
-    for label, key, proc in _all_procedure_tuples(data):
+    for label, _key, proc in _all_procedure_tuples(data):
         proc_name = proc[0]
         points = proc[2]
         if len(points) < 2:
@@ -297,7 +297,7 @@ def test_no_runway_all_with_single_point(icao):
     """Procedures with runway=ALL must still have a meaningful path."""
     data = _get_procedures(icao)
 
-    for label, key, proc in _all_procedure_tuples(data):
+    for label, _key, proc in _all_procedure_tuples(data):
         proc_name = proc[0]
         runway = proc[1]
         points = proc[2]
@@ -325,7 +325,7 @@ def test_no_runway_all_when_specific_exists(icao):
 
         # Group by procedure name -> set of runways
         name_runways: dict = {}
-        for key, proc_list in section.items():
+        for _key, proc_list in section.items():
             for proc in proc_list:
                 proc_name = proc[0]
                 runway = proc[1]
@@ -421,7 +421,7 @@ def test_sid_runway_endpoint_consistent(icao):
 
     runway_has_endpoint: dict = {}
     runway_procs: dict = {}
-    for key, proc_list in sid.items():
+    for _key, proc_list in sid.items():
         for proc in proc_list:
             proc_name = proc[0]
             runway = proc[1]
@@ -463,7 +463,7 @@ def test_zbaa_36l_sid_circles_beijing():
     data = _get_procedures("ZBAA")
     sid = data.get("sidDetails", {})
 
-    for key, proc_list in sid.items():
+    for _key, proc_list in sid.items():
         for proc in proc_list:
             proc_name = proc[0]
             runway = proc[1]
@@ -496,7 +496,7 @@ def test_star_final_approach_reasonable(icao):
     data = _get_procedures(icao)
     star = data.get("starDetails", {})
 
-    for key, proc_list in star.items():
+    for _key, proc_list in star.items():
         for proc in proc_list:
             points = proc[2]
             for pt in points:
@@ -526,7 +526,7 @@ def test_zggg_ikavo3_approach_bridge_exists():
     star = data.get("starDetails", {})
 
     failures = []
-    for key, proc_list in star.items():
+    for _key, proc_list in star.items():
         for proc in proc_list:
             if proc[0] != "IKAVO3":
                 continue
@@ -556,7 +556,7 @@ def test_zggg_ikavo3_approach_bridge_exists():
             candidates = []
             for pt in pts[lupvu_idx + 1 :]:
                 candidates.append(pt)
-            for t_name, t_pts in transitions:
+            for _t_name, t_pts in transitions:
                 for pt in t_pts:
                     candidates.append(pt)
 
@@ -605,7 +605,7 @@ def test_zggg_ikavo3_has_complete_points():
     star = data.get("starDetails", {})
 
     failures = []
-    for key, proc_list in star.items():
+    for _key, proc_list in star.items():
         for proc in proc_list:
             proc_name = proc[0]
             runway = proc[1]
@@ -669,7 +669,7 @@ def test_procedure_internal_edges_no_hub_nodes(icao, navdata_fb):
         # 1. Collect expected edges from all procedure points + transitions
         expected_edges = set()
         iid_to_name = {}
-        for key, proc_list in conn.procedures.items():
+        for _key, proc_list in conn.procedures.items():
             for proc in proc_list:
                 pts = proc.points
                 for i in range(len(pts) - 1):
@@ -679,7 +679,7 @@ def test_procedure_internal_edges_no_hub_nodes(icao, navdata_fb):
                     iid_to_name[from_node.iid] = from_node.name
                     iid_to_name[to_node.iid] = to_node.name
 
-                for t_name, t_pts in proc.transitions:
+                for _t_name, t_pts in proc.transitions:
                     for i in range(len(t_pts) - 1):
                         from_node = connector._resolve_node(t_pts[i][0], t_pts[i][1], t_pts[i][2])
                         to_node = connector._resolve_node(
@@ -693,13 +693,13 @@ def test_procedure_internal_edges_no_hub_nodes(icao, navdata_fb):
         #    and are NOT the last point (so they may have outgoing edges).
         #    The last point connects to the airport/network, not internally.
         sensitive_nodes = set()
-        for key, proc_list in conn.procedures.items():
+        for _key, proc_list in conn.procedures.items():
             for proc in proc_list:
                 pts = proc.points
                 for i in range(len(pts) - 1):
                     node = connector._resolve_node(pts[i][0], pts[i][1], pts[i][2])
                     sensitive_nodes.add(node.iid)
-                for t_name, t_pts in proc.transitions:
+                for _t_name, t_pts in proc.transitions:
                     for i in range(len(t_pts) - 1):
                         node = connector._resolve_node(t_pts[i][0], t_pts[i][1], t_pts[i][2])
                         sensitive_nodes.add(node.iid)

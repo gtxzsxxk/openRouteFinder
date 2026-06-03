@@ -1,5 +1,6 @@
 """Data loading and NavGraph singleton."""
 
+import contextlib
 import dataclasses
 import pickle
 import sys
@@ -207,7 +208,7 @@ def _parse_runways(airport_str: str) -> list:
         # Parse ILS info
         ils = []
         if len(parts) > 7 and parts[5].strip() not in ("", "0"):
-            try:
+            with contextlib.suppress(ValueError):
                 ils.append(
                     {
                         "runwayEnd": name,
@@ -216,8 +217,6 @@ def _parse_runways(airport_str: str) -> list:
                         "category": "I",
                     }
                 )
-            except ValueError:
-                pass
 
         runways[name] = {
             "name": name,
@@ -512,10 +511,8 @@ def _parse_runways_from_fb(ap) -> list:
                 continue
 
         lighting = ""
-        try:
+        with contextlib.suppress(ValueError, TypeError):
             lighting = _parse_lighting(str(rw.Lighting())) if rw.Lighting() else ""
-        except (ValueError, TypeError):
-            pass
 
         result.append(
             {

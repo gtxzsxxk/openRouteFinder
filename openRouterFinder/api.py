@@ -1,6 +1,7 @@
 """FastAPI application with thread-pooled A* route search."""
 
 import asyncio
+import contextlib
 import json
 import os
 import shutil
@@ -446,10 +447,8 @@ async def post_route(req: RouteRequest):
         pass
 
     time_min = None
-    try:
+    with contextlib.suppress(ValueError, TypeError):
         time_min = float(result.get("total_time", 0)) / 1000.0
-    except (ValueError, TypeError):
-        pass
 
     nodeinformation = result.get("nodeinformation", [])
     nodes_count = len([n for n in nodeinformation if len(n) >= 3]) if nodeinformation else 0
@@ -510,9 +509,8 @@ async def post_route(req: RouteRequest):
     # Rename single-runway ALL variants (e.g. KIMMO3 ALL → 24R) so the
     # frontend shows the correct runway.  Multi-runway ALL variants are
     # kept because their entry-point keys are needed for starNodeName.
-    result = _rename_single_runway_all(result)
+    return _rename_single_runway_all(result)
 
-    return result
 
 
 @app.get("/api/metar/{icao}")
@@ -750,7 +748,7 @@ async def upload_navdata(
             zf.extractall(tmp_dir)
 
         # Find .db3 file (Fenix navdata)
-        for root, dirs, files in os.walk(tmp_dir):
+        for root, _dirs, files in os.walk(tmp_dir):
             for name in files:
                 if name.lower().endswith(".db3"):
                     db_path = Path(root) / name
