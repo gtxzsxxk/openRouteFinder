@@ -561,12 +561,11 @@ class RouteEngine:
             boundary = end_node
             if not boundary.next_list:
                 for edge in sid_conn.bridge_edges:
-                    if edge.nfrom == boundary.iid:
-                        if 0 <= edge.nend < self.num_nodes:
-                            airway_node = self.node_list[edge.nend]
-                            if airway_node is not None:
-                                boundary = airway_node
-                                break
+                    if edge.nfrom == boundary.iid and 0 <= edge.nend < self.num_nodes:
+                        airway_node = self.node_list[edge.nend]
+                        if airway_node is not None:
+                            boundary = airway_node
+                            break
 
             if not boundary.next_list:
                 continue
@@ -583,8 +582,9 @@ class RouteEngine:
 
     @staticmethod
     def _is_excluded_airway(name: str) -> bool:
-        """Check if an airway is a T-route (terminal route) that should be
-        excluded from enroute A*.
+        """Check if an airway is a T-route (terminal route).
+
+        T-routes should be excluded from enroute A*.
 
         T-routes are low-altitude terminal routes that provide shortcuts in
         terminal areas but fragment the enroute airway graph, causing A* to
@@ -813,12 +813,11 @@ class RouteEngine:
                         boundary = end_node
                         if not boundary.next_list:
                             for edge in conn.bridge_edges:
-                                if edge.nfrom == boundary.iid:
-                                    if 0 <= edge.nend < self.num_nodes:
-                                        airway_node = self.node_list[edge.nend]
-                                        if airway_node is not None:
-                                            boundary = airway_node
-                                            break
+                                if edge.nfrom == boundary.iid and 0 <= edge.nend < self.num_nodes:
+                                    airway_node = self.node_list[edge.nend]
+                                    if airway_node is not None:
+                                        boundary = airway_node
+                                        break
 
                         if boundary is not None and boundary.next_list:
                             candidates.append((proc, boundary, key, t_name))
@@ -842,12 +841,11 @@ class RouteEngine:
                         if not boundary.next_list:
                             # STAR bridge: airway -> temp
                             for edge in conn.bridge_edges:
-                                if edge.nend == boundary.iid:
-                                    if 0 <= edge.nfrom < self.num_nodes:
-                                        airway_node = self.node_list[edge.nfrom]
-                                        if airway_node is not None:
-                                            boundary = airway_node
-                                            break
+                                if edge.nend == boundary.iid and 0 <= edge.nfrom < self.num_nodes:
+                                    airway_node = self.node_list[edge.nfrom]
+                                    if airway_node is not None:
+                                        boundary = airway_node
+                                        break
 
                         if boundary is not None and boundary.next_list:
                             candidates.append((proc, boundary, key, t_name))

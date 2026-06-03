@@ -51,11 +51,20 @@ ignore = [
     "ANN001", "ANN201", "ANN202", "ANN204", "ANN401",
     # Allow implicit string concatenation
     "ISC001",
+    # Allow unused loop control variables (legacy codebase)
+    "B007",
+    # Allow Chinese punctuation in comments/docstrings/strings
+    "RUF001", "RUF002", "RUF003",
+    # Allow os.path/pathlib mix (legacy codebase)
+    "PTH107", "PTH108", "PTH110", "PTH118", "PTH120", "PTH123",
+    # Allow FastAPI File/Query/Header in default arguments
+    "B008",
 ]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["S", "D", "ANN"]
 "openRouterFinder/core/storage/NavData/**/*.py" = ["ALL"]
+"openRouterFinder/core/storage/reader.py" = ["E402"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

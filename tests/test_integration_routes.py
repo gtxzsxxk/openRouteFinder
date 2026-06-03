@@ -338,7 +338,8 @@ def test_route_topology_no_branching(orig, dest):
     seg_endpoints = [n for n, d in seg_degree.items() if d == 1]
     if len(seg_endpoints) != 2:
         errors.append(
-            f"{orig}→{dest} routeSegments: expected 2 endpoints, got {len(seg_endpoints)}: {seg_endpoints}"
+            f"{orig}→{dest} routeSegments: expected 2 endpoints, "
+            f"got {len(seg_endpoints)}: {seg_endpoints}"
         )
 
     # ------------------------------------------------------------------
@@ -1100,8 +1101,10 @@ def _assert_api_response_structure(data: dict, orig: str, dest: str):
             for proc in proc_list:
                 # proc tuple: [name, runway, points, transitions]
                 if not isinstance(proc, list) or len(proc) != 4:
+                    proc_len = len(proc) if isinstance(proc, list) else "N/A"
                     errors.append(
-                        f"{label}[{key!r}] procedure shape {type(proc).__name__} len={len(proc) if isinstance(proc, list) else 'N/A'}"
+                        f"{label}[{key!r}] procedure shape "
+                        f"{type(proc).__name__} len={proc_len}"
                     )
                     continue
                 pname, prunway, ppoints, ptrans = proc
@@ -1111,7 +1114,8 @@ def _assert_api_response_structure(data: dict, orig: str, dest: str):
                     errors.append(f"{label}[{key!r}] runway type={type(prunway).__name__}")
                 elif prunway not in ("ALL", "") and not RUNWAY_RE.match(prunway):
                     errors.append(
-                        f"{label}[{key!r}] {pname}: runway={prunway!r} is not a valid runway designator"
+                        f"{label}[{key!r}] {pname}: "
+                        f"runway={prunway!r} is not a valid runway designator"
                     )
                 # points
                 if not isinstance(ppoints, list):
@@ -1139,12 +1143,14 @@ def _assert_api_response_structure(data: dict, orig: str, dest: str):
                         tname, tpts = t
                         if not isinstance(tname, str):
                             errors.append(
-                                f"{label}[{key!r}] {pname}: transition name type={type(tname).__name__}"
+                                f"{label}[{key!r}] {pname}: "
+                                f"transition name type={type(tname).__name__}"
                             )
                             break
                         if not isinstance(tpts, list):
                             errors.append(
-                                f"{label}[{key!r}] {pname}: transition points type={type(tpts).__name__}"
+                                f"{label}[{key!r}] {pname}: "
+                                f"transition points type={type(tpts).__name__}"
                             )
                             break
                         for pt in tpts:
@@ -1346,10 +1352,7 @@ def _verify_sid_star_complete_path(
         return errors
 
     # Determine procedure nodes (excluding airport)
-    if label == "SID":
-        proc_seg_nodes = seg_nodes[1:]  # Skip airport at start
-    else:
-        proc_seg_nodes = seg_nodes[:-1]  # Skip airport at end
+    proc_seg_nodes = seg_nodes[1:] if label == "SID" else seg_nodes[:-1]
 
     if len(proc_seg_nodes) < 2:
         return errors
@@ -1392,9 +1395,9 @@ def _verify_sid_star_complete_path(
             # Check boundary conditions
             if label == "SID" and proc_seg_nodes and proc_seg_nodes[0] != proc_names[0]:
                 continue
-            if label == "STAR" and proc_seg_nodes:
-                if proc_seg_nodes[-1] != proc_names[-1]:
-                    continue
+            if (label == "STAR" and proc_seg_nodes
+                    and proc_seg_nodes[-1] != proc_names[-1]):
+                continue
 
             valid_procs.append(proc)
 
@@ -1427,9 +1430,9 @@ def _verify_sid_star_complete_path(
             f"SID segment: {seg_nodes}"
         )
 
-    if label == "STAR" and proc_seg_nodes and proc_names:
-        if proc_seg_nodes[-1] != proc_names[-1]:
-            errors.append(
+    if (label == "STAR" and proc_seg_nodes and proc_names
+            and proc_seg_nodes[-1] != proc_names[-1]):
+        errors.append(
                 f"{orig}->{dest} STAR: last proc node {proc_seg_nodes[-1]!r} != "
                 f"procedure last point {proc_names[-1]!r} ({best_proc[0]} rwy={best_proc[1]}). "
                 f"STAR segment: {seg_nodes}"
@@ -1944,7 +1947,8 @@ STANDARD_ROUTES = [
     (
         "RKPC",
         "ZBAD",
-        "RKPC SID LIMDI Y677 TOLIS Y655 NONOS Z55 AGAVO A591 IKEKA W4 HCH W200 DOVIV W55 DUMAP STAR ZBAD",
+        "RKPC SID LIMDI Y677 TOLIS Y655 NONOS Z55 AGAVO "
+        "A591 IKEKA W4 HCH W200 DOVIV W55 DUMAP STAR ZBAD",
         718.5,
     ),
     pytest.param(

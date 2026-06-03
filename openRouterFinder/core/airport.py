@@ -85,7 +85,8 @@ class FlatbuffersAirportConnector:
         return nearest
 
     def _ensure_continuous_paths(self, conn: AirportConnection, label: str):
-        """Add missing internal_edges so every consecutive pair in procedure
+        """Add missing internal_edges so every consecutive pair in procedure.
+
         points and transitions is connected.
         """
         existing = {(e.nfrom, e.nend) for e in conn.internal_edges}
@@ -241,9 +242,9 @@ class FlatbuffersAirportConnector:
             for node in self.nav_data.node_list:
                 if node is None:
                     continue
-                if node.iid not in proc_node_iids and node.next_list:
-                    if _is_reachable_from_network(node.iid):
-                        nodes_reachable_from_network.add(node.iid)
+                if (node.iid not in proc_node_iids and node.next_list
+                        and _is_reachable_from_network(node.iid)):
+                    nodes_reachable_from_network.add(node.iid)
 
             for node in entry_nodes.values():
                 needs_bridge = not node.next_list or node.iid not in nodes_with_inbound
@@ -613,9 +614,11 @@ class FlatbuffersAirportConnector:
 
         Returns:
             (runway_segments, common_segments, transition_segments)
-            runway_segments: list of (proc_name, runway, anchor_node, points, transitions, is_main_legs)
+            runway_segments: list of (proc_name, runway, anchor_node, points,
+                transitions, is_main_legs)
             common_segments: dict of proc_name -> (anchor_node, points, transitions)
-            transition_segments: list of (proc_name, runway, anchor_node, points, transitions, is_main_legs)
+            transition_segments: list of (proc_name, runway, anchor_node, points,
+                transitions, is_main_legs)
         """
         ap = self.nav_data.get_airport(icao)
         if ap is None:
@@ -739,7 +742,8 @@ class FlatbuffersAirportConnector:
                 for trans_name, trans_points in transitions:
                     if not trans_points:
                         continue
-                    # Fallback to transition name for grouping (runway is validated at display time).
+                    # Fallback to transition name for grouping
+                    # (runway is validated at display time).
                     runway_name = trans_name[2:] if trans_name.startswith("RW") else trans_name
                     if proc_type == 1:
                         # SID transitions are stored airport->network.
@@ -755,7 +759,8 @@ class FlatbuffersAirportConnector:
                     else:
                         # STAR transitions are stored network->airport.
                         # The airport-side entry point is the last point.
-                        # Keep network->airport order so internal_edges and display match flight direction.
+                        # Keep network->airport order so internal_edges
+                        # and display match flight direction.
                         anchor_name, anchor_lat, anchor_lon = trans_points[-1]
                         anchor_node = self._resolve_node(anchor_name, anchor_lat, anchor_lon)
                         # Network-side entry is the first point; use it for connections (A* entry)
@@ -840,7 +845,7 @@ class FlatbuffersAirportConnector:
         procedure x runway) when the same procedure name has both an 'ALL' variant
         and runway-specific variants.
         """
-        name_runways: dict[str, Set[str]] = {}
+        name_runways: dict[str, set[str]] = {}
         for proc_list in procedures.values():
             for proc in proc_list:
                 name_runways.setdefault(proc.name, set()).add(proc.runway)
@@ -1099,7 +1104,7 @@ class FlatbuffersAirportConnector:
             runway_groups[(proc_name, runway)].append((exit_node, points, transitions, is_main))
 
         # Collect candidate runways per proc_name from RWxx transitions.
-        sid_proc_name_candidates: dict[str, Set[str]] = {}
+        sid_proc_name_candidates: dict[str, set[str]] = {}
         for proc_name, runway, _exit_node, _points, _transitions, _is_main in runway_segments:
             if self.RUNWAY_RE.match(runway):
                 sid_proc_name_candidates.setdefault(proc_name, set()).add(runway)
@@ -1492,7 +1497,7 @@ class FlatbuffersAirportConnector:
             runway_groups[(proc_name, runway)].append((entry_node, points, transitions, is_main))
 
         # Collect candidate runways per proc_name from approach bridges and RWxx transitions.
-        proc_name_candidate_runways: dict[str, Set[str]] = {}
+        proc_name_candidate_runways: dict[str, set[str]] = {}
         for proc_name, runway, _entry_node, _points, _transitions, _is_main in runway_segments:
             if self.RUNWAY_RE.match(runway):
                 proc_name_candidate_runways.setdefault(proc_name, set()).add(runway)
@@ -1737,7 +1742,10 @@ class FlatbuffersAirportConnector:
         return result
 
     def _flatten_transitions(self, transition_segments):
-        """Flatten transition segments into (proc_name, trans_name, from_node, to_node, points) tuples."""
+        """Flatten transition segments into tuples.
+
+        (proc_name, trans_name, from_node, to_node, points)
+        """
         result = []
         for proc_name, _runway, _anchor_node, _points, transitions, _is_main in transition_segments:
             for trans_name, t_points in transitions:
@@ -2397,7 +2405,8 @@ class AirportConnector:
                 else:
                     procedures[entry_node.name].append(proc)
 
-            # Register by transition start node (from_node) — A* may route from_node -> airport directly
+            # Register by transition start node (from_node).
+            # A* may route from_node -> airport directly.
             seen_keys = set()
             for proc_name, trans_name, from_node, to_node, points in transition_segments:
                 proc = base_procs[proc_name]

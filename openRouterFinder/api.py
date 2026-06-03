@@ -431,7 +431,7 @@ async def post_route(req: RouteRequest):
             )
     except Exception as e:
         record_error(f"Route calculation failed: {e}", "/api/route", "POST", 500)
-        raise HTTPException(status_code=500, detail=f"Route calculation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Route calculation failed: {e}") from e
 
     if result is None:
         record_error(f"No route found: {req.orig} → {req.dest}", "/api/route", "POST", 404)
@@ -440,11 +440,9 @@ async def post_route(req: RouteRequest):
     # Extract stats before mutating result
     distance_raw = result.get("distance", "")
     distance = None
-    try:
+    with contextlib.suppress(ValueError, IndexError):
         # "676.59 nm / 1253.05 km" -> 676.59
         distance = float(distance_raw.split()[0]) if distance_raw else None
-    except (ValueError, IndexError):
-        pass
 
     time_min = None
     with contextlib.suppress(ValueError, TypeError):
@@ -641,9 +639,8 @@ def _validate_fenix_db(db_path: Path) -> dict:
         conn.close()
         raise ValueError(f"Config table has unexpected schema: columns={cols}")
 
-    cursor.execute(
-        f"SELECT {key_col}, {val_col} FROM config WHERE {key_col} IN ('CycleName', 'CycleStartDate', 'CycleEndDate')"
-    )
+    in_clause = "'CycleName', 'CycleStartDate', 'CycleEndDate'"
+    cursor.execute(f"SELECT {key_col}, {val_col} FROM config WHERE {key_col} IN ({in_clause})")
     config = {row[0]: row[1] for row in cursor.fetchall()}
     conn.close()
 
@@ -703,8 +700,11 @@ def _do_build_navdata(
             "cycle": cycle,
             "info": info,
         }
+        size_mb = len(compressed) / 1024 / 1024
+        raw_mb = len(raw) / 1024 / 1024
         print(
-            f"[build {build_id}] done: cycle={cycle}, fb={fb_path} ({len(compressed) / 1024 / 1024:.1f}MB / {len(raw) / 1024 / 1024:.1f}MB)"
+            f"[build {build_id}] done: cycle={cycle}, fb={fb_path} "
+            f"({size_mb:.1f}MB / {raw_mb:.1f}MB)"
         )
     except Exception as e:
         import traceback
@@ -767,7 +767,7 @@ async def upload_navdata(
             cycle_info = _validate_fenix_db(db_path)
         except ValueError as e:
             record_error(f"Upload validation failed: {e}", "/api/admin/navdata/upload", "POST", 400)
-            raise HTTPException(status_code=400, detail=str(e))
+            raise HTTPException(status_code=400, detail=str(e)) from e
 
         cycle = cycle_info["cycle"]
 
@@ -807,7 +807,7 @@ async def upload_navdata(
     except Exception as e:
         shutil.rmtree(tmp_dir, ignore_errors=True)
         record_error(f"Upload failed: {e}", "/api/admin/navdata/upload", "POST", 500)
-        raise HTTPException(status_code=500, detail=f"Upload processing failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Upload processing failed: {e}") from e
 
 
 @app.get("/api/admin/navdata/build-progress/{build_id}")

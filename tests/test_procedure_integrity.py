@@ -581,9 +581,10 @@ def test_zggg_ikavo3_approach_bridge_exists():
                     break
 
             if not has_bridge:
+                cand_str = [(p[0], round(_point_dist_km(lupvu, p), 1)) for p in candidates]
                 failures.append(
                     f"IKAVO3 runway {runway}: no waypoint between LUPVU "
-                    f"and airport among {[(p[0], round(_point_dist_km(lupvu, p), 1)) for p in candidates]}"
+                    f"and airport among {cand_str}"
                 )
 
     assert not failures, "ZGGG IKAVO3 approach bridge issues:\n" + "\n".join(failures)

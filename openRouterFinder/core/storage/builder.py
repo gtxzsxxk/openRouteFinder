@@ -3,7 +3,6 @@
 import sqlite3
 from collections.abc import Callable
 from pathlib import Path
-from typing import Optional
 
 import flatbuffers
 
@@ -233,7 +232,7 @@ from openRouterFinder.core.storage.NavData.RunwayEnd import (
 # Builder
 # ---------------------------------------------------------------------------
 
-ProgressCallback = Optional[Callable[[str, int, int], None]]
+ProgressCallback = Callable[[str, int, int], None] | None
 
 
 def _count_table(cursor, table: str) -> int:
@@ -503,11 +502,12 @@ def _build_airports(cursor, builder, wp_names: dict[int, str], progress=None) ->
 
     # 5. Fetch all terminal legs in one query
     cursor.execute("""
-        SELECT tl.ID, tl.TerminalID, tl.WptID, tl.WptLat, tl.WptLon, tl.Transition, tl.Course, tl.Distance,
-               tl.Alt, tl.Vnav, tl.TurnDir, tl.Type, tl.TrackCode,
-               tl.NavID, tl.NavLat, tl.NavLon, tl.NavBear, tl.NavDist,
-               tl.CenterID, tl.CenterLat, tl.CenterLon,
-               tl.WptDescCode, tle.IsFlyOver, tle.SpeedLimit
+        SELECT tl.ID, tl.TerminalID, tl.WptID, tl.WptLat, tl.WptLon,
+               tl.Transition, tl.Course, tl.Distance, tl.Alt, tl.Vnav,
+               tl.TurnDir, tl.Type, tl.TrackCode, tl.NavID, tl.NavLat,
+               tl.NavLon, tl.NavBear, tl.NavDist, tl.CenterID,
+               tl.CenterLat, tl.CenterLon, tl.WptDescCode, tle.IsFlyOver,
+               tle.SpeedLimit
         FROM TerminalLegs tl
         LEFT JOIN TerminalLegsEx tle ON tl.ID = tle.ID
     """)
@@ -800,8 +800,8 @@ def _build_procedure_legs(
     if not leg_offsets:
         return 0
     ProcedureStartLegsVector(builder, len(leg_offsets))
-    for l in reversed(leg_offsets):
-        builder.PrependUOffsetTRelative(l)
+    for offset in reversed(leg_offsets):
+        builder.PrependUOffsetTRelative(offset)
     return builder.EndVector()
 
 

@@ -36,9 +36,8 @@ class MmappedNavData:
             tmp_fd, tmp_name = tempfile.mkstemp(suffix=".fb", prefix="navdata_")
             try:
                 dctx = zstd.ZstdDecompressor()
-                with open(fb_path, "rb") as zst_in:
-                    with dctx.stream_reader(zst_in) as reader:
-                        while True:
+                with open(fb_path, "rb") as zst_in, dctx.stream_reader(zst_in) as reader:
+                    while True:
                             chunk = reader.read(1024 * 1024)
                             if not chunk:
                                 break
@@ -48,7 +47,7 @@ class MmappedNavData:
             actual_path = Path(tmp_name)
             self._tmp_path = actual_path
 
-        self._file = open(actual_path, "rb")
+        self._file = open(actual_path, "rb")  # noqa: SIM115
         self._mmap = mmap.mmap(self._file.fileno(), 0, access=mmap.ACCESS_READ)
         self._nav = NavData.GetRootAs(self._mmap, 0)
 
@@ -203,5 +202,5 @@ class MmappedNavData:
     def __enter__(self):
         return self
 
-    def __exit__(self, *args):
+    def __exit__(self, *args: object) -> None:
         self.close()

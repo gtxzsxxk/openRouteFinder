@@ -4,6 +4,7 @@ import contextlib
 import dataclasses
 import pickle
 import sys
+from threading import Lock
 
 from openRouterFinder.config import settings
 from openRouterFinder.core.graph import Edge as NewEdge
@@ -351,8 +352,6 @@ def _get_airport_detail_from_fb(nav, icao: str) -> dict | None:
         "runways": _parse_runways_from_fb(ap),
     }
 
-
-from threading import Lock
 
 # Module-level caches for airport connections. AirportConnection objects are
 # read-only after construction, so they are safe to share across requests.
