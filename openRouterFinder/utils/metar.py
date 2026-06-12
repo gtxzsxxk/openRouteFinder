@@ -1,5 +1,6 @@
 """METAR weather data fetcher."""
 
+import os
 import threading
 import time
 
@@ -9,6 +10,7 @@ from openRouterFinder.config import settings
 
 _metar_data = ""
 _metar_lock = threading.Lock()
+_metar_file_lock = threading.Lock()
 _metar_stop_event = threading.Event()
 _metar_thread: threading.Thread | None = None
 
@@ -25,8 +27,12 @@ def fetch_metar() -> str:
                 headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"},
                 timeout=(5, 15),
             )
-            with open(settings.metar_full_path, "w") as f:
-                f.write(r.text)
+            # Atomic write so readers never see a half-written file.
+            with _metar_file_lock:
+                tmp_path = settings.metar_full_path.with_suffix(".tmp")
+                with open(tmp_path, "w") as f:
+                    f.write(r.text)
+                os.replace(tmp_path, settings.metar_full_path)
             with _metar_lock:
                 global _metar_data
                 _metar_data = r.text
@@ -54,15 +60,16 @@ def read_metar(icao: str) -> str:
             return data[idx:end].strip()
 
     # Fallback: read from file
-    if settings.metar_full_path.exists():
-        with open(settings.metar_full_path) as f:
-            data = f.read()
-        idx = data.find(icao.upper())
-        if idx >= 0:
-            end = data.find("\n", idx)
-            if end < 0:
-                end = len(data)
-            return data[idx:end].strip()
+    with _metar_file_lock:
+        if settings.metar_full_path.exists():
+            with open(settings.metar_full_path) as f:
+                data = f.read()
+            idx = data.find(icao.upper())
+            if idx >= 0:
+                end = data.find("\n", idx)
+                if end < 0:
+                    end = len(data)
+                return data[idx:end].strip()
 
     return f"{icao.upper()} METAR NOT AVAILABLE"
 
