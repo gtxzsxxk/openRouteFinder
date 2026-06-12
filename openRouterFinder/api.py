@@ -36,7 +36,7 @@ from openRouterFinder.core.data_loader import (
     search_route,
 )
 from openRouterFinder.core.storage.builder import build_from_fenix
-from openRouterFinder.utils.metar import read_metar, start_metar_updater
+from openRouterFinder.utils.metar import read_metar, start_metar_updater, stop_metar_updater
 from openRouterFinder.utils.validcode import generate_captcha_b64
 
 # --- Procedure response filtering ---
@@ -167,6 +167,7 @@ def _rename_single_runway_all(data: dict) -> dict:
 
 # --- Concurrency controls ---
 _dijkstra_pool = ThreadPoolExecutor(max_workers=4)
+_build_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="navdata-build")
 _route_semaphore = asyncio.Semaphore(8)
 
 # --- Valid code storage ---
@@ -667,32 +668,32 @@ def _validate_fenix_db(db_path: Path) -> dict:
     import sqlite3
 
     conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
 
-    # Check required tables exist
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-    tables = {row[0] for row in cursor.fetchall()}
-    required = {"config", "Waypoints", "Airports", "TerminalLegs", "Terminals"}
-    missing = required - tables
-    if missing:
+        # Check required tables exist
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tables = {row[0] for row in cursor.fetchall()}
+        required = {"config", "Waypoints", "Airports", "TerminalLegs", "Terminals"}
+        missing = required - tables
+        if missing:
+            raise ValueError(
+                f"Missing required tables: {', '.join(missing)}. Not a valid Fenix A320 navdata."
+            )
+
+        # Extract cycle info from config table — column names vary by Fenix version
+        cursor.execute("PRAGMA table_info(config)")
+        cols = {row[1].lower() for row in cursor.fetchall()}
+        key_col = next((c for c in cols if c == "key" or c == "name"), None)
+        val_col = next((c for c in cols if c in ("value", "val", "data")), None)
+        if not key_col or not val_col:
+            raise ValueError(f"Config table has unexpected schema: columns={cols}")
+
+        in_clause = "'CycleName', 'CycleStartDate', 'CycleEndDate'"
+        cursor.execute(f"SELECT {key_col}, {val_col} FROM config WHERE {key_col} IN ({in_clause})")
+        config = {row[0]: row[1] for row in cursor.fetchall()}
+    finally:
         conn.close()
-        raise ValueError(
-            f"Missing required tables: {', '.join(missing)}. Not a valid Fenix A320 navdata."
-        )
-
-    # Extract cycle info from config table — column names vary by Fenix version
-    cursor.execute("PRAGMA table_info(config)")
-    cols = {row[1].lower() for row in cursor.fetchall()}
-    key_col = next((c for c in cols if c == "key" or c == "name"), None)
-    val_col = next((c for c in cols if c in ("value", "val", "data")), None)
-    if not key_col or not val_col:
-        conn.close()
-        raise ValueError(f"Config table has unexpected schema: columns={cols}")
-
-    in_clause = "'CycleName', 'CycleStartDate', 'CycleEndDate'"
-    cursor.execute(f"SELECT {key_col}, {val_col} FROM config WHERE {key_col} IN ({in_clause})")
-    config = {row[0]: row[1] for row in cursor.fetchall()}
-    conn.close()
 
     cycle = config.get("CycleName", "").strip()
     effective_from = config.get("CycleStartDate", "").strip()
@@ -822,13 +823,28 @@ async def upload_navdata(
             if decompressed_total > _MAX_DECOMPRESSED_SIZE:
                 raise HTTPException(status_code=413, detail="Zip contents too large")
 
+            extracted_total = 0
             for info in zf.infolist():
+                if info.is_dir():
+                    continue
                 if _is_path_traversal(info.filename):
                     raise HTTPException(
                         status_code=400, detail=f"Invalid archive member: {info.filename}"
                     )
 
-            zf.extractall(tmp_dir)
+                target = Path(tmp_dir) / info.filename
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with zf.open(info) as src, open(target, "wb") as dst:
+                    while True:
+                        chunk = src.read(8192)
+                        if not chunk:
+                            break
+                        extracted_total += len(chunk)
+                        if extracted_total > _MAX_DECOMPRESSED_SIZE:
+                            raise HTTPException(
+                                status_code=413, detail="Decompressed size exceeds limit"
+                            )
+                        dst.write(chunk)
 
         # Find .db3 file (Fenix navdata)
         db3_files = []
@@ -872,7 +888,7 @@ async def upload_navdata(
 
         loop = asyncio.get_event_loop()
         loop.run_in_executor(
-            None,
+            _build_pool,
             _do_build_navdata,
             build_id,
             db_path,
@@ -950,3 +966,15 @@ def startup():
     _build_airport_index()
     start_metar_updater()
     print("METAR keeper started")
+
+
+@app.on_event("shutdown")
+def shutdown():
+    print("OpenRouteFinder API shutting down...")
+    stop_metar_updater()
+    _dijkstra_pool.shutdown(wait=True)
+    _build_pool.shutdown(wait=True)
+    reg = get_nav_registry()
+    if reg is not None:
+        reg.close_all()
+    print("Shutdown complete")

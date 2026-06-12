@@ -29,6 +29,13 @@ class MmappedNavData:
     def __init__(self, fb_path: Path):
         self._path = fb_path
         self._tmp_path: Path | None = None
+        self._file = None
+        self._mmap = None
+        self._nav = None
+        self._node_index: dict[tuple, GraphNode] = {}
+        self._node_by_iid: dict[int, GraphNode] = {}
+        self._airport_by_icao: dict[str, int] = {}
+        self._navaid_by_ident: dict[str, list[int]] = {}
 
         actual_path = fb_path
         if str(fb_path).endswith(".fb.zst"):
@@ -47,17 +54,16 @@ class MmappedNavData:
             actual_path = Path(tmp_name)
             self._tmp_path = actual_path
 
-        self._file = open(actual_path, "rb")  # noqa: SIM115
-        self._mmap = mmap.mmap(self._file.fileno(), 0, access=mmap.ACCESS_READ)
-        self._nav = NavData.GetRootAs(self._mmap, 0)
-
-        # Build O(1) lookups
-        self._node_index: dict[tuple, GraphNode] = {}
-        self._node_by_iid: dict[int, GraphNode] = {}
-        self._airport_by_icao: dict[str, int] = {}  # icao -> index in _nav.Airports()
-        self._navaid_by_ident: dict[str, list[int]] = {}
-
-        self._build_indices()
+        try:
+            self._file = open(actual_path, "rb")  # noqa: SIM115
+            self._mmap = mmap.mmap(self._file.fileno(), 0, access=mmap.ACCESS_READ)
+            self._nav = NavData.GetRootAs(self._mmap, 0)
+            self._build_indices()
+        except Exception:
+            # Ensure temp files and file handles are released even if mmap or
+            # index building fails.
+            self.close()
+            raise
 
     def _build_indices(self):
         # Node index by (name, lat, lon)
@@ -194,10 +200,29 @@ class MmappedNavData:
         return self._node_index
 
     def close(self):
-        self._mmap.close()
-        self._file.close()
-        if self._tmp_path is not None and self._tmp_path.exists():
-            os.unlink(self._tmp_path)
+        """Release mmap/file handles and remove decompressed temp files.
+
+        Idempotent: safe to call multiple times.
+        """
+        if self._mmap is not None:
+            try:
+                self._mmap.close()
+            except (ValueError, OSError):
+                pass
+            self._mmap = None
+        if self._file is not None:
+            try:
+                self._file.close()
+            except (ValueError, OSError):
+                pass
+            self._file = None
+        if self._tmp_path is not None:
+            try:
+                if self._tmp_path.exists():
+                    os.unlink(self._tmp_path)
+            except OSError:
+                pass
+            self._tmp_path = None
 
     def __enter__(self):
         return self

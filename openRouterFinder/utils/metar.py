@@ -9,6 +9,8 @@ from openRouterFinder.config import settings
 
 _metar_data = ""
 _metar_lock = threading.Lock()
+_metar_stop_event = threading.Event()
+_metar_thread: threading.Thread | None = None
 
 
 def fetch_metar() -> str:
@@ -67,14 +69,27 @@ def read_metar(icao: str) -> str:
 
 def start_metar_updater():
     """Start background METAR update thread."""
+    global _metar_thread
+
+    _metar_stop_event.clear()
 
     def loop():
-        while True:
+        while not _metar_stop_event.is_set():
             print(f"==== {time.strftime('%Y-%m-%d %H:%M:%S')} Updating METAR ====")
             fetch_metar()
             print("============================")
-            time.sleep(settings.metar_update_minutes * 60)
+            _metar_stop_event.wait(settings.metar_update_minutes * 60)
 
-    t = threading.Thread(target=loop, daemon=True)
-    t.start()
-    return t
+    _metar_thread = threading.Thread(target=loop, daemon=True)
+    _metar_thread.start()
+    return _metar_thread
+
+
+def stop_metar_updater():
+    """Signal the METAR updater thread to stop and wait briefly."""
+    global _metar_thread
+    _metar_stop_event.set()
+    t = _metar_thread
+    _metar_thread = None
+    if t is not None and t.is_alive():
+        t.join(timeout=2.0)
