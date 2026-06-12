@@ -130,11 +130,13 @@ const { mutate: searchRoute } = useRouteQuery()
 
 const queryTime = ref(0)
 let timer: ReturnType<typeof setInterval> | null = null
+let queryStartTime = 0
 
 function handleSearch(params: { orig: string; dest: string; validCode: string; validToken: string; sidExit: string; starEntry: string; cycle: string }) {
   store.setLoading(true)
   store.setError(null)
   queryTime.value = 0
+  queryStartTime = performance.now()
 
   if (timer) {
     clearInterval(timer)
@@ -142,8 +144,8 @@ function handleSearch(params: { orig: string; dest: string; validCode: string; v
   }
 
   timer = setInterval(() => {
-    queryTime.value += 0.01
-  }, 10)
+    queryTime.value = Number(((performance.now() - queryStartTime) / 1000).toFixed(2))
+  }, 100)
 
   searchRoute(params, {
     onSuccess: (data) => {

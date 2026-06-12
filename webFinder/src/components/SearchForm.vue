@@ -135,12 +135,14 @@ watch(defaultCycle, (val) => {
   }
 }, { immediate: true })
 
+const ICAO_RE = /^[A-Z0-9]{4}$/i
+
 const showProcedureSelectors = computed(() => {
-  return departure.value.length === 4 && arrival.value.length === 4
+  return ICAO_RE.test(departure.value) && ICAO_RE.test(arrival.value)
 })
 
 const canSubmit = computed(() => {
-  return departure.value.length === 4 && arrival.value.length === 4
+  return ICAO_RE.test(departure.value) && ICAO_RE.test(arrival.value)
 })
 
 function onDepartureSelect(airport: Airport) {
