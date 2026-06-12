@@ -680,7 +680,8 @@ def _runway_base_name(ident: str) -> str:
     num = int(num_str)
     opp_num = num + 18 if num <= 18 else num - 18
     suffix_map = {"L": "R", "R": "L", "C": "C"}
-    opp_suffix = suffix_map.get(suffix, "")
+    # Preserve non-standard suffixes (e.g. T, W) instead of dropping them.
+    opp_suffix = suffix_map.get(suffix, suffix)
     opp = f"{opp_num:02d}{opp_suffix}"
     if num < opp_num or (num == opp_num and suffix in ("L", "C")):
         return f"{ident}/{opp}"
@@ -1045,17 +1046,21 @@ def _build_gls(cursor, builder, progress=None) -> list[int]:
 
 
 def _build_grid_mora(cursor, builder, progress=None) -> list[int]:
+    cursor.execute("PRAGMA table_info(GridMora)")
+    mora_cols = sorted(
+        [col["name"] for col in cursor.fetchall() if col["name"].startswith("mora")],
+        key=lambda x: int(x[4:]),
+    )
     cursor.execute("SELECT * FROM GridMora")
     rows = cursor.fetchall()
     total = len(rows)
     mora_list = []
     for i, row in enumerate(rows):
         row_dict = dict(row)
-        values = []
-        for j in range(1, 31):
-            col = f"mora{j:02d}"
-            val = row_dict.get(col)
-            values.append(str(val) if val is not None else "")
+        values = [
+            str(row_dict.get(col)) if row_dict.get(col) is not None else ""
+            for col in mora_cols
+        ]
         # Build string vector
         str_offsets = [builder.CreateString(v) for v in values]
         GridMoraStartMoraValuesVector(builder, len(str_offsets))

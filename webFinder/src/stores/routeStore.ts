@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, shallowReadonly } from 'vue'
 import type { RouteResult, ProcedureTuple } from '@/types'
 
 export interface TransitionData {
@@ -103,28 +103,34 @@ export const useRouteStore = defineStore('route', () => {
   const parsedWeather = computed(() => routeResult.value?.parsedWeather ?? null)
   const routeSegments = computed(() => routeResult.value?.routeSegments ?? [])
 
+  function _scoreMatch(
+    pointLists: [string, number, number][][],
+    routeNodeNames: Set<string>,
+  ): number {
+    const seen = new Set<string>()
+    let matches = 0
+    for (const list of pointLists) {
+      for (const p of list) {
+        const name = p[0]
+        if (!seen.has(name) && routeNodeNames.has(name)) {
+          matches += 1
+          seen.add(name)
+        }
+      }
+    }
+    return matches * 1000 + pointLists[0].length
+  }
+
   function _matchProcedureIndex(procedures: ProcedureTuple[], routeNodeNames: Set<string>): number {
     let bestIdx = 0
     let bestScore = -1
     for (let i = 0; i < procedures.length; i++) {
       const proc = procedures[i]
-      const pointNames = new Set(proc[2].map(p => p[0]))
-      let score = 0
-      for (const name of pointNames) {
-        if (routeNodeNames.has(name)) score += 1
-      }
-      // Also consider transitions: add unique transition points
       const transitions = proc[3] || []
-      for (const t of transitions) {
-        const tPointNames = new Set(t[1].map((p: any) => p[0]))
-        for (const name of tPointNames) {
-          if (routeNodeNames.has(name) && !pointNames.has(name)) {
-            score += 1
-          }
-        }
-      }
-      // Bonus for matching more unique points; tie-break by preferring more points total
-      score = score * 1000 + proc[2].length
+      const score = _scoreMatch(
+        [proc[2], ...transitions.map(t => t[1])],
+        routeNodeNames,
+      )
       if (score > bestScore) {
         bestScore = score
         bestIdx = i
@@ -137,14 +143,8 @@ export const useRouteStore = defineStore('route', () => {
     let bestIdx = -1
     let bestScore = -1
     for (let i = 0; i < transitions.length; i++) {
-      const t = transitions[i]
-      const tPoints = t[1] as any[]
-      const pointNames = new Set(tPoints.map(p => p[0]))
-      let score = 0
-      for (const name of pointNames) {
-        if (routeNodeNames.has(name)) score += 1
-      }
-      score = score * 1000 + tPoints.length
+      const tPoints = transitions[i][1] as [string, number, number][]
+      const score = _scoreMatch([tPoints], routeNodeNames)
       if (score > bestScore) {
         bestScore = score
         bestIdx = i
@@ -237,7 +237,7 @@ export const useRouteStore = defineStore('route', () => {
   }
 
   return {
-    routeResult,
+    routeResult: shallowReadonly(routeResult),
     selectedSIDIndex,
     selectedSTARIndex,
     selectedSIDTransitionIndex,

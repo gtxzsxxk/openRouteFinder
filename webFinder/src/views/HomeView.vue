@@ -85,7 +85,7 @@
           <div class="absolute top-[3.75rem] bottom-6 left-6 right-6 overflow-y-auto space-y-0">
             <div
               v-for="(node, i) in store.routeResult.nodes"
-              :key="i"
+              :key="`${node.name}-${i}`"
               class="flex items-center justify-between py-4 border-b border-border last:border-0"
             >
               <div class="flex items-center gap-3">

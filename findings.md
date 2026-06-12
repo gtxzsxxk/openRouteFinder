@@ -28,12 +28,12 @@
 
 | # | 模块 | 问题 | 证据 | 建议 |
 |---|---|------|------|------|
-| 18 | `core/dijkstra.py` | `search()` 维护两套独立路径（`_mixed_graph_astar` + phase-separated），行为容易不一致 | 115-409 / 1481-1802 行 | 统一为单一路径，或提取共享 helper 减少重复 |
+| ~~18~~ | ~~`core/dijkstra.py`~~ | ~~`search()` 维护两套独立路径（`_mixed_graph_astar` + phase-separated），行为容易不一致~~ | ~~115-409 / 1481-1802 行~~ | ~~已提取 `_build_route_response()` 共享 helper~~ |
 | 19 | `core/dijkstra.py` | T-route 过滤逻辑：当节点同时有 T 和非 T 边时，T 边被完全禁用，可能丢失最优解 | 611-621 行 | 重新评估 T-route 策略，或仅在高空航路时跳过 T 边 |
 | 20 | `core/dijkstra.py` | 候选剪枝 top 50 按到对端机场距离排序，可能丢弃综合最优解 | 1529-1545 行 | 增加说明注释，或改用 procedure 实际长度加权排序 |
-| 21 | `core/dijkstra.py` | 负 IID 映射通过遍历 `node_list` 按名称找对应 airway node，O(N) 且未处理同名多节点 | 1556-1564 行 | 预建 name->nodes 映射字典 |
-| 22 | `core/dijkstra.py` | 内联启发式计算与 `graph.py` 重复，使用局部 `_PI`/`_R`，修改不同步 | 1596-1600 行 | 统一调用 `graph.py` 的 `heuristic_km` |
-| 23 | `core/dijkstra.py` | 移除 airway 循环时丢弃重复 IID 后续节点，可能破坏路径连续性 | 1685-1698 行 | 改为标记保留首次出现，或确认循环确实非法 |
+| ~~21~~ | ~~`core/dijkstra.py`~~ | ~~负 IID 映射通过遍历 `node_list` 按名称找对应 airway node，O(N) 且未处理同名多节点~~ | ~~1556-1564 行~~ | ~~已改用 `_node_index` O(1) 精确匹配~~ |
+| ~~22~~ | ~~`core/dijkstra.py`~~ | ~~内联启发式计算与 `graph.py` 重复，使用局部 `_PI`/`_R`，修改不同步~~ | ~~1596-1600 行~~ | ~~已统一调用 `graph.heuristic_km`~~ |
+| ~~23~~ | ~~`core/dijkstra.py`~~ | ~~移除 airway 循环时丢弃重复 IID 后续节点，可能破坏路径连续性~~ | ~~1685-1698 行~~ | ~~已改为回溯到首次出现点并截断循环~~ |
 | ~~24~~ | ~~`core/airport.py`~~ | ~~`_find_nearest_connected_node` 线性扫描所有节点，O(N)~~ | ~~61-85 行~~ | ~~预建空间索引（如 KD-tree）或按网格分区~~ |
 | 25 | `core/airport.py` | `_truncate_approach_path` 使用欧几里得距离而非大圆距离 | 1826-1865 行 | 改用 `great_circle_distance_km` |
 | 26 | `core/airport.py` | `_collect_approach_bridges` 中 `proc_name` 和 `trans_name` 被解码但从未使用 | 1347-1350, 1398-1401 行 | 删除死变量 |
@@ -43,14 +43,14 @@
 | 30 | `core/storage/reader.py` | `_build_indices` 未处理重复 IID，后出现的静默覆盖先出现的 | 64-73 行 | 记录重复并告警 |
 | ~~31~~ | ~~`core/storage/reader.py`~~ | ~~`close()` 非幂等，第二次调用抛异常~~ | ~~196-200 行~~ | ~~添加 `self._closed` 标志~~ |
 | 32 | `core/storage/registry.py` | 文件名正则 `fb\|fb\.zst` 优先级导致 `navdata_1234.fb.zst` 匹配为 `.fb` | 13 行 | 改为 `^navdata_(\d{4})\.((?:fb\.zst)\|(?:fb))$` |
-| 33 | `core/storage/builder.py` | `_build_runways_for_airport` 中 `ILSAddRunwayEnd` 写入 runway end 名而非 runway base name | 476-493 行 | 确认消费端语义并修正或文档化 |
-| 34 | `core/storage/builder.py` | `_runway_base_name` 对非标准后缀（如 `T`、`W`）返回空 `opp_suffix`，导致 `18T/18T` | 652-672 行 | 增加后缀白名单校验 |
-| 35 | `core/storage/builder.py` | `RunwayEndAddHeading` 写入 `TrueHeading`，但航图通常使用磁航向 | 575-579 行 | 确认 schema 语义并文档化 |
-| 36 | `core/storage/builder.py` | `_build_grid_mora` 用 `SELECT *` 硬编码 30 列，表结构变化会静默出错 | 1029-1057 行 | 查询明确列名并校验 |
+| 33 | `core/storage/builder.py` | `ILSAddRunwayEnd` 写入 runway end 名；经确认消费端按 end name 使用，当前语义正确 | 476-493 行 | 无需修改，已在代码中保留 end name |
+| ~~34~~ | ~~`core/storage/builder.py`~~ | ~~`_runway_base_name` 对非标准后缀（如 `T`、`W`）返回空 `opp_suffix`，导致 `18T/18T`~~ | ~~652-672 行~~ | ~~未知后缀保留原后缀~~ |
+| 35 | `core/storage/builder.py` | `RunwayEndAddHeading` 写入 `TrueHeading`；地图渲染需要真北向，当前语义正确 | 575-579 行 | 无需修改，已在注释说明为真航向 |
+| ~~36~~ | ~~`core/storage/builder.py`~~ | ~~`_build_grid_mora` 用 `SELECT *` 硬编码 30 列，表结构变化会静默出错~~ | ~~1029-1057 行~~ | ~~已改为动态读取 `mora*` 列~~ |
 | ~~37~~ | ~~`core/data_loader.py`~~ | ~~`_sid_cache` / `_star_cache` 无大小限制，长时间运行无限增长~~ | ~~358-360 行~~ | ~~设置 LRU 或 maxlen~~ |
 | 38 | `core/data_loader.py` | `_parse_airport_detail` 依赖 legacy `NavGraph.airport_maps`，modern 路径未使用，代码已死 | 291-332 行 | 清理死代码 |
 | ~~39~~ | ~~`core/data_loader.py`~~ | ~~`_init_registry()` 未加锁，多线程同时初始化可能创建多个 Registry~~ | ~~117-131 行~~ | ~~加锁保护~~ |
-| 40 | `core/admin.py` | `unique_ips` 已改用 OrderedDict 实现 O(1) 检查/淘汰；`total_requests` 仍无限增长 | 18, 30-31 行 | 按需重置 `total_requests` 或改为计数窗口 |
+| ~~40~~ | ~~`core/admin.py`~~ | ~~`unique_ips` 已改用 OrderedDict 实现 O(1) 检查/淘汰；`total_requests` 仍无限增长~~ | ~~18, 30-31 行~~ | ~~已改为 `deque(maxlen=2000)` 窗口~~ |
 | 41 | `utils/metar.py` | `fetch_metar` 中 `requests.get` 成功后先写文件再更新内存，写文件失败则内存不更新 | 21-31 行 | 先更新内存或统一事务 |
 | ~~42~~ | ~~`utils/metar.py`~~ | ~~`read_metar` fallback 读文件未加锁，与 `fetch_metar` 写文件可能并发读到半写文件~~ | ~~56 行~~ | ~~加锁或临时文件+重命名~~ |
 | ~~43~~ | ~~`utils/metar.py`~~ | ~~`start_metar_updater` 线程在应用关闭时无法优雅停止~~ | ~~68-80 行~~ | ~~使用 `threading.Event` 控制退出~~ |
@@ -63,13 +63,13 @@
 | ~~50~~ | ~~`api.py`~~ | ~~`_do_build_navdata` 中压缩后数据直接 `write_bytes`，写入中断留下损坏文件~~ | ~~689-694 行~~ | ~~先写临时文件再原子重命名~~ |
 | ~~51~~ | ~~`api.py`~~ | ~~`_airport_prefix_index` 在 navdata 热更新后未重建~~ | ~~172-173 行~~ | ~~在 Registry 注册/注销 cycle 后触发索引重建~~ |
 | 52 | `api.py` | `loop.run_in_executor(None, ...)` 使用默认线程池，与 `_dijkstra_pool` 不一致 | 790 行 | 统一使用 `_dijkstra_pool` |
-| 53 | `webFinder/src/composables/useMap.ts` | `nodes.length === 0` 时提前 return 未重置 `isUpdating`，地图卡死 | 231-235 行 | `return` 前重置 `isUpdating` |
-| 54 | `webFinder/src/composables/useMap.ts` | `fitBounds` 每次更新都执行 1.5s 动画，用户正在平移/缩放时强制拉回 | 792-813 行 | 增加用户交互检测或仅首次动画 |
-| 55 | `webFinder/src/composables/useMap.ts` | 五个 `watch` 在 `routeResult` 大对象变更时都触发 `scheduleUpdate` | 832-836 行 | 使用 `watch` 的 `deep: false` 或精确监听子字段 |
-| 56 | `webFinder/src/stores/routeStore.ts` | `_matchProcedureIndex` / `_matchTransitionIndex` 逻辑重复 | 106-154 行 | 提取共享辅助函数 |
-| 57 | `webFinder/src/stores/routeStore.ts` | `routeResult` 原始 ref 直接暴露，外部可绕过 `setRouteResult` 修改 | 239-271 行 | 暴露 readonly 版本 |
+| ~~53~~ | ~~`webFinder/src/composables/useMap.ts`~~ | ~~`nodes.length === 0` 时提前 return 未重置 `isUpdating`，地图卡死~~ | ~~231-235 行~~ | ~~当前代码已有 try/finally，`isUpdating` 会被正确重置~~ |
+| ~~54~~ | ~~`webFinder/src/composables/useMap.ts`~~ | ~~`fitBounds` 每次更新都执行 1.5s 动画，用户正在平移/缩放时强制拉回~~ | ~~792-813 行~~ | ~~已增加 `isMoving()` 检测与首次动画~~ |
+| ~~55~~ | ~~`webFinder/src/composables/useMap.ts`~~ | ~~五个 `watch` 在 `routeResult` 大对象变更时都触发 `scheduleUpdate`~~ | ~~832-836 行~~ | ~~已合并为单个数组 watcher~~ |
+| ~~56~~ | ~~`webFinder/src/stores/routeStore.ts`~~ | ~~`_matchProcedureIndex` / `_matchTransitionIndex` 逻辑重复~~ | ~~106-154 行~~ | ~~已提取 `_scoreMatch` 共享 helper~~ |
+| ~~57~~ | ~~`webFinder/src/stores/routeStore.ts`~~ | ~~`routeResult` 原始 ref 直接暴露，外部可绕过 `setRouteResult` 修改~~ | ~~239-271 行~~ | ~~已改用 `shallowReadonly` 暴露~~ |
 | ~~58~~ | ~~`webFinder/src/views/HomeView.vue`~~ | ~~`queryTime` 计时器使用 `setInterval(10ms)` 精度浪费~~ | ~~131-162 行~~ | ~~用 `performance.now()` 单次计算~~ |
-| 59 | `webFinder/src/views/HomeView.vue` | Waypoints 列表使用 `:key="i"`（索引作为 key） | 86-107 行 | 用 `node.name + i` 作为 key |
+| ~~59~~ | ~~`webFinder/src/views/HomeView.vue`~~ | ~~Waypoints 列表使用 `:key="i"`（索引作为 key）~~ | ~~86-107 行~~ | ~~已改为 `node.name + i`~~ |
 | ~~60~~ | ~~`webFinder/src/components/SearchForm.vue`~~ | ~~`canSubmit` 仅校验 ICAO 长度为 4，用户可输入 `!!!!`~~ | ~~142-144 行~~ | ~~增加正则 `/^[A-Z0-9]{4}$/`~~ |
 | ~~61~~ | ~~`webFinder/src/components/ProcedureSelector.vue`~~ | ~~404 时设置 `options = []` 但不设置 error，用户无法区分"无数据"和"机场不存在"~~ | ~~64-104 行~~ | ~~404 时显示特定提示~~ |
 | 62 | `webFinder/src/components/SIDSelector.vue` | `selectedIndex` setter 接收 string（Vue 自动转换），类型存在隐式转换风险 | 45-48 行 | 显式 `Number(val)` |
@@ -81,7 +81,7 @@
 |---|---|------|------|------|
 | 64 | `core/dijkstra.py` | 分阶段搜索的交替优化最多 5 次，收敛条件只比较名称和 transition，不比较 boundary | 199-255 行 | 增加 boundary 比较或确认收敛充分 |
 | 65 | `core/dijkstra.py` | `_sort_route` 对空 airway name 的 bridge 段输出空字符串，route string 出现连续空格 | 1440-1446 行 | 空 name 时输出占位符或跳过 |
-| 66 | `core/dijkstra.py` | `sid_info[1]` 和 `star_info[1]` 作为表达式无实际作用 | 1720 / 1725 行 | 删除无效表达式 |
+| ~~66~~ | ~~`core/dijkstra.py`~~ | ~~`sid_info[1]` 和 `star_info[1]` 作为表达式无实际作用~~ | ~~1720 / 1725 行~~ | ~~已删除无效表达式~~ |
 | 67 | `core/graph.py` | `_haversine_a` 与 `great_circle_distance_km` 重复计算，未被任何调用方使用 | 29-39 行 | 删除死代码 |
 | 68 | `core/airport.py` | `_collect_procedures` 注释返回类型与实际不符（文档说 dict/dict/dict，实际是 list/dict/list） | 612-616 行注释 | 修正注释 |
 | 69 | `core/storage/builder.py` | `flatbuffers.Builder(1024 * 1024)` 初始 1MB 对大型 navdata 可能频繁扩容 | 258 行 | 根据数据量估算初始容量 |

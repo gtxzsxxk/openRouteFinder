@@ -27,7 +27,7 @@ function isDarkMode() {
 
 export function useMap(
   containerRef: Ref<HTMLElement | null>,
-  routeResult: Ref<RouteResult | null>,
+  routeResult: Ref<RouteResult | null> | Readonly<Ref<RouteResult | null>>,
   selectedSID: Ref<ProcedureData | null>,
   selectedSTAR: Ref<ProcedureData | null>,
   selectedSIDTransition: Ref<TransitionData | null>,
@@ -43,6 +43,7 @@ export function useMap(
   const mqRef = ref<MediaQueryList | null>(null)
   const mqCallbackRef = ref<((e: MediaQueryListEvent | MediaQueryList) => void) | null>(null)
   const observerRef = ref<MutationObserver | null>(null)
+  const hasFittedBounds = ref(false)
 
   function getColors() {
     const dark = isDarkMode()
@@ -149,6 +150,7 @@ export function useMap(
       }
       map.value = null
       isMapReady.value = false
+      hasFittedBounds.value = false
     }
   }
 
@@ -852,7 +854,11 @@ export function useMap(
       origRunways.forEach(r => r.thresholds.forEach(t => bounds.extend([t.lon, t.lat])))
       destRunways.forEach(r => r.thresholds.forEach(t => bounds.extend([t.lon, t.lat])))
 
-      m.fitBounds(bounds, { padding: 60, maxZoom: 12, duration: 1500 })
+      if (!m.isMoving()) {
+        const duration = hasFittedBounds.value ? 0 : 1500
+        m.fitBounds(bounds, { padding: 60, maxZoom: 12, duration })
+        hasFittedBounds.value = true
+      }
     } catch (err) {
       console.error('[useMap] updateMap error:', err)
     } finally {
@@ -871,11 +877,10 @@ export function useMap(
     }, 50)
   }
 
-  watch(routeResult, () => { scheduleUpdate() })
-  watch(selectedSID, () => { scheduleUpdate() })
-  watch(selectedSTAR, () => { scheduleUpdate() })
-  watch(selectedSIDTransition, () => { scheduleUpdate() })
-  watch(selectedSTARTransition, () => { scheduleUpdate() })
+  watch(
+    [routeResult, selectedSID, selectedSTAR, selectedSIDTransition, selectedSTARTransition],
+    scheduleUpdate,
+  )
 
   return { map, isMapReady, initMap, updateMap, destroyMap }
 }
