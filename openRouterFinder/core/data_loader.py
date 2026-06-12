@@ -4,10 +4,12 @@ import contextlib
 import dataclasses
 import pickle
 import sys
+import threading
 from collections import OrderedDict
 from threading import Lock
 
 from openRouterFinder.config import settings
+from openRouterFinder.core.airport import AirportConnection
 from openRouterFinder.core.graph import Edge as NewEdge
 from openRouterFinder.core.graph import Node as NewNode
 
@@ -20,6 +22,7 @@ if "RouteFinderLib" not in sys.modules:
 
 _nav_graph = None
 _nav_registry = None
+_registry_lock = threading.Lock()
 
 
 def _convert_old_nodes(old_nodes):
@@ -116,15 +119,18 @@ def get_nav_graph() -> NavGraph:
 
 
 def _init_registry():
-    """Initialize NavDataRegistry from data directory."""
+    """Initialize NavDataRegistry from data directory. Thread-safe."""
     global _nav_registry
     if _nav_registry is not None:
         return _nav_registry
-    from openRouterFinder.core.storage.registry import NavDataRegistry
+    with _registry_lock:
+        if _nav_registry is not None:
+            return _nav_registry
+        from openRouterFinder.core.storage.registry import NavDataRegistry
 
-    data_dir = settings.navdat_full_path.parent
-    _nav_registry = NavDataRegistry(data_dir)
-    return _nav_registry
+        data_dir = settings.navdat_full_path.parent
+        _nav_registry = NavDataRegistry(data_dir)
+        return _nav_registry
 
 
 def get_nav_registry():

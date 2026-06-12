@@ -1,7 +1,10 @@
 """Multi-version navigation data registry with hot reload support."""
 
+import contextlib
 import re
+import sys
 import threading
+import weakref
 from pathlib import Path
 
 from openRouterFinder.core.storage.reader import MmappedNavData
@@ -12,9 +15,12 @@ class _NavDataRef:
 
     Holds the underlying mapping open until release() is called.  All attribute
     access is forwarded to the wrapped MmappedNavData instance.
+
+    A weakref.finalize fallback guarantees the reference count is decremented
+    even if a caller forgets to use the context manager or call release().
     """
 
-    __slots__ = ("_nav", "_cycle", "_registry", "_released", "_cache")
+    __slots__ = ("__weakref__", "_cache", "_cycle", "_finalizer", "_nav", "_registry", "_released")
 
     def __init__(self, nav: MmappedNavData, cycle: str, registry: "NavDataRegistry"):
         self._nav = nav
@@ -22,6 +28,14 @@ class _NavDataRef:
         self._registry = registry
         self._released = False
         self._cache = {}
+        # Finalizer holds a weak reference to self via a ref object, so it does
+        # not keep the wrapper alive.  It resurrects self briefly only to call
+        # release() if that has not already happened.
+        self._finalizer = weakref.finalize(
+            self,
+            _NavDataRef._finalize,
+            weakref.ref(self),
+        )
 
     def __getattr__(self, name: str):
         if self._released:
@@ -29,12 +43,24 @@ class _NavDataRef:
         return getattr(self._nav, name)
 
     def release(self):
-        if not self._released:
-            self._released = True
-            self._registry._release(self._cycle)
+        if self._released:
+            return
+        self._released = True
+        # Prevent the finalizer from running once we have explicitly released.
+        self._finalizer.detach()
+        self._registry._release(self._cycle)
 
-    def __del__(self):
-        self.release()
+    @staticmethod
+    def _finalize(ref: weakref.ref) -> None:
+        if sys.is_finalizing():
+            return
+        obj = ref()
+        if obj is None or obj._released:
+            return
+        obj._released = True
+        with contextlib.suppress(Exception):
+            # During interpreter shutdown the registry may already be gone.
+            obj._registry._release(obj._cycle)
 
     def __enter__(self):
         return self

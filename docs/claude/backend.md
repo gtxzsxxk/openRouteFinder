@@ -39,31 +39,35 @@ class RouteRequest(BaseModel):
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/version` | Returns navdata cycle info |
+| GET | `/api/version` | Returns navdata cycle string |
 | GET | `/api/cycles` | Returns all available cycles + default + disableCaptcha flag |
 | GET | `/api/airports?q=` | Airport prefix search (O(1) via prefix index) |
-| GET | `/api/airports/{icao}` | Airport details with runways |
+| GET | `/api/airports/{icao}` | Airport basic info (icao, name, lat, lon) |
 | GET | `/api/airports/{icao}/procedures` | SID/STAR procedures for airport |
 | POST | `/api/route` | Main route calculation |
 | GET | `/api/metar/{icao}` | METAR weather for airport |
 | GET | `/api/validcode` | CAPTCHA image + token |
 | GET | `/health` | Health check |
+| GET | `/api/admin` | Admin statistics |
+| GET | `/api/admin/navdata` | List navdata cycles with metadata |
+| GET | `/api/admin/navdata/{cycle}` | Cycle metadata |
+| DELETE | `/api/admin/navdata/{cycle}` | Delete a navdata cycle |
 | POST | `/api/admin/navdata/upload` | Upload Fenix A320 nd.db3 zip |
-| GET | `/api/admin/build/progress/{build_id}` | SSE build progress stream |
-| GET | `/api/admin/stats` | Admin statistics |
+| GET | `/api/admin/navdata/build-progress/{build_id}` | SSE build progress stream |
 
 ### Concurrency Model
 
 ```python
 _dijkstra_pool = ThreadPoolExecutor(max_workers=4)
+_build_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="navdata-build")
 _route_semaphore = asyncio.Semaphore(8)
 ```
 
-Route calculation runs in `run_in_executor()` because the A* engine is synchronous. The semaphore limits concurrent requests to 8.
+Route calculation runs in `run_in_executor(_dijkstra_pool, ...)` because the A* engine is synchronous. The semaphore limits concurrent route requests to 8. Fenix navdata builds run serially in `_build_pool` so only one conversion happens at a time.
 
 ### Airport Index
 
-`_airport_prefix_index` maps ICAO code prefixes to airport lists for O(1) autocomplete lookup. Built at startup from FlatBuffers navdata.
+`_airport_prefix_index` maps ICAO code prefixes to airport lists for O(1) autocomplete lookup. Built at startup from FlatBuffers navdata and rebuilt atomically after a cycle is uploaded or deleted via the admin endpoints.
 
 ### Admin Endpoints
 
@@ -77,7 +81,11 @@ Route calculation runs in `run_in_executor()` because the A* engine is synchrono
 
 ```python
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=PROJECT_ROOT / ".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
     listen_port: int = 9807
     metar_update_minutes: int = 15
     bing_maps_key: str = ""
@@ -87,6 +95,7 @@ class Settings(BaseSettings):
     navdat_cycle: str = "AUTO"
     local_asdata_path: str = ""
     disable_captcha: bool = False
+    airport_connection_cache_size: int = 1000
 
     @property
     def navdat_full_path(self) -> Path: ...
@@ -96,7 +105,7 @@ class Settings(BaseSettings):
     def metar_full_path(self) -> Path: ...
 ```
 
-All paths relative to project root. `.env` file at project root.
+`navdat_path`/`apdat_path` accept absolute paths or paths relative to `PROJECT_ROOT`. `.env` file is resolved from `PROJECT_ROOT`.
 
 ---
 
@@ -113,17 +122,17 @@ class RouteEngine:
                star_entry: Optional[str] = None) -> str  # JSON string
 ```
 
-### A* Search Logic (Single Mixed-Graph A*)
+### A* Search Logic
 
-`RouteEngine.search()` builds a **single mixed graph** per request: all airway nodes/edges plus the temporary SID/STAR nodes and edges from `FlatbuffersAirportConnector`, then runs one A* search over the combined graph.
+`RouteEngine.search()` first attempts a **single mixed-graph A\*** over the combined airway + SID/STAR graph. If the mixed search cannot find a valid route that respects the requested SID/STAR constraints, it falls back to a **phase-separated search**: airway-only path between SID exit and STAR entry points, with procedure segments attached separately.
 
 1. **Candidate selection** — For each available SID/STAR procedure, calculate the boundary point's great-circle distance to the opposite airport. Keep the top 50 candidates (sorted by distance) and prune the rest. This is a simple distance-based filter, not algorithmic pruning; 50 candidates cover all standard routes without losing optimality.
 2. **Start/end nodes** — SID airport node (`iid=-1`) and STAR airport node (`iid=-2`)
 3. **Priority queue** — Ordered by `f_score = g_score + heuristic`
-4. **Heuristic** — Great-circle distance to STAR airport node (admissible; satisfies triangle inequality on sphere). Inlined into the A* hot loop to avoid function call overhead.
-5. **Edge weight** — Uses precomputed `edge.dist` (great-circle distance in km) with a **0.5× multiplier** for SID/STAR edges to prefer procedures over raw airways.
-6. **Forbidden-node filtering** — Airway nodes that share names with SID/STAR procedure points (excluding STAR boundary points) are added to a `forbidden_names` set. A* skips edges whose target node name is in this set, preventing the airway from revisiting procedure waypoints.
-7. **T-route filtering** — Edges on T-routes (`T123`) are skipped when the current node has at least one non-T outgoing edge. This is evaluated via a precomputed `_node_has_non_t` bitmask (O(1) lookup, no string scanning per edge).
+4. **Heuristic** — Great-circle distance to STAR airport node (admissible; satisfies triangle inequality on sphere).
+5. **Edge weight** — Uses precomputed `edge.dist` (great-circle distance in km).
+6. **Forbidden-node filtering** — Airway nodes that share **names and coordinates** with SID/STAR procedure points (excluding STAR boundary points) are added to a forbidden set. A* skips edges whose target node is in this set, preventing the airway from revisiting procedure waypoints.
+7. **T-route filtering** — Edges on T-routes (`T123`) are skipped when the current node has at least one non-T outgoing edge.
 8. **Cycle removal** — After backtracking the optimal path, duplicate airway node IIDs are removed to prevent cycles where the airway re-enters the same node.
 9. **Tracks `dists` dict** for best-known distances.
 
@@ -148,7 +157,7 @@ Temp node boundary points are mapped to their corresponding airway nodes by **na
 
 ### Output
 
-Returns a **JSON string** via `orjson` (not stdlib `json`) for faster serialization. Caller in `api.py` parses it with `json.loads()`.
+Returns a **JSON string**. Caller in `api.py` parses it with `json.loads()`.
 
 ---
 
@@ -183,8 +192,8 @@ class SearchingNode:
     route_list: List[Tuple[str, str, int]]  # (edge_name, node_name, node_iid)
 ```
 
-- `EARTH_RADIUS = 6378.137` km (WGS-84)
-- `great_circle_distance_km()` uses Haversine formula
+- `EARTH_RADIUS = 6371.0` km (mean Earth radius, aviation standard)
+- `great_circle_distance_km()` uses the `atan2(sqrt(a), sqrt(1-a))` form of the Haversine formula for better numerical stability
 - `Edge.dist` is precomputed at navdata load time to avoid trigonometric recalculation during every A* edge relaxation
 
 ---
@@ -214,7 +223,7 @@ def has_registry() -> bool
 def get_data_version() -> str
 ```
 
-Registry is lazily initialized. `get_nav_data()` returns specific cycle or latest (highest cycle number).
+Registry is lazily initialized in a thread-safe manner (`_init_registry()` uses double-checked locking). `get_nav_data()` returns a reference-counted `_NavDataRef` for a specific cycle or the latest (highest cycle number). Callers should use it as a context manager or call `.release()`.
 
 ### search_route() — Main Entry Point
 
@@ -229,13 +238,13 @@ Flow:
 1. Uppercase orig/dest
 2. Get navdata for cycle (or latest)
 3. Validate airports exist
-4. `FlatbuffersAirportConnector(nav)` → `build_sid(orig)` / `build_star(dest)`
+4. `FlatbuffersAirportConnector(nav)` → cached `build_sid(orig)` / `build_star(dest)` via LRU caches
 5. `RouteEngine(nav.node_list, nav.cycle)` → `engine.search(...)`
 6. Parse JSON result
 7. Enrich with airport details and runway info
 8. Return dict
 
-Thread-safe: creates fresh `RouteEngine` and connectors per call.
+Thread-safe: creates fresh `RouteEngine` per call. `AirportConnection` objects are cached and `dataclasses.replace()` is used to give each request isolated `temp_nodes`. Cache size is controlled by `AIRPORT_CONNECTION_CACHE_SIZE`.
 
 ---
 
@@ -265,10 +274,10 @@ Converts Fenix A320 `nd.db3` SQLite to FlatBuffers bytes:
 - Pre-fetches waypoint names for procedure leg lookup
 - Progress callback: `progress(step, current, total)`
 - Builds all sections: nodes, edges, airports, navaids, holdings, markers, GLS, grid MORA, airport comms
-- Nodes: ID converted to 0-based IID (`(row["ID"] or 1) - 1`)
+- Nodes: waypoint `ID` mapped to 0-based IID via an explicit `id_to_iid` dictionary; handles non-consecutive IDs
 - Runways: pairs ends by base name (e.g., "18L/36R")
-- ILS frequency decoded from BCD-like hex encoding
-- Procedures: maps Fenix `Proc` field (1=arrival, 2=departure) to schema enum
+- ILS frequency decoded from BCD-like hex encoding, preserving trailing zeros
+- Procedures: maps Fenix `Proc` field (1=arrival, 2=departure) to schema enum; legs are ordered by `SeqNumber` (or `ID` fallback)
 
 ### NavData/ — Generated FlatBuffers Python Classes
 

@@ -77,11 +77,11 @@ Detailed documentation lives in `docs/claude/`. Read the relevant file before mo
 
 Key modules:
 
-- `api.py` — FastAPI app with all endpoints (`/api/route`, `/api/airports`, `/api/airports/{icao}/procedures`, `/api/admin/navdata/upload`, etc.). Route calculation runs in a `ThreadPoolExecutor` (4 workers) guarded by an `asyncio.Semaphore(8)`.
-- `core/dijkstra.py` — `RouteEngine` implements a **single mixed-graph A\*** search: temporary SID/STAR nodes and edges are injected into the global airway graph, then one A* search runs over the combined graph. Uses admissible great-circle heuristic, precomputed `edge.dist`, candidate pruning (top 50), and cycle prevention.
+- `api.py` — FastAPI app with all endpoints (`/api/route`, `/api/airports`, `/api/airports/{icao}/procedures`, `/api/admin/*`, etc.). Route calculation runs in `_dijkstra_pool` (4 workers) guarded by an `asyncio.Semaphore(8)`. Fenix builds run serially in `_build_pool` (1 worker). The airport prefix index is rebuilt atomically after a navdata cycle is uploaded or deleted.
+- `core/dijkstra.py` — `RouteEngine` attempts a **single mixed-graph A\*** search over airway + SID/STAR nodes, falling back to a phase-separated search when constraints cannot be satisfied. Uses admissible great-circle heuristic, precomputed `edge.dist`, candidate pruning (top 50), and cycle prevention.
 - `core/graph.py` — Immutable `Node`/`Edge` dataclasses and great-circle distance utilities. `Edge` carries a precomputed `dist` field.
 - `core/airport.py` — `FlatbuffersAirportConnector` builds temporary nodes and edges for SID/STAR procedures from FlatBuffers navdata. Also contains the legacy `AirportConnector` for pickle-based data.
-- `core/data_loader.py` — `NavGraph` singleton (legacy pickle-based) and `search_route()` orchestration. Also holds `get_nav_data()` / `get_nav_registry()` accessors.
+- `core/data_loader.py` — Legacy `NavGraph` singleton (pickle-based) and modern `NavDataRegistry` accessors. `get_nav_registry()` / `get_nav_data()` are lazily initialized in a thread-safe manner. `search_route()` orchestrates the A* search and caches built `AirportConnection` objects in bounded LRU caches keyed by `(cycle, icao)`.
 - `core/storage/registry.py` — `NavDataRegistry` manages multiple navdata cycles (thread-safe, hot reload).
 - `core/storage/reader.py` — `MmappedNavData` reads `.fb` / `.fb.zst` files via `mmap`.
 - `core/storage/builder.py` — `build_from_fenix()` converts Fenix A320 `nd.db3` SQLite files into FlatBuffers navdata.
@@ -119,12 +119,13 @@ For Fenix A320 data, use the admin upload API (`POST /api/admin/navdata/upload`)
 ## Environment Configuration
 
 Copy `.env.example` to `.env`:
-- `NAVDAT_PATH` / `APDAT_PATH` — paths to nav data files (relative to project root)
+- `NAVDAT_PATH` / `APDAT_PATH` — paths to nav data files. Absolute paths are used as-is; relative paths are resolved from the project root.
 - `LOCAL_ASDATA_PATH` — path to raw Aerosoft data (for `pack_data.py`)
 - `ADMIN_KEY` — enables admin dashboard and navdata upload
 - `METAR_UPDATE_MINUTES` — METAR refresh interval
 - `BING_MAPS_KEY` — optional, for map tiles
 - `DISABLE_CAPTCHA` — skip captcha validation (for testing/development)
+- `AIRPORT_CONNECTION_CACHE_SIZE` — LRU cache size for built SID/STAR connections (default 1000)
 
 ## Important Notes
 

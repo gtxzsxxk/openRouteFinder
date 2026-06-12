@@ -10,7 +10,7 @@ PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=PROJECT_ROOT / ".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -32,13 +32,18 @@ class Settings(BaseSettings):
     # can be tens to hundreds of KB. Default 1000 covers ~1000 busy airports.
     airport_connection_cache_size: int = 1000
 
+    @staticmethod
+    def _resolve_path(path: str) -> Path:
+        p = Path(path)
+        return p if p.is_absolute() else PROJECT_ROOT / p
+
     @property
     def navdat_full_path(self) -> Path:
-        return PROJECT_ROOT / self.navdat_path
+        return self._resolve_path(self.navdat_path)
 
     @property
     def apdat_full_path(self) -> Path:
-        return PROJECT_ROOT / self.apdat_path
+        return self._resolve_path(self.apdat_path)
 
     @property
     def metar_full_path(self) -> Path:

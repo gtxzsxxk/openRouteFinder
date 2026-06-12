@@ -33,6 +33,7 @@ export default {
     noSTAR: 'No STAR available',
     navdataVersion: 'Navdata Version',
     noNavdata: 'No navdata available',
+    airportNotFound: 'Airport not found',
   },
   captcha: {
     title: 'Security Check',

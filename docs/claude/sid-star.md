@@ -15,11 +15,12 @@ class Procedure:
 @dataclass
 class AirportConnection:
     airport_node: Node          # temp node (IID -1 for SID, -2 for STAR)
-    connections: List[Edge]     # airport ↔ network edges
+    connections: List[Edge]     # airport → network edges (SID) or network → airport edges (STAR)
     procedures: Dict[str, List[Procedure]]  # anchor_point -> list of procedures
     transition_edges: List[Edge]
     temp_nodes: List[Node]      # off-network waypoints (negative IIDs)
     internal_edges: List[Edge]  # edges within procedures (pooled across ALL procedures)
+    bridge_edges: List[Edge]    # temporary bridges from isolated boundary nodes to the airway network
 ```
 
 **Important:** `internal_edges` is pooled across ALL procedures for an airport, not per-procedure. Shared common-segment nodes naturally have >2 edges. Deduplication is required for meaningful edge-count checks.
@@ -60,7 +61,7 @@ class FlatbuffersAirportConnector:
 7. Merge runway segments with common segments; prefer options with matching approach bridges
 8. Key procedures by network-side entry point (`merged_points[0][0]`)
 9. Merge approach bridges into STAR procedures so full path to runway is available
-10. Build connections from each procedure's last point to airport
+10. Build connections from each procedure's first point (network-side entry) to the airport
 11. Add internal edges for used approach bridges
 12. **Fallback**: when no STAR procedures exist (and no filter is active), create virtual STAR procedures from approach bridges
 13. `_ensure_continuous_paths()` — add missing edges for consecutive points in merged procedures
@@ -75,11 +76,15 @@ The core of SID/STAR parsing. Returns three things:
 
 ```python
 (
-    runway_segments: Dict[str, List[Tuple[str, float, float]]],   # runway -> points
-    common_segments: Dict[str, List[Tuple[str, float, float]]],   # name -> points
-    transition_segments: Dict[str, Dict[str, List[Tuple[str, float, float]]]]  # name -> {transition_name -> points}
+    runway_segments: List[Tuple[str, str, Node, List[Tuple[str, float, float]], List, bool]],
+    common_segments: Dict[str, Tuple[Node, List[Tuple[str, float, float]], List]],
+    transition_segments: List[Tuple[str, str, Node, List[Tuple[str, float, float]], List, bool]]
 )
 ```
+
+- `runway_segments`: list of `(proc_name, runway, anchor_node, points, transitions, is_main_legs)`
+- `common_segments`: dict of `proc_name -> (anchor_node, points, transitions)`
+- `transition_segments`: list of `(proc_name, runway, anchor_node, points, transitions, is_main_legs)`
 
 Fenix navdata stores procedures with:
 - Main legs (Transition="ALL")

@@ -80,12 +80,17 @@ cd openRouterFinder && uvicorn api:app --host 0.0.0.0 --port 9807
 | Method | Path | 中文说明 | Description |
 |--------|------|----------|-------------|
 | GET | `/api/version` | 导航数据周期 | Navigation data cycle |
+| GET | `/api/cycles` | 可用导航数据周期 | Available navdata cycles |
 | GET | `/api/airports?q=` | 机场搜索 | Airport search |
-| GET | `/api/airports/{icao}` | 机场详情 | Airport details |
+| GET | `/api/airports/{icao}` | 机场基本信息 | Airport basic info |
+| GET | `/api/airports/{icao}/procedures` | 机场进离场程序 | Airport SID/STAR procedures |
 | POST | `/api/route` | 计算航路 | Calculate route |
 | GET | `/api/metar/{icao}` | METAR 天气 | METAR weather |
 | GET | `/api/validcode` | 获取验证码 | Get captcha |
 | GET | `/health` | 健康检查 | Health check |
+| GET | `/api/admin` | 管理统计 | Admin statistics |
+| POST | `/api/admin/navdata/upload` | 上传 Fenix 导航数据 | Upload Fenix navdata |
+| GET | `/api/admin/navdata/build-progress/{build_id}` | 构建进度 SSE | Build progress SSE |
 
 ---
 

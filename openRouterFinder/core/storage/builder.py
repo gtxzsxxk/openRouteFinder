@@ -289,7 +289,9 @@ def build_from_fenix(
         processed += counts["airways"]
         _progress("airways", counts["airways"], counts["airways"])
 
-        airports = _build_airports(cursor, builder, wp_names, lambda c, t: _progress("airports", c, t))
+        airports = _build_airports(
+            cursor, builder, wp_names, lambda c, t: _progress("airports", c, t)
+        )
         processed += counts["airports"]
         _progress("airports", counts["airports"], counts["airports"])
 

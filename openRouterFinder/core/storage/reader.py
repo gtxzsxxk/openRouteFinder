@@ -1,5 +1,6 @@
 """mmap-based FlatBuffers reader for NavData files."""
 
+import contextlib
 import mmap
 import os
 import sys
@@ -205,23 +206,17 @@ class MmappedNavData:
         Idempotent: safe to call multiple times.
         """
         if self._mmap is not None:
-            try:
+            with contextlib.suppress(ValueError, OSError):
                 self._mmap.close()
-            except (ValueError, OSError):
-                pass
             self._mmap = None
         if self._file is not None:
-            try:
+            with contextlib.suppress(ValueError, OSError):
                 self._file.close()
-            except (ValueError, OSError):
-                pass
             self._file = None
         if self._tmp_path is not None:
-            try:
+            with contextlib.suppress(OSError):
                 if self._tmp_path.exists():
                     os.unlink(self._tmp_path)
-            except OSError:
-                pass
             self._tmp_path = None
 
     def __enter__(self):

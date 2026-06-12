@@ -184,7 +184,7 @@ class _TTLCodeStore:
     def _cleanup(self, now: float):
         """Drop expired entries from the front of the ordered dict."""
         while self._data:
-            key, (_, ts) = next(iter(self._data.items()))
+            _, (_, ts) = next(iter(self._data.items()))
             if now - ts <= self._ttl:
                 break
             self._data.popitem(last=False)
@@ -235,7 +235,12 @@ def _cleanup_finished_build_tasks() -> None:
 
 
 def _build_airport_index():
-    """Build prefix index for O(1) airport autocomplete lookups."""
+    """Build prefix index for O(1) airport autocomplete lookups.
+
+    The index and list are replaced atomically so readers never see a
+    half-built structure while a rebuild is in progress (e.g. after navdata
+    hot reload).
+    """
     global _airport_prefix_index, _airport_list
     airports = []
 
@@ -252,18 +257,17 @@ def _build_airport_index():
                     {"icao": icao, "name": name, "lat": float(ap.Lat()), "lon": float(ap.Lon())}
                 )
 
-    _airport_list = airports
-
-    # Build prefix index for ICAO codes
+    prefix_index: dict[str, list] = {}
     for ap in airports:
         icao = ap["icao"]
         for i in range(1, len(icao) + 1):
             prefix = icao[:i]
-            if prefix not in _airport_prefix_index:
-                _airport_prefix_index[prefix] = []
-            _airport_prefix_index[prefix].append(ap)
+            prefix_index.setdefault(prefix, []).append(ap)
 
-    print(f"Airport index built: {len(airports)} airports, {len(_airport_prefix_index)} prefixes")
+    _airport_list = airports
+    _airport_prefix_index = prefix_index
+
+    print(f"Airport index built: {len(airports)} airports, {len(prefix_index)} prefixes")
 
 
 def _search_airports(q: str, limit: int = 50) -> list:
@@ -656,6 +660,7 @@ def delete_navdata_cycle(cycle: str, x_admin_key: str = Header(default="")):
     if not reg.has_cycle(cycle):
         raise HTTPException(status_code=404, detail="Cycle not found")
     reg.unregister(cycle)
+    _build_airport_index()
     return {"success": True, "cycle": cycle}
 
 
@@ -745,6 +750,7 @@ def _do_build_navdata(
         fb_path.write_bytes(compressed)
         reg = get_nav_registry()
         reg.register(cycle, fb_path)
+        _build_airport_index()
         info = reg.get_cycle_info(cycle)
         _build_tasks[build_id] = {
             "status": "done",

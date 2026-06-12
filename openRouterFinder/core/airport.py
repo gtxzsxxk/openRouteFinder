@@ -56,13 +56,19 @@ class _ConnectedNodeIndex:
             if node is None:
                 continue
             if node.next_list:
-                key = (int(math.floor(node.px / cell_deg)), int(math.floor(node.py / cell_deg)))
+                key = (math.floor(node.px / cell_deg), math.floor(node.py / cell_deg))
                 self._cells.setdefault(key, []).append(node)
             for e in node.next_list:
                 self.nodes_with_inbound.add(e.nend)
 
     @staticmethod
-    def _nearest_point_in_cell(lat: float, lon: float, cx: int, cy: int, cell_deg: float):
+    def _nearest_point_in_cell(
+        lat: float,
+        lon: float,
+        cx: int,
+        cy: int,
+        cell_deg: float,
+    ) -> tuple[float, float]:
         lat0 = cx * cell_deg
         lat1 = (cx + 1) * cell_deg
         lon0 = cy * cell_deg
@@ -77,8 +83,8 @@ class _ConnectedNodeIndex:
         exclude_iids: set | None = None,
         valid_iids: set | None = None,
     ) -> Node | None:
-        cx = int(math.floor(lat / self._cell_deg))
-        cy = int(math.floor(lon / self._cell_deg))
+        cx = math.floor(lat / self._cell_deg)
+        cy = math.floor(lon / self._cell_deg)
         heap = [(0.0, 0, cx, cy)]
         visited: set[tuple[int, int]] = set()
         best: Node | None = None
@@ -111,7 +117,10 @@ class _ConnectedNodeIndex:
                 if (nx, ny) in visited:
                     continue
                 nlat, nlon = self._nearest_point_in_cell(lat, lon, nx, ny, self._cell_deg)
-                heapq.heappush(heap, (_haversine_a(lat, lon, nlat, nlon), abs(nx - cx) + abs(ny - cy), nx, ny))
+                heapq.heappush(
+                    heap,
+                    (_haversine_a(lat, lon, nlat, nlon), abs(nx - cx) + abs(ny - cy), nx, ny),
+                )
 
         return best
 

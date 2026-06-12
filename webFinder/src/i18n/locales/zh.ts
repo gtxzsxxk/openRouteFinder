@@ -33,6 +33,7 @@ export default {
     noSTAR: '该机场无可用进场程序',
     navdataVersion: '导航数据版本',
     noNavdata: '无可用导航数据',
+    airportNotFound: '机场不存在',
   },
   captcha: {
     title: '安全验证',

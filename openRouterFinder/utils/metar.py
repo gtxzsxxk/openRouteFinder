@@ -1,6 +1,5 @@
 """METAR weather data fetcher."""
 
-import os
 import threading
 import time
 
@@ -32,7 +31,7 @@ def fetch_metar() -> str:
                 tmp_path = settings.metar_full_path.with_suffix(".tmp")
                 with open(tmp_path, "w") as f:
                     f.write(r.text)
-                os.replace(tmp_path, settings.metar_full_path)
+                tmp_path.replace(settings.metar_full_path)
             with _metar_lock:
                 global _metar_data
                 _metar_data = r.text
