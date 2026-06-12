@@ -39,9 +39,9 @@
 | 26 | `core/airport.py` | `_collect_approach_bridges` 中 `proc_name` 和 `trans_name` 被解码但从未使用 | 1347-1350, 1398-1401 行 | 删除死变量 |
 | 27 | `core/airport.py` | `build_sid` 内部导入 `from collections import defaultdict`（1100 行），应在模块顶部导入 | 1100 行 | 移到文件顶部 |
 | 28 | `core/airport.py` | Legacy `AirportConnector` 类（1868-2463 行）与 `FlatbuffersAirportConnector` 并存，大量重复逻辑 | 1868-2463 行 | 评估是否可以删除 legacy 类，或标记为 deprecated |
-| 29 | `core/storage/reader.py` | zstd 解压异常时临时文件未被删除 | 36-48 行 finally 块 | 异常时清理临时文件 |
+| ~~29~~ | ~~`core/storage/reader.py`~~ | ~~zstd 解压异常时临时文件未被删除~~ | ~~36-48 行 finally 块~~ | ~~异常时清理临时文件~~ |
 | 30 | `core/storage/reader.py` | `_build_indices` 未处理重复 IID，后出现的静默覆盖先出现的 | 64-73 行 | 记录重复并告警 |
-| 31 | `core/storage/reader.py` | `close()` 非幂等，第二次调用抛异常 | 196-200 行 | 添加 `self._closed` 标志 |
+| ~~31~~ | ~~`core/storage/reader.py`~~ | ~~`close()` 非幂等，第二次调用抛异常~~ | ~~196-200 行~~ | ~~添加 `self._closed` 标志~~ |
 | 32 | `core/storage/registry.py` | 文件名正则 `fb\|fb\.zst` 优先级导致 `navdata_1234.fb.zst` 匹配为 `.fb` | 13 行 | 改为 `^navdata_(\d{4})\.((?:fb\.zst)\|(?:fb))$` |
 | 33 | `core/storage/builder.py` | `_build_runways_for_airport` 中 `ILSAddRunwayEnd` 写入 runway end 名而非 runway base name | 476-493 行 | 确认消费端语义并修正或文档化 |
 | 34 | `core/storage/builder.py` | `_runway_base_name` 对非标准后缀（如 `T`、`W`）返回空 `opp_suffix`，导致 `18T/18T` | 652-672 行 | 增加后缀白名单校验 |
@@ -50,17 +50,17 @@
 | ~~37~~ | ~~`core/data_loader.py`~~ | ~~`_sid_cache` / `_star_cache` 无大小限制，长时间运行无限增长~~ | ~~358-360 行~~ | ~~设置 LRU 或 maxlen~~ |
 | 38 | `core/data_loader.py` | `_parse_airport_detail` 依赖 legacy `NavGraph.airport_maps`，modern 路径未使用，代码已死 | 291-332 行 | 清理死代码 |
 | 39 | `core/data_loader.py` | `_init_registry()` 未加锁，多线程同时初始化可能创建多个 Registry | 117-131 行 | 加锁保护 |
-| 40 | `core/admin.py` | `unique_ips` 用 deque 成员检查 O(n)，且 `total_requests` 整数无限增长 | 18, 30-31 行 | 改用 set 辅助；按需重置 total_requests |
+| ~~40~~ | ~~`core/admin.py`~~ | ~~`unique_ips` 用 deque 成员检查 O(n)，且 `total_requests` 整数无限增长~~ | ~~18, 30-31 行~~ | ~~改用 set 辅助；按需重置 total_requests~~ |
 | 41 | `utils/metar.py` | `fetch_metar` 中 `requests.get` 成功后先写文件再更新内存，写文件失败则内存不更新 | 21-31 行 | 先更新内存或统一事务 |
-| 42 | `utils/metar.py` | `read_metar` fallback 读文件未加锁，与 `fetch_metar` 写文件可能并发读到半写文件 | 56 行 | 加锁或临时文件+重命名 |
-| 43 | `utils/metar.py` | `start_metar_updater` 线程在应用关闭时无法优雅停止 | 68-80 行 | 使用 `threading.Event` 控制退出 |
-| 44 | `utils/validcode.py` | `_get_font` 每次调用重新加载字体文件 | 11-20 行 | 缓存字体对象 |
-| 45 | `utils/validcode.py` | 使用 `random` 而非 `secrets` 生成验证码 | 25-35 行 | 改用 `secrets` |
+| ~~42~~ | ~~`utils/metar.py`~~ | ~~`read_metar` fallback 读文件未加锁，与 `fetch_metar` 写文件可能并发读到半写文件~~ | ~~56 行~~ | ~~加锁或临时文件+重命名~~ |
+| ~~43~~ | ~~`utils/metar.py`~~ | ~~`start_metar_updater` 线程在应用关闭时无法优雅停止~~ | ~~68-80 行~~ | ~~使用 `threading.Event` 控制退出~~ |
+| ~~44~~ | ~~`utils/validcode.py`~~ | ~~`_get_font` 每次调用重新加载字体文件~~ | ~~11-20 行~~ | ~~缓存字体对象~~ |
+| ~~45~~ | ~~`utils/validcode.py`~~ | ~~使用 `random` 而非 `secrets` 生成验证码~~ | ~~25-35 行~~ | ~~改用 `secrets`~~ |
 | 46 | `config.py` | `navdat_full_path` / `apdat_full_path` 未处理用户配置绝对路径的情况 | 31-36 行 | 判断路径是否为绝对路径 |
 | 47 | `config.py` | `navdat_path` / `apdat_path` 默认指向 legacy pickle 文件，但项目已转向 FlatBuffers | 23-24 行 | 默认改为 FlatBuffers 路径或明确文档说明 |
 | 48 | `api.py` | `admin` 接口在每个端点重复写相同的密钥校验，未使用 `Depends` | 537/546/562/577/590/723/813 行 | 抽取 `verify_admin_key` 依赖 |
 | 49 | `api.py` | `ThreadPoolExecutor(max_workers=4)` 与 `asyncio.Semaphore(8)` 组合不一致，第 5-8 个任务阻塞事件循环 | 165 行 | 统一信号量与线程池大小 |
-| 50 | `api.py` | `_do_build_navdata` 中压缩后数据直接 `write_bytes`，写入中断留下损坏文件 | 689-694 行 | 先写临时文件再原子重命名 |
+| ~~50~~ | ~~`api.py`~~ | ~~`_do_build_navdata` 中压缩后数据直接 `write_bytes`，写入中断留下损坏文件~~ | ~~689-694 行~~ | ~~先写临时文件再原子重命名~~ |
 | 51 | `api.py` | `_airport_prefix_index` 在 navdata 热更新后未重建 | 172-173 行 | 在 Registry 注册/注销 cycle 后触发索引重建 |
 | 52 | `api.py` | `loop.run_in_executor(None, ...)` 使用默认线程池，与 `_dijkstra_pool` 不一致 | 790 行 | 统一使用 `_dijkstra_pool` |
 | 53 | `webFinder/src/composables/useMap.ts` | `nodes.length === 0` 时提前 return 未重置 `isUpdating`，地图卡死 | 231-235 行 | `return` 前重置 `isUpdating` |
@@ -68,9 +68,9 @@
 | 55 | `webFinder/src/composables/useMap.ts` | 五个 `watch` 在 `routeResult` 大对象变更时都触发 `scheduleUpdate` | 832-836 行 | 使用 `watch` 的 `deep: false` 或精确监听子字段 |
 | 56 | `webFinder/src/stores/routeStore.ts` | `_matchProcedureIndex` / `_matchTransitionIndex` 逻辑重复 | 106-154 行 | 提取共享辅助函数 |
 | 57 | `webFinder/src/stores/routeStore.ts` | `routeResult` 原始 ref 直接暴露，外部可绕过 `setRouteResult` 修改 | 239-271 行 | 暴露 readonly 版本 |
-| 58 | `webFinder/src/views/HomeView.vue` | `queryTime` 计时器使用 `setInterval(10ms)` 精度浪费 | 131-162 行 | 用 `performance.now()` 单次计算 |
+| ~~58~~ | ~~`webFinder/src/views/HomeView.vue`~~ | ~~`queryTime` 计时器使用 `setInterval(10ms)` 精度浪费~~ | ~~131-162 行~~ | ~~用 `performance.now()` 单次计算~~ |
 | 59 | `webFinder/src/views/HomeView.vue` | Waypoints 列表使用 `:key="i"`（索引作为 key） | 86-107 行 | 用 `node.name + i` 作为 key |
-| 60 | `webFinder/src/components/SearchForm.vue` | `canSubmit` 仅校验 ICAO 长度为 4，用户可输入 `!!!!` | 142-144 行 | 增加正则 `/^[A-Z0-9]{4}$/` |
+| ~~60~~ | ~~`webFinder/src/components/SearchForm.vue`~~ | ~~`canSubmit` 仅校验 ICAO 长度为 4，用户可输入 `!!!!`~~ | ~~142-144 行~~ | ~~增加正则 `/^[A-Z0-9]{4}$/`~~ |
 | 61 | `webFinder/src/components/ProcedureSelector.vue` | 404 时设置 `options = []` 但不设置 error，用户无法区分"无数据"和"机场不存在" | 64-104 行 | 404 时显示特定提示 |
 | 62 | `webFinder/src/components/SIDSelector.vue` | `selectedIndex` setter 接收 string（Vue 自动转换），类型存在隐式转换风险 | 45-48 行 | 显式 `Number(val)` |
 | 63 | `webFinder/src/i18n/locales/en.ts` | `weather.light/heavy` 值带尾部空格 `"Light "` / `"Heavy "` | en.ts | 移除尾部空格 |
