@@ -334,7 +334,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   Shield,
@@ -512,6 +512,13 @@ function formatTime(iso: string): string {
   const d = new Date(iso)
   return d.toLocaleTimeString('en-GB', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
+
+onUnmounted(() => {
+  if (activeEsCleanup) {
+    activeEsCleanup()
+    activeEsCleanup = null
+  }
+})
 </script>
 
 <script lang="ts">

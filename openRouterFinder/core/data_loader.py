@@ -4,6 +4,7 @@ import contextlib
 import dataclasses
 import pickle
 import sys
+from collections import OrderedDict
 from threading import Lock
 
 from openRouterFinder.config import settings
@@ -360,8 +361,11 @@ def _get_airport_detail_from_fb(nav, icao: str) -> dict | None:
 
 # Module-level caches for airport connections. AirportConnection objects are
 # read-only after construction, so they are safe to share across requests.
-_sid_cache: dict = {}
-_star_cache: dict = {}
+# OrderedDict + move_to_end gives simple LRU eviction so long-running processes
+# do not grow without bound.
+_MAX_AIRPORT_CACHE_SIZE = 1000
+_sid_cache: OrderedDict = OrderedDict()
+_star_cache: OrderedDict = OrderedDict()
 _cache_lock = Lock()
 
 
@@ -458,7 +462,8 @@ def _get_airport_connection(
     """Return a cached or freshly-built airport connection for the given proc type.
 
     proc_type: 1 for SID, 2 for STAR.  Reuses the module-level caches so API and
-    route endpoints do not rebuild procedures on every request.
+    route endpoints do not rebuild procedures on every request.  The caches are
+    LRU-bounded to _MAX_AIRPORT_CACHE_SIZE entries per type.
     """
     from openRouterFinder.core.airport import FlatbuffersAirportConnector
 
@@ -466,11 +471,18 @@ def _get_airport_connection(
     key = (cycle, icao)
     with _cache_lock:
         conn = cache.get(key)
-    if conn is None:
-        connector = FlatbuffersAirportConnector(nav)
-        conn = connector.build_sid(icao) if proc_type == 1 else connector.build_star(icao)
-        with _cache_lock:
-            cache[key] = conn
+        if conn is not None:
+            cache.move_to_end(key)
+            return conn
+
+    connector = FlatbuffersAirportConnector(nav)
+    conn = connector.build_sid(icao) if proc_type == 1 else connector.build_star(icao)
+
+    with _cache_lock:
+        cache[key] = conn
+        cache.move_to_end(key)
+        while len(cache) > _MAX_AIRPORT_CACHE_SIZE:
+            cache.popitem(last=False)
     return conn
 
 

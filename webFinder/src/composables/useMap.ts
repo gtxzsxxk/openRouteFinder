@@ -117,6 +117,11 @@ export function useMap(
   }
 
   function destroyMap() {
+    if (updateTimer.value) {
+      clearTimeout(updateTimer.value)
+      updateTimer.value = null
+    }
+
     const mq = mqRef.value
     const cb = mqCallbackRef.value
     if (mq && cb) {

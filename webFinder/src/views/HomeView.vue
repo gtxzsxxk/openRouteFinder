@@ -112,7 +112,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, onUnmounted } from 'vue'
 import { X } from '@lucide/vue'
 import { useRouteStore } from '@/stores/routeStore'
 import { useRouteQuery } from '@/composables/useRouteQuery'
@@ -136,6 +136,11 @@ function handleSearch(params: { orig: string; dest: string; validCode: string; v
   store.setError(null)
   queryTime.value = 0
 
+  if (timer) {
+    clearInterval(timer)
+    timer = null
+  }
+
   timer = setInterval(() => {
     queryTime.value += 0.01
   }, 10)
@@ -156,6 +161,13 @@ function handleSearch(params: { orig: string; dest: string; validCode: string; v
 
 watch(() => store.isLoading, (loading) => {
   if (!loading && timer) {
+    clearInterval(timer)
+    timer = null
+  }
+})
+
+onUnmounted(() => {
+  if (timer) {
     clearInterval(timer)
     timer = null
   }

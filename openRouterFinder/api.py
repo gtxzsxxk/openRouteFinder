@@ -8,6 +8,7 @@ import shutil
 import threading
 import time
 import uuid
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -176,31 +177,33 @@ class _TTLCodeStore:
     def __init__(self, ttl: int = 600, maxsize: int = 10000):
         self._ttl = ttl
         self._maxsize = maxsize
-        self._data: dict[str, tuple[str, float]] = {}
+        self._data: OrderedDict[str, tuple[str, float]] = OrderedDict()
         self._lock = threading.Lock()
 
     def _cleanup(self, now: float):
-        expired = [k for k, (_, ts) in self._data.items() if now - ts > self._ttl]
-        for k in expired:
-            del self._data[k]
+        """Drop expired entries from the front of the ordered dict."""
+        while self._data:
+            key, (_, ts) = next(iter(self._data.items()))
+            if now - ts <= self._ttl:
+                break
+            self._data.popitem(last=False)
 
     def set(self, token: str, code: str):
         now = time.time()
         with self._lock:
             self._cleanup(now)
             if len(self._data) >= self._maxsize:
-                oldest = min(self._data, key=lambda k: self._data[k][1])
-                del self._data[oldest]
+                self._data.popitem(last=False)
             self._data[token] = (code, now)
 
     def pop(self, token: str) -> str | None:
         now = time.time()
         with self._lock:
-            item = self._data.get(token)
+            self._cleanup(now)
+            item = self._data.pop(token, None)
             if item is None:
                 return None
             code, ts = item
-            del self._data[token]
             if now - ts > self._ttl:
                 return None
             return code
@@ -214,6 +217,20 @@ _airport_list: list = []
 
 # --- Build progress tracking ---
 _build_tasks: dict[str, dict] = {}
+_BUILD_TASK_TTL_SECONDS = 300  # keep finished tasks around for 5 minutes
+
+
+def _cleanup_finished_build_tasks() -> None:
+    """Remove done/error build entries older than the TTL."""
+    now = time.time()
+    expired = [
+        bid
+        for bid, task in _build_tasks.items()
+        if task.get("status") in ("done", "error")
+        and now - task.get("finished_at", now) > _BUILD_TASK_TTL_SECONDS
+    ]
+    for bid in expired:
+        _build_tasks.pop(bid, None)
 
 
 def _build_airport_index():
@@ -606,6 +623,7 @@ def list_active_builds(x_admin_key: str = Header(default="")):
     if x_admin_key != settings.admin_key:
         raise HTTPException(status_code=403, detail="Invalid key")
 
+    _cleanup_finished_build_tasks()
     active = [
         {"build_id": bid, **task}
         for bid, task in _build_tasks.items()
@@ -731,6 +749,7 @@ def _do_build_navdata(
             "status": "done",
             "cycle": cycle,
             "info": info,
+            "finished_at": time.time(),
         }
         size_mb = len(compressed) / 1024 / 1024
         raw_mb = len(raw) / 1024 / 1024
@@ -747,6 +766,7 @@ def _do_build_navdata(
         _build_tasks[build_id] = {
             "status": "error",
             "detail": detail,
+            "finished_at": time.time(),
         }
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -884,23 +904,31 @@ async def build_progress(build_id: str, x_admin_key: str = Query(default="")):
     from fastapi.responses import StreamingResponse
 
     async def event_stream():
-        while True:
+        _cleanup_finished_build_tasks()
+        try:
+            while True:
+                task = _build_tasks.get(build_id)
+                if task is None:
+                    yield f"event: error\ndata: {json.dumps({'detail': 'Build not found'})}\n\n"
+                    break
+
+                data = json.dumps(task)
+                if task["status"] == "done":
+                    yield f"event: done\ndata: {data}\n\n"
+                    break
+                elif task["status"] == "error":
+                    yield f"event: error\ndata: {data}\n\n"
+                    break
+                else:
+                    yield f"event: progress\ndata: {data}\n\n"
+
+                await asyncio.sleep(1)
+        finally:
+            # Once a finished task has been delivered, drop it so the dict
+            # does not grow without bound across many uploads.
             task = _build_tasks.get(build_id)
-            if task is None:
-                yield f"event: error\ndata: {json.dumps({'detail': 'Build not found'})}\n\n"
-                break
-
-            data = json.dumps(task)
-            if task["status"] == "done":
-                yield f"event: done\ndata: {data}\n\n"
-                break
-            elif task["status"] == "error":
-                yield f"event: error\ndata: {data}\n\n"
-                break
-            else:
-                yield f"event: progress\ndata: {data}\n\n"
-
-            await asyncio.sleep(1)
+            if task is not None and task.get("status") in ("done", "error"):
+                _build_tasks.pop(build_id, None)
 
     return StreamingResponse(
         event_stream(),
