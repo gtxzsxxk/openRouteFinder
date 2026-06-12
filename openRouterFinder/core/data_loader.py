@@ -138,9 +138,11 @@ def has_registry() -> bool:
 
 
 def get_nav_data(cycle: str | None = None):
-    """Get MmappedNavData for a specific cycle, or latest if None.
+    """Get a reference-counted MmappedNavData handle for a specific cycle.
 
-    Returns None if registry is empty.
+    Returns None if registry is empty.  The caller should use the returned
+    object as a context manager, or call .release() when finished, to avoid
+    keeping the underlying mmap open longer than necessary.
     """
     reg = _init_registry()
     return reg.get(cycle)
@@ -149,7 +151,10 @@ def get_nav_data(cycle: str | None = None):
 def get_data_version() -> str:
     reg = _init_registry()
     latest = reg.get()
-    return latest.cycle if latest else ""
+    if latest is None:
+        return ""
+    with latest:
+        return latest.cycle
 
 
 def get_airport_maps() -> dict:
@@ -378,69 +383,105 @@ def search_route(
     if nav is None:
         return None
 
-    if nav.get_airport(orig) is None or nav.get_airport(dest) is None:
-        return None
+    with nav:
+        if nav.get_airport(orig) is None or nav.get_airport(dest) is None:
+            return None
 
-    # Use cached AirportConnection when available to avoid rebuilding
-    # procedures on every request.
-    connector = FlatbuffersAirportConnector(nav)
+        # Use cached AirportConnection when available to avoid rebuilding
+        # procedures on every request.
+        connector = FlatbuffersAirportConnector(nav)
 
-    # Build unfiltered connections so the engine can fall back to auto-selected
-    # procedures when a filtered entry is unreachable via the airway graph.
-    sid_key = (cycle, orig)
-    with _cache_lock:
-        sid_conn = _sid_cache.get(sid_key)
-    if sid_conn is None:
-        sid_conn = connector.build_sid(orig, filter_name=None)
+        # Build unfiltered connections so the engine can fall back to auto-selected
+        # procedures when a filtered entry is unreachable via the airway graph.
+        sid_key = (cycle, orig)
         with _cache_lock:
-            _sid_cache[sid_key] = sid_conn
-    else:
-        # Each request must have isolated temp_nodes so that post-A* point
-        # insertion does not pollute the shared cache.
-        sid_conn = dataclasses.replace(sid_conn, temp_nodes=[])
+            sid_conn = _sid_cache.get(sid_key)
+        if sid_conn is None:
+            sid_conn = connector.build_sid(orig, filter_name=None)
+            with _cache_lock:
+                _sid_cache[sid_key] = sid_conn
+        else:
+            # Each request must have isolated temp_nodes so that post-A* point
+            # insertion does not pollute the shared cache.
+            sid_conn = dataclasses.replace(sid_conn, temp_nodes=[])
 
-    star_key = (cycle, dest)
-    with _cache_lock:
-        star_conn = _star_cache.get(star_key)
-    if star_conn is None:
-        star_conn = connector.build_star(dest, filter_name=None)
+        star_key = (cycle, dest)
         with _cache_lock:
-            _star_cache[star_key] = star_conn
-    else:
-        star_conn = dataclasses.replace(star_conn, temp_nodes=[])
+            star_conn = _star_cache.get(star_key)
+        if star_conn is None:
+            star_conn = connector.build_star(dest, filter_name=None)
+            with _cache_lock:
+                _star_cache[star_key] = star_conn
+        else:
+            star_conn = dataclasses.replace(star_conn, temp_nodes=[])
 
-    if sid_conn is None or star_conn is None:
-        return None
-    if not sid_conn.connections or not star_conn.connections:
-        return None
+        if sid_conn is None or star_conn is None:
+            return None
+        if not sid_conn.connections or not star_conn.connections:
+            return None
 
-    engine = RouteEngine(nav.node_list, nav.cycle, node_index=nav.node_index)
-    result_json = engine.search(
-        orig,
-        dest,
-        sid_conn,
-        star_conn,
-        connector.get_airport_names(orig) + connector.get_airport_names(dest),
-        sid_exit=sid_exit,
-        star_entry=star_entry,
-    )
+        engine = RouteEngine(nav.node_list, nav.cycle, node_index=nav.node_index)
+        result_json = engine.search(
+            orig,
+            dest,
+            sid_conn,
+            star_conn,
+            connector.get_airport_names(orig) + connector.get_airport_names(dest),
+            sid_exit=sid_exit,
+            star_entry=star_entry,
+        )
 
-    if result_json is None:
-        return None
+        if result_json is None:
+            return None
 
-    import json
+        import json
 
-    result = json.loads(result_json)
+        result = json.loads(result_json)
 
-    if isinstance(result, dict):
-        result["origAirportDetail"] = _get_airport_detail_from_fb(nav, orig)
-        result["destAirportDetail"] = _get_airport_detail_from_fb(nav, dest)
-        orig_ap = nav.get_airport(orig)
-        dest_ap = nav.get_airport(dest)
-        result["origRunways"] = _parse_runways_from_fb(orig_ap) if orig_ap else []
-        result["destRunways"] = _parse_runways_from_fb(dest_ap) if dest_ap else []
+        if isinstance(result, dict):
+            result["origAirportDetail"] = _get_airport_detail_from_fb(nav, orig)
+            result["destAirportDetail"] = _get_airport_detail_from_fb(nav, dest)
+            orig_ap = nav.get_airport(orig)
+            dest_ap = nav.get_airport(dest)
+            result["origRunways"] = _parse_runways_from_fb(orig_ap) if orig_ap else []
+            result["destRunways"] = _parse_runways_from_fb(dest_ap) if dest_ap else []
 
-    return result
+        return result
+
+
+def _get_airport_connection(
+    nav,
+    icao: str,
+    proc_type: int,
+    cycle: str | None,
+) -> "AirportConnection | None":
+    """Return a cached or freshly-built airport connection for the given proc type.
+
+    proc_type: 1 for SID, 2 for STAR.  Reuses the module-level caches so API and
+    route endpoints do not rebuild procedures on every request.
+    """
+    from openRouterFinder.core.airport import FlatbuffersAirportConnector
+
+    cache = _sid_cache if proc_type == 1 else _star_cache
+    key = (cycle, icao)
+    with _cache_lock:
+        conn = cache.get(key)
+    if conn is None:
+        connector = FlatbuffersAirportConnector(nav)
+        conn = connector.build_sid(icao) if proc_type == 1 else connector.build_star(icao)
+        with _cache_lock:
+            cache[key] = conn
+    return conn
+
+
+def get_sid_connection(nav, icao: str, cycle: str | None = None) -> "AirportConnection | None":
+    """Cached SID connection for an airport."""
+    return _get_airport_connection(nav, icao, 1, cycle)
+
+
+def get_star_connection(nav, icao: str, cycle: str | None = None) -> "AirportConnection | None":
+    """Cached STAR connection for an airport."""
+    return _get_airport_connection(nav, icao, 2, cycle)
 
 
 def _parse_runways_from_fb(ap) -> list:

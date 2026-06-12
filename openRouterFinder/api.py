@@ -5,6 +5,7 @@ import contextlib
 import json
 import os
 import shutil
+import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -29,6 +30,8 @@ from openRouterFinder.core.data_loader import (
     get_data_version,
     get_nav_data,
     get_nav_registry,
+    get_sid_connection,
+    get_star_connection,
     search_route,
 )
 from openRouterFinder.core.storage.builder import build_from_fenix
@@ -166,7 +169,44 @@ _dijkstra_pool = ThreadPoolExecutor(max_workers=4)
 _route_semaphore = asyncio.Semaphore(8)
 
 # --- Valid code storage ---
-_valid_codes: dict[str, str] = {}
+
+class _TTLCodeStore:
+    """Thread-safe captcha token store with TTL and bounded size."""
+
+    def __init__(self, ttl: int = 600, maxsize: int = 10000):
+        self._ttl = ttl
+        self._maxsize = maxsize
+        self._data: dict[str, tuple[str, float]] = {}
+        self._lock = threading.Lock()
+
+    def _cleanup(self, now: float):
+        expired = [k for k, (_, ts) in self._data.items() if now - ts > self._ttl]
+        for k in expired:
+            del self._data[k]
+
+    def set(self, token: str, code: str):
+        now = time.time()
+        with self._lock:
+            self._cleanup(now)
+            if len(self._data) >= self._maxsize:
+                oldest = min(self._data, key=lambda k: self._data[k][1])
+                del self._data[oldest]
+            self._data[token] = (code, now)
+
+    def pop(self, token: str) -> str | None:
+        now = time.time()
+        with self._lock:
+            item = self._data.get(token)
+            if item is None:
+                return None
+            code, ts = item
+            del self._data[token]
+            if now - ts > self._ttl:
+                return None
+            return code
+
+
+_valid_codes = _TTLCodeStore()
 
 # --- Airport prefix index ---
 _airport_prefix_index: dict[str, list] = {}
@@ -183,15 +223,16 @@ def _build_airport_index():
 
     nav = get_nav_data()
     if nav is not None:
-        for icao in nav.list_airport_icaos():
-            ap = nav.get_airport(icao)
-            if ap is None:
-                continue
-            name = ap.Name()
-            name = name.decode("utf-8") if isinstance(name, bytes) else (name or icao)
-            airports.append(
-                {"icao": icao, "name": name, "lat": float(ap.Lat()), "lon": float(ap.Lon())}
-            )
+        with nav:
+            for icao in nav.list_airport_icaos():
+                ap = nav.get_airport(icao)
+                if ap is None:
+                    continue
+                name = ap.Name()
+                name = name.decode("utf-8") if isinstance(name, bytes) else (name or icao)
+                airports.append(
+                    {"icao": icao, "name": name, "lat": float(ap.Lat()), "lon": float(ap.Lon())}
+                )
 
     _airport_list = airports
 
@@ -310,112 +351,111 @@ def get_airport(icao: str, cycle: str | None = None):
     nav = get_nav_data(cycle)
     if nav is None:
         raise HTTPException(status_code=503, detail="Navdata not available")
-    ap = nav.get_airport(icao)
-    if ap is None:
-        raise HTTPException(status_code=404, detail="Airport not found")
-    name = ap.Name()
-    name = name.decode("utf-8") if isinstance(name, bytes) else (name or icao)
-    return {
-        "icao": icao,
-        "name": name,
-        "lat": float(ap.Lat()),
-        "lon": float(ap.Lon()),
-    }
+    with nav:
+        ap = nav.get_airport(icao)
+        if ap is None:
+            raise HTTPException(status_code=404, detail="Airport not found")
+        name = ap.Name()
+        name = name.decode("utf-8") if isinstance(name, bytes) else (name or icao)
+        return {
+            "icao": icao,
+            "name": name,
+            "lat": float(ap.Lat()),
+            "lon": float(ap.Lon()),
+        }
 
 
 @app.get("/api/airports/{icao}/procedures")
 def get_airport_procedures(icao: str, cycle: str | None = None, detail: bool = False):
     icao = icao.upper()
 
-    from openRouterFinder.core.airport import FlatbuffersAirportConnector
-
     nav = get_nav_data(cycle)
     if nav is None:
         raise HTTPException(status_code=503, detail="Navdata not available")
-    if nav.get_airport(icao) is None:
-        raise HTTPException(status_code=404, detail="Airport not found")
-    connector = FlatbuffersAirportConnector(nav)
+    with nav:
+        if nav.get_airport(icao) is None:
+            raise HTTPException(status_code=404, detail="Airport not found")
 
-    sid_conn = connector.build_sid(icao)
-    star_conn = connector.build_star(icao)
+        sid_conn = get_sid_connection(nav, icao, cycle)
+        star_conn = get_star_connection(nav, icao, cycle)
 
-    sid_exits = []
-    if sid_conn and sid_conn.procedures:
-        seen = set()
-        for exit_name, proc_list in sid_conn.procedures.items():
-            if exit_name in seen:
-                continue
-            seen.add(exit_name)
-            sid_exits.append(
-                {
-                    "name": exit_name,
-                    "procedures": list(dict.fromkeys(p.name for p in proc_list)),
-                }
-            )
-
-    star_entries = []
-    if star_conn and star_conn.procedures:
-        seen = set()
-        for entry_name, proc_list in star_conn.procedures.items():
-            if entry_name in seen:
-                continue
-            seen.add(entry_name)
-            star_entries.append(
-                {
-                    "name": entry_name,
-                    "procedures": list(dict.fromkeys(p.name for p in proc_list)),
-                }
-            )
-
-    result = {
-        "icao": icao,
-        "sid": {"exits": sid_exits},
-        "star": {"entries": star_entries},
-    }
-
-    if detail and (sid_conn or star_conn):
-        # Return full procedure tuples (same shape as /api/route SID/STAR fields)
-        def _proc_tuple(proc):
-            return [
-                proc.name,
-                proc.runway,
-                [[p[0], p[1], p[2]] for p in proc.points],
-                [[t[0], [[p[0], p[1], p[2]] for p in t[1]]] for t in proc.transitions],
-            ]
-
+        sid_exits = []
         if sid_conn and sid_conn.procedures:
-            result["sidDetails"] = {
-                key: [_proc_tuple(p) for p in proc_list]
-                for key, proc_list in sid_conn.procedures.items()
-            }
+            seen = set()
+            for exit_name, proc_list in sid_conn.procedures.items():
+                if exit_name in seen:
+                    continue
+                seen.add(exit_name)
+                sid_exits.append(
+                    {
+                        "name": exit_name,
+                        "procedures": list(dict.fromkeys(p.name for p in proc_list)),
+                    }
+                )
+
+        star_entries = []
         if star_conn and star_conn.procedures:
-            result["starDetails"] = {
-                key: [_proc_tuple(p) for p in proc_list]
-                for key, proc_list in star_conn.procedures.items()
-            }
+            seen = set()
+            for entry_name, proc_list in star_conn.procedures.items():
+                if entry_name in seen:
+                    continue
+                seen.add(entry_name)
+                star_entries.append(
+                    {
+                        "name": entry_name,
+                        "procedures": list(dict.fromkeys(p.name for p in proc_list)),
+                    }
+                )
 
-    if detail:
-        if "sidDetails" in result:
-            result["sidDetails"] = _filter_runway_all_from_response(
-                {"SID": result["sidDetails"]}
-            ).get("SID", {})
-        if "starDetails" in result:
-            result["starDetails"] = _filter_runway_all_from_response(
-                {"STAR": result["starDetails"]}
-            ).get("STAR", {})
+        result = {
+            "icao": icao,
+            "sid": {"exits": sid_exits},
+            "star": {"entries": star_entries},
+        }
 
-    return result
+        if detail and (sid_conn or star_conn):
+            # Return full procedure tuples (same shape as /api/route SID/STAR fields)
+            def _proc_tuple(proc):
+                return [
+                    proc.name,
+                    proc.runway,
+                    [[p[0], p[1], p[2]] for p in proc.points],
+                    [[t[0], [[p[0], p[1], p[2]] for p in t[1]]] for t in proc.transitions],
+                ]
+
+            if sid_conn and sid_conn.procedures:
+                result["sidDetails"] = {
+                    key: [_proc_tuple(p) for p in proc_list]
+                    for key, proc_list in sid_conn.procedures.items()
+                }
+            if star_conn and star_conn.procedures:
+                result["starDetails"] = {
+                    key: [_proc_tuple(p) for p in proc_list]
+                    for key, proc_list in star_conn.procedures.items()
+                }
+
+        if detail:
+            if "sidDetails" in result:
+                result["sidDetails"] = _filter_runway_all_from_response(
+                    {"SID": result["sidDetails"]}
+                ).get("SID", {})
+            if "starDetails" in result:
+                result["starDetails"] = _filter_runway_all_from_response(
+                    {"STAR": result["starDetails"]}
+                ).get("STAR", {})
+
+        return result
 
 
 @app.post("/api/route")
 async def post_route(req: RouteRequest):
     # Validate captcha (skip if disabled via config)
     if not settings.disable_captcha:
-        if req.validToken not in _valid_codes:
+        expected_code = _valid_codes.pop(req.validToken)
+        if expected_code is None:
             raise HTTPException(status_code=401, detail="验证码已过期")
-        if _valid_codes[req.validToken] != req.validCode:
+        if expected_code != req.validCode:
             raise HTTPException(status_code=401, detail="验证码错误")
-        del _valid_codes[req.validToken]
 
     try:
         async with _route_semaphore:
@@ -522,7 +562,7 @@ def get_valid_code():
 
     num = random.randint(1000, 9999)
     token = str(uuid.uuid4())
-    _valid_codes[token] = str(num)
+    _valid_codes.set(token, str(num))
     return {
         "token": token,
         "image": generate_captcha_b64(num),
@@ -597,14 +637,6 @@ def delete_navdata_cycle(cycle: str, x_admin_key: str = Header(default="")):
     if not reg.has_cycle(cycle):
         raise HTTPException(status_code=404, detail="Cycle not found")
     reg.unregister(cycle)
-    data_dir = settings.navdat_full_path.parent
-    fb_path = data_dir / f"navdata_{cycle}.fb.zst"
-    if fb_path.exists():
-        os.remove(fb_path)
-    # Also clean up legacy .fb if present
-    legacy_fb = data_dir / f"navdata_{cycle}.fb"
-    if legacy_fb.exists():
-        os.remove(legacy_fb)
     return {"success": True, "cycle": cycle}
 
 
@@ -720,6 +752,16 @@ def _do_build_navdata(
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
+# Upload limits for navdata zip files
+_MAX_UPLOAD_SIZE = 200 * 1024 * 1024  # 200 MB
+_MAX_DECOMPRESSED_SIZE = 1024 * 1024 * 1024  # 1 GB
+
+
+def _is_path_traversal(name: str) -> bool:
+    """Detect archive members that escape the extraction directory."""
+    return name.startswith("/") or ".." in Path(name).parts
+
+
 @app.post("/api/admin/navdata/upload")
 async def upload_navdata(
     x_admin_key: str = Header(default=""),
@@ -738,29 +780,51 @@ async def upload_navdata(
     db_path = None
 
     try:
-        # Save uploaded file
+        # Save uploaded file with size limit
         upload_path = Path(tmp_dir) / "upload.zip"
+        total_size = 0
         with open(upload_path, "wb") as f:
-            shutil.copyfileobj(file.file, f)
+            while True:
+                chunk = file.file.read(8192)
+                if not chunk:
+                    break
+                total_size += len(chunk)
+                if total_size > _MAX_UPLOAD_SIZE:
+                    raise HTTPException(status_code=413, detail="Upload too large")
+                f.write(chunk)
 
-        # Extract zip
+        if not zipfile.is_zipfile(upload_path):
+            raise HTTPException(status_code=400, detail="Uploaded file is not a valid zip archive")
+
+        # Extract zip with decompression-bomb and path-traversal protection
         with zipfile.ZipFile(upload_path, "r") as zf:
+            decompressed_total = sum(info.file_size for info in zf.infolist())
+            if decompressed_total > _MAX_DECOMPRESSED_SIZE:
+                raise HTTPException(status_code=413, detail="Zip contents too large")
+
+            for info in zf.infolist():
+                if _is_path_traversal(info.filename):
+                    raise HTTPException(
+                        status_code=400, detail=f"Invalid archive member: {info.filename}"
+                    )
+
             zf.extractall(tmp_dir)
 
         # Find .db3 file (Fenix navdata)
+        db3_files = []
         for root, _dirs, files in os.walk(tmp_dir):
             for name in files:
                 if name.lower().endswith(".db3"):
-                    db_path = Path(root) / name
-                    break
-            if db_path:
-                break
+                    db3_files.append(Path(root) / name)
 
-        if db_path is None:
+        if len(db3_files) == 0:
             record_error(
                 "Upload failed: no .db3 file found in zip", "/api/admin/navdata/upload", "POST", 400
             )
             raise HTTPException(status_code=400, detail="No .db3 file found in uploaded zip")
+        if len(db3_files) > 1:
+            raise HTTPException(status_code=400, detail="Multiple .db3 files found in uploaded zip")
+        db_path = db3_files[0]
 
         # Validate and extract cycle info from db
         try:

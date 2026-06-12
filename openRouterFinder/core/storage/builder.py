@@ -281,11 +281,11 @@ def build_from_fenix(
             progress(step, current, total)
 
     # Build all tables
-    nodes = _build_nodes(cursor, builder, lambda c, t: _progress("waypoints", c, t))
+    nodes, id_to_iid = _build_nodes(cursor, builder, lambda c, t: _progress("waypoints", c, t))
     processed += counts["waypoints"]
     _progress("waypoints", counts["waypoints"], counts["waypoints"])
 
-    edges = _build_edges(cursor, builder, lambda c, t: _progress("airways", c, t))
+    edges = _build_edges(cursor, builder, id_to_iid, lambda c, t: _progress("airways", c, t))
     processed += counts["airways"]
     _progress("airways", counts["airways"], counts["airways"])
 
@@ -400,15 +400,18 @@ def build_from_fenix(
 # ---------------------------------------------------------------------------
 
 
-def _build_nodes(cursor, builder, progress=None) -> list[int]:
-    cursor.execute("SELECT ID, Ident, Latitude, Longtitude FROM Waypoints")
+def _build_nodes(cursor, builder, progress=None) -> tuple[list[int], dict[int, int]]:
+    cursor.execute("SELECT ID, Ident, Latitude, Longtitude FROM Waypoints ORDER BY ID")
     rows = cursor.fetchall()
     total = len(rows)
     nodes = []
+    id_to_iid: dict[int, int] = {}
     for i, row in enumerate(rows):
         name = builder.CreateString(row["Ident"] or "")
+        iid = i
+        id_to_iid[row["ID"]] = iid
         NodeStart(builder)
-        NodeAddIid(builder, (row["ID"] or 1) - 1)
+        NodeAddIid(builder, iid)
         NodeAddName(builder, name)
         NodeAddLat(builder, row["Latitude"] or 0.0)
         NodeAddLon(builder, row["Longtitude"] or 0.0)
@@ -417,7 +420,7 @@ def _build_nodes(cursor, builder, progress=None) -> list[int]:
             progress(i, total)
     if progress:
         progress(total, total)
-    return nodes
+    return nodes, id_to_iid
 
 
 # ---------------------------------------------------------------------------
@@ -425,7 +428,7 @@ def _build_nodes(cursor, builder, progress=None) -> list[int]:
 # ---------------------------------------------------------------------------
 
 
-def _build_edges(cursor, builder, progress=None) -> list[int]:
+def _build_edges(cursor, builder, id_to_iid: dict[int, int], progress=None) -> list[int]:
     cursor.execute("""
         SELECT al.Waypoint1ID, al.Waypoint2ID, aw.Ident, al.Level
         FROM AirwayLegs al
@@ -440,9 +443,11 @@ def _build_edges(cursor, builder, progress=None) -> list[int]:
         level = {"B": AirwayLevel.Both, "H": AirwayLevel.High, "L": AirwayLevel.Low}.get(
             level_str, AirwayLevel.Both
         )
+        nfrom = id_to_iid.get(row["Waypoint1ID"], -1)
+        nend = id_to_iid.get(row["Waypoint2ID"], -1)
         EdgeStart(builder)
-        EdgeAddNfrom(builder, (row["Waypoint1ID"] or 1) - 1)
-        EdgeAddNend(builder, (row["Waypoint2ID"] or 1) - 1)
+        EdgeAddNfrom(builder, nfrom)
+        EdgeAddNend(builder, nend)
         EdgeAddName(builder, name)
         EdgeAddLevel(builder, level)
         edges.append(EdgeEnd(builder))
@@ -501,7 +506,11 @@ def _build_airports(cursor, builder, wp_names: dict[int, str], progress=None) ->
         terminals_by_airport.setdefault(row["AirportID"], []).append(row)
 
     # 5. Fetch all terminal legs in one query
-    cursor.execute("""
+    # Determine available ordering column (SeqNumber preferred, fall back to ID)
+    cursor.execute("PRAGMA table_info(TerminalLegs)")
+    terminal_legs_columns = {col["name"] for col in cursor.fetchall()}
+    seq_col = "SeqNumber" if "SeqNumber" in terminal_legs_columns else "tl.ID"
+    cursor.execute(f"""
         SELECT tl.ID, tl.TerminalID, tl.WptID, tl.WptLat, tl.WptLon,
                tl.Transition, tl.Course, tl.Distance, tl.Alt, tl.Vnav,
                tl.TurnDir, tl.Type, tl.TrackCode, tl.NavID, tl.NavLat,
@@ -510,10 +519,13 @@ def _build_airports(cursor, builder, wp_names: dict[int, str], progress=None) ->
                tle.SpeedLimit
         FROM TerminalLegs tl
         LEFT JOIN TerminalLegsEx tle ON tl.ID = tle.ID
+        ORDER BY tl.TerminalID, {seq_col}
     """)
     legs_by_terminal: dict[int, list] = {}
     for row in cursor.fetchall():
         legs_by_terminal.setdefault(row["TerminalID"], []).append(row)
+    for terminal_id, legs in legs_by_terminal.items():
+        legs.sort(key=lambda r: r.get("SeqNumber") or r["ID"])
 
     # 6. Fetch all transitions in one query
     cursor.execute("""
@@ -675,18 +687,21 @@ def _runway_base_name(ident: str) -> str:
 def _decode_ils_freq(raw_freq) -> str:
     """Decode Fenix ILS frequency from BCD-like hex encoding.
 
-    Fenix stores ILS frequency as an integer whose hexadecimal digits
-    represent the frequency in BCD. Trailing zeros are padding.
+    Fenix stores ILS frequency as an integer whose low 5 hexadecimal digits
+    represent the frequency in BCD with two implied decimal places.
     Examples: 0x01085000 (17321984) -> 108.50 MHz,
-              0x01115500 (17913088) -> 111.55 MHz.
+              0x01115500 (17913088) -> 111.55 MHz,
+              0x01100000 (17825792) -> 110.00 MHz.
     """
     if not raw_freq:
         return ""
     try:
-        hex_str = f"{int(raw_freq):X}".rstrip("0")
-        if not hex_str:
+        # Format to at least 5 hex digits; the low 5 digits are the BCD frequency.
+        hex_str = f"{int(raw_freq):010X}"
+        digits = hex_str[-5:]
+        if not digits or digits == "00000":
             return ""
-        freq = int(hex_str) / (10 ** (len(hex_str) - 3))
+        freq = int(digits) / 100.0
         return f"{freq:.2f} MHz"
     except (ValueError, TypeError):
         return str(raw_freq)

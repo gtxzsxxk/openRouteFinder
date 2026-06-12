@@ -299,10 +299,10 @@ class RouteEngine:
         if airway_route is not None:
             airway_route = self._reassign_airways(airway_route, sid_boundary.iid)
 
-        # Fallback: if filtered STAR is unreachable via pure airway graph,
-        # try auto-selected STAR (matches old mixed-graph behaviour where
-        # all procedures were implicitly available).
-        if airway_route is None and star_entry:
+        # Fallback: if no STAR filter was requested and the selected STAR is
+        # unreachable via pure airway graph, try auto-selected STAR (matches old
+        # mixed-graph behaviour where all procedures were implicitly available).
+        if airway_route is None and not star_entry:
             fallback_candidates = self._collect_procedure_candidates(
                 star_conn, is_sid=False, filter_name=None, sid_conn=sid_conn, star_conn=star_conn
             )
@@ -1503,26 +1503,26 @@ class RouteEngine:
         if not sid_candidates or not star_candidates:
             return None
 
-        # Build forbidden set from all procedure point names and transition
-        # point names.  Use names instead of IIDs because temp_nodes may be
-        # cleared in cached connections.
-        forbidden_names = set()
+        # Build forbidden set from all procedure point coordinates.  Use
+        # (name, lat, lon) keys instead of names alone so that airway nodes
+        # sharing a name but located elsewhere are not blocked.
+        forbidden_keys = set()
         for proc, boundary, key, t_name in sid_candidates:
             for pt in proc.points:
-                forbidden_names.add(pt[0])
+                forbidden_keys.add((pt[0], round(pt[1], 6), round(pt[2], 6)))
             for _trans_name, trans_pts in proc.transitions:
                 for pt in trans_pts:
-                    forbidden_names.add(pt[0])
+                    forbidden_keys.add((pt[0], round(pt[1], 6), round(pt[2], 6)))
         for proc, boundary, key, t_name in star_candidates:
             for pt in proc.points:
-                forbidden_names.add(pt[0])
+                forbidden_keys.add((pt[0], round(pt[1], 6), round(pt[2], 6)))
             for _trans_name, trans_pts in proc.transitions:
                 for pt in trans_pts:
-                    forbidden_names.add(pt[0])
+                    forbidden_keys.add((pt[0], round(pt[1], 6), round(pt[2], 6)))
 
         # STAR boundaries must be reachable from airway, so remove them from forbidden
         for proc, boundary, key, t_name in star_candidates:
-            forbidden_names.discard(boundary.name)
+            forbidden_keys.discard((boundary.name, round(boundary.px, 6), round(boundary.py, 6)))
 
         # Prune candidates to the most promising N per side (by boundary
         # distance to the opposite airport) to keep A* search fast.
@@ -1593,12 +1593,11 @@ class RouteEngine:
         # Local bindings for hot loop
         node_list = self.node_list
         has_non_t = self._node_has_non_t
-        _PI = 3.1415926535898
-        _R = 6378.137
-        _end_rlat = end_lat * _PI / 180.0
-        _end_rlon = end_lon * _PI / 180.0
+        _end_rlat = end_lat * math.pi / 180.0
+        _end_rlon = end_lon * math.pi / 180.0
         _ce = math.cos(_end_rlat)
-        forbidden = forbidden_names
+        _R = 6371.0
+        forbidden = forbidden_keys
         num_nodes = self.num_nodes
 
         while queue:
@@ -1616,8 +1615,8 @@ class RouteEngine:
                         dists[target_iid] = nd
                         prev[target_iid] = (curr, "SID", key, proc, t_name, boundary)
                         target_node = node_list[target_iid]
-                        _rlat = target_node.px * _PI / 180.0
-                        _rlon = target_node.py * _PI / 180.0
+                        _rlat = target_node.px * math.pi / 180.0
+                        _rlon = target_node.py * math.pi / 180.0
                         _dlat = _rlat - _end_rlat
                         _dlon = _rlon - _end_rlon
                         _a = (math.sin(_dlat / 2) ** 2
@@ -1633,7 +1632,7 @@ class RouteEngine:
                     for edge in curr_node.next_list:
                         nend = edge.nend
                         next_node = node_list[nend]
-                        if next_node.name in forbidden:
+                        if next_node.node_key() in forbidden:
                             continue
                         ename = edge.name
                         if (ename and ename[0] == "T" and len(ename) > 1
@@ -1643,8 +1642,8 @@ class RouteEngine:
                         if nd < dists[nend]:
                             dists[nend] = nd
                             prev[nend] = (curr, ename, None, None, None, None)
-                            _rlat = next_node.px * _PI / 180.0
-                            _rlon = next_node.py * _PI / 180.0
+                            _rlat = next_node.px * math.pi / 180.0
+                            _rlon = next_node.py * math.pi / 180.0
                             _dlat = _rlat - _end_rlat
                             _dlon = _rlon - _end_rlon
                             _a = (math.sin(_dlat / 2) ** 2
