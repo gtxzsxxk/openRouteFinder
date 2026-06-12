@@ -140,9 +140,9 @@ Copy `.env.example` to `.env`:
 
 `build_sid()` and `build_star()` in `core/airport.py` are symmetric: one constructs departure procedures, the other arrival procedures. When modifying either, the other **must** receive the corresponding structural fix (reversed logic). Do not copy-paste code between them; extract shared helpers (e.g., `_register_common_procedures()`) instead.
 
-### Synthetic Marker Filtering
+### Empty-Name Marker Filtering
 
-Heading+distance markers matching `^D\d+[A-Z]?$` (e.g., `D091M`, `D123`, `D194Q`) must **never** appear as standalone points in built procedures. They should be filtered out in `_leg_to_point()`; if one appears in a procedure, it indicates a parsing or merging bug.
+Fenix navdata stores all procedure waypoints in the `Waypoints` table. D-prefixed identifiers (e.g., `D321Y`) are real waypoints in this data set, not synthetic heading+distance markers, so `_leg_to_point()` does **not** filter them by name. Only legs whose decoded `Name()` is empty or `None` are filtered out. If an empty-name marker appears as a standalone point in a built procedure, it indicates a parsing or merging bug.
 
 ### Procedure Quality Invariants
 

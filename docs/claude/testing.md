@@ -48,13 +48,13 @@ PYTHONPATH=. DISABLE_CAPTCHA=true pytest tests/test_integration_routes.py -v
 
 | Test | What It Checks |
 |------|----------------|
-| `test_no_synthetic_markers_in_procedures` | D#### markers must not appear in any procedure |
+| `test_no_synthetic_markers_in_procedures` | Empty-name markers must not appear as standalone points in any procedure |
 | `test_procedure_edge_counts_reasonable` | No isolated nodes (degree 0), no branching within single procedure (degree >2 after dedup) |
 | `test_procedure_paths_no_teleportation` | No leg exceeds distance threshold (domestic ≤100nm, international ≤300nm) |
 | `test_no_runway_all_with_single_point` | Runway="ALL" must have >1 point |
 | `test_sid_runway_endpoint_consistent` | If any SID for a runway starts with DERxx/DExx, all SIDs for that runway must share the same endpoint |
 | `test_zbaa_36l_sid_circles_beijing` | 36L northbound SIDs must circle Beijing west (lon < 116.5) |
-| `test_star_final_approach_reasonable` | STARs have ≥2 points, no synthetic markers |
+| `test_star_final_approach_reasonable` | STARs have ≥2 points, no empty-name markers |
 | `test_zggg_ikavo3_approach_bridge_exists` | IKAVO3 for runways 19R/20L/20R must have a waypoint between LUPVU and the airport |
 | `test_zggg_ikavo3_has_complete_points` | IKAVO3 for all runways must have a complete approach path with >2 points |
 | `test_procedure_internal_edges_no_hub_nodes` | Every edge in pooled `internal_edges` must belong to at least one procedure's consecutive point pair |
