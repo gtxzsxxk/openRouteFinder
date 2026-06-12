@@ -22,7 +22,7 @@
 | ~~14~~ | ~~`core/graph.py`~~ | ~~`great_circle_distance_km` 使用 `asin(sqrt(a))` 对浮点误差敏感；`PI` 精度低于 `math.pi`；`EARTH_RADIUS` 使用赤道半径而非平均半径~~ | ~~6-7 行，14-26 行~~ | ~~改用 `atan2` 公式；使用 `math.pi`；使用 6371.0 km~~ |
 | ~~15~~ | ~~`webFinder/src/composables/useMap.ts`~~ | ~~`initMap` 中 `MutationObserver` 和 `matchMedia` 注册后未保存引用，组件卸载时无法移除，内存泄漏~~ | ~~59-111 行~~ | ~~保存引用并在 cleanup 中移除~~ |
 | ~~16~~ | ~~`webFinder/src/views/AdminView.vue`~~ | ~~`attachProgress` 中 `activeEsCleanup` 为单例，多 build 时前一个 SSE 被静默覆盖且无法清理~~ | ~~441-463 行~~ | ~~用 Map<buildId, cleanup> 管理~~ |
-| 17 | `webFinder/src/components/AirportAutocomplete.vue` | `debounceTimer` 为模块级变量，多实例同时存在时互相覆盖 | 57 行 | 改为组件实例级 ref |
+| ~~17~~ | ~~`webFinder/src/components/AirportAutocomplete.vue`~~ | ~~`debounceTimer` 为模块级变量，多实例同时存在时互相覆盖~~ | ~~57 行~~ | ~~改为组件实例级 ref~~ |
 
 ### 中等（性能/可维护性/代码异味）
 
@@ -49,19 +49,19 @@
 | 36 | `core/storage/builder.py` | `_build_grid_mora` 用 `SELECT *` 硬编码 30 列，表结构变化会静默出错 | 1029-1057 行 | 查询明确列名并校验 |
 | ~~37~~ | ~~`core/data_loader.py`~~ | ~~`_sid_cache` / `_star_cache` 无大小限制，长时间运行无限增长~~ | ~~358-360 行~~ | ~~设置 LRU 或 maxlen~~ |
 | 38 | `core/data_loader.py` | `_parse_airport_detail` 依赖 legacy `NavGraph.airport_maps`，modern 路径未使用，代码已死 | 291-332 行 | 清理死代码 |
-| 39 | `core/data_loader.py` | `_init_registry()` 未加锁，多线程同时初始化可能创建多个 Registry | 117-131 行 | 加锁保护 |
-| ~~40~~ | ~~`core/admin.py`~~ | ~~`unique_ips` 用 deque 成员检查 O(n)，且 `total_requests` 整数无限增长~~ | ~~18, 30-31 行~~ | ~~改用 set 辅助；按需重置 total_requests~~ |
+| ~~39~~ | ~~`core/data_loader.py`~~ | ~~`_init_registry()` 未加锁，多线程同时初始化可能创建多个 Registry~~ | ~~117-131 行~~ | ~~加锁保护~~ |
+| 40 | `core/admin.py` | `unique_ips` 已改用 OrderedDict 实现 O(1) 检查/淘汰；`total_requests` 仍无限增长 | 18, 30-31 行 | 按需重置 `total_requests` 或改为计数窗口 |
 | 41 | `utils/metar.py` | `fetch_metar` 中 `requests.get` 成功后先写文件再更新内存，写文件失败则内存不更新 | 21-31 行 | 先更新内存或统一事务 |
 | ~~42~~ | ~~`utils/metar.py`~~ | ~~`read_metar` fallback 读文件未加锁，与 `fetch_metar` 写文件可能并发读到半写文件~~ | ~~56 行~~ | ~~加锁或临时文件+重命名~~ |
 | ~~43~~ | ~~`utils/metar.py`~~ | ~~`start_metar_updater` 线程在应用关闭时无法优雅停止~~ | ~~68-80 行~~ | ~~使用 `threading.Event` 控制退出~~ |
 | ~~44~~ | ~~`utils/validcode.py`~~ | ~~`_get_font` 每次调用重新加载字体文件~~ | ~~11-20 行~~ | ~~缓存字体对象~~ |
 | ~~45~~ | ~~`utils/validcode.py`~~ | ~~使用 `random` 而非 `secrets` 生成验证码~~ | ~~25-35 行~~ | ~~改用 `secrets`~~ |
-| 46 | `config.py` | `navdat_full_path` / `apdat_full_path` 未处理用户配置绝对路径的情况 | 31-36 行 | 判断路径是否为绝对路径 |
+| ~~46~~ | ~~`config.py`~~ | ~~`navdat_full_path` / `apdat_full_path` 未处理用户配置绝对路径的情况~~ | ~~31-36 行~~ | ~~判断路径是否为绝对路径~~ |
 | 47 | `config.py` | `navdat_path` / `apdat_path` 默认指向 legacy pickle 文件，但项目已转向 FlatBuffers | 23-24 行 | 默认改为 FlatBuffers 路径或明确文档说明 |
 | 48 | `api.py` | `admin` 接口在每个端点重复写相同的密钥校验，未使用 `Depends` | 537/546/562/577/590/723/813 行 | 抽取 `verify_admin_key` 依赖 |
 | 49 | `api.py` | `ThreadPoolExecutor(max_workers=4)` 与 `asyncio.Semaphore(8)` 组合不一致，第 5-8 个任务阻塞事件循环 | 165 行 | 统一信号量与线程池大小 |
 | ~~50~~ | ~~`api.py`~~ | ~~`_do_build_navdata` 中压缩后数据直接 `write_bytes`，写入中断留下损坏文件~~ | ~~689-694 行~~ | ~~先写临时文件再原子重命名~~ |
-| 51 | `api.py` | `_airport_prefix_index` 在 navdata 热更新后未重建 | 172-173 行 | 在 Registry 注册/注销 cycle 后触发索引重建 |
+| ~~51~~ | ~~`api.py`~~ | ~~`_airport_prefix_index` 在 navdata 热更新后未重建~~ | ~~172-173 行~~ | ~~在 Registry 注册/注销 cycle 后触发索引重建~~ |
 | 52 | `api.py` | `loop.run_in_executor(None, ...)` 使用默认线程池，与 `_dijkstra_pool` 不一致 | 790 行 | 统一使用 `_dijkstra_pool` |
 | 53 | `webFinder/src/composables/useMap.ts` | `nodes.length === 0` 时提前 return 未重置 `isUpdating`，地图卡死 | 231-235 行 | `return` 前重置 `isUpdating` |
 | 54 | `webFinder/src/composables/useMap.ts` | `fitBounds` 每次更新都执行 1.5s 动画，用户正在平移/缩放时强制拉回 | 792-813 行 | 增加用户交互检测或仅首次动画 |
@@ -71,9 +71,9 @@
 | ~~58~~ | ~~`webFinder/src/views/HomeView.vue`~~ | ~~`queryTime` 计时器使用 `setInterval(10ms)` 精度浪费~~ | ~~131-162 行~~ | ~~用 `performance.now()` 单次计算~~ |
 | 59 | `webFinder/src/views/HomeView.vue` | Waypoints 列表使用 `:key="i"`（索引作为 key） | 86-107 行 | 用 `node.name + i` 作为 key |
 | ~~60~~ | ~~`webFinder/src/components/SearchForm.vue`~~ | ~~`canSubmit` 仅校验 ICAO 长度为 4，用户可输入 `!!!!`~~ | ~~142-144 行~~ | ~~增加正则 `/^[A-Z0-9]{4}$/`~~ |
-| 61 | `webFinder/src/components/ProcedureSelector.vue` | 404 时设置 `options = []` 但不设置 error，用户无法区分"无数据"和"机场不存在" | 64-104 行 | 404 时显示特定提示 |
+| ~~61~~ | ~~`webFinder/src/components/ProcedureSelector.vue`~~ | ~~404 时设置 `options = []` 但不设置 error，用户无法区分"无数据"和"机场不存在"~~ | ~~64-104 行~~ | ~~404 时显示特定提示~~ |
 | 62 | `webFinder/src/components/SIDSelector.vue` | `selectedIndex` setter 接收 string（Vue 自动转换），类型存在隐式转换风险 | 45-48 行 | 显式 `Number(val)` |
-| 63 | `webFinder/src/i18n/locales/en.ts` | `weather.light/heavy` 值带尾部空格 `"Light "` / `"Heavy "` | en.ts | 移除尾部空格 |
+| ~~63~~ | ~~`webFinder/src/i18n/locales/en.ts`~~ | ~~`weather.light/heavy` 值带尾部空格 `"Light "` / `"Heavy "`~~ | ~~en.ts~~ | ~~移除尾部空格~~ |
 
 ### 轻微（风格/文档/建议）
 
@@ -93,7 +93,7 @@
 | 75 | `api.py` | SSE 端点 `while True` + `asyncio.sleep(1)`，连接断开后不会立即感知 | 813 行 | 增加 `request.is_disconnected()` 检查 |
 | 76 | `api.py` | `startup` 中 `start_metar_updater()` 放在 `_build_airport_index()` 之后，启动失败时 METAR 线程仍可能启动 | 854 行 | 将 METAR 启动放最后并处理异常 |
 | 77 | `app.py` | `uvicorn.run` 直接运行模块级 `app`，缺少生产参数 | 9 行 | 通过 CLI 或配置启动 |
-| 78 | `config.py` | `env_file=".env"` 是相对路径，取决于工作目录 | 12 行 | 改为 `PROJECT_ROOT / ".env"` |
+| ~~78~~ | ~~`config.py`~~ | ~~`env_file=".env"` 是相对路径，取决于工作目录~~ | ~~12 行~~ | ~~改为 `PROJECT_ROOT / ".env"`~~ |
 | 79 | `config.py` | `metar_full_path` 硬编码为 `data/metar.txt` | 39-41 行 | 可配置化 |
 | 80 | `utils/metar_parser.py` | `"NOT" in tokens and "AVAILABLE" in tokens` 过于宽松 | 85-86 行 | 匹配完整短语 |
 | 81 | `utils/metar_parser.py` | 能见度只解析单个 token，未处理 `1 1/2SM` 等 | 114-118 行 | 扩展解析 |
