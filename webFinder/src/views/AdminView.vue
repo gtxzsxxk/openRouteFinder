@@ -441,7 +441,10 @@ function handleDelete(cycle: string) {
 let activeEsCleanup: (() => void) | null = null
 
 function attachProgress(buildId: string) {
-  if (activeEsCleanup) return
+  if (activeEsCleanup) {
+    activeEsCleanup()
+    activeEsCleanup = null
+  }
   isBuilding.value = true
   activeEsCleanup = connectProgress(buildId, (p) => {
     buildProgress.value = {

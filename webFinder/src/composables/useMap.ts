@@ -40,6 +40,9 @@ export function useMap(
   const pendingUpdate = ref(false)
   const updateTimer = ref<ReturnType<typeof setTimeout> | null>(null)
   const currentStyle = ref(isDarkMode() ? STYLE_DARK : STYLE_LIGHT)
+  const mqRef = ref<MediaQueryList | null>(null)
+  const mqCallbackRef = ref<((e: MediaQueryListEvent | MediaQueryList) => void) | null>(null)
+  const observerRef = ref<MutationObserver | null>(null)
 
   function getColors() {
     const dark = isDarkMode()
@@ -75,6 +78,7 @@ export function useMap(
     })
 
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    mqRef.value = mq
     const onMediaChange = (e: MediaQueryListEvent | MediaQueryList) => {
       if (document.documentElement.getAttribute('data-theme')) return
       const newStyle = e.matches ? STYLE_DARK : STYLE_LIGHT
@@ -86,6 +90,7 @@ export function useMap(
         })
       }
     }
+    mqCallbackRef.value = onMediaChange
     if (mq.addEventListener) {
       mq.addEventListener('change', onMediaChange)
     } else if ((mq as any).addListener) {
@@ -107,7 +112,39 @@ export function useMap(
         }
       }
     })
+    observerRef.value = observer
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+  }
+
+  function destroyMap() {
+    const mq = mqRef.value
+    const cb = mqCallbackRef.value
+    if (mq && cb) {
+      if (mq.removeEventListener) {
+        mq.removeEventListener('change', cb)
+      } else if ((mq as any).removeListener) {
+        (mq as any).removeListener(cb)
+      }
+    }
+    mqRef.value = null
+    mqCallbackRef.value = null
+
+    const observer = observerRef.value
+    if (observer) {
+      observer.disconnect()
+      observerRef.value = null
+    }
+
+    const m = map.value
+    if (m) {
+      try {
+        m.remove()
+      } catch {
+        // ignore
+      }
+      map.value = null
+      isMapReady.value = false
+    }
   }
 
   function safeRemoveLayer(m: any, id: string) {
@@ -835,5 +872,5 @@ export function useMap(
   watch(selectedSIDTransition, () => { scheduleUpdate() })
   watch(selectedSTARTransition, () => { scheduleUpdate() })
 
-  return { map, isMapReady, initMap, updateMap }
+  return { map, isMapReady, initMap, updateMap, destroyMap }
 }
