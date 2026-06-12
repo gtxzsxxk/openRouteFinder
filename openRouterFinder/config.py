@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     local_asdata_path: str = ""
     disable_captcha: bool = False
 
+    # LRU cache size for built airport SID/STAR connections.
+    # Each entry holds the full procedure graph for one airport; large airports
+    # can be tens to hundreds of KB. Default 1000 covers ~1000 busy airports.
+    airport_connection_cache_size: int = 1000
+
     @property
     def navdat_full_path(self) -> Path:
         return PROJECT_ROOT / self.navdat_path

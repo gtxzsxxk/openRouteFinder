@@ -362,8 +362,7 @@ def _get_airport_detail_from_fb(nav, icao: str) -> dict | None:
 # Module-level caches for airport connections. AirportConnection objects are
 # read-only after construction, so they are safe to share across requests.
 # OrderedDict + move_to_end gives simple LRU eviction so long-running processes
-# do not grow without bound.
-_MAX_AIRPORT_CACHE_SIZE = 1000
+# do not grow without bound. Size is controlled via AIRPORT_CONNECTION_CACHE_SIZE.
 _sid_cache: OrderedDict = OrderedDict()
 _star_cache: OrderedDict = OrderedDict()
 _cache_lock = Lock()
@@ -481,7 +480,8 @@ def _get_airport_connection(
     with _cache_lock:
         cache[key] = conn
         cache.move_to_end(key)
-        while len(cache) > _MAX_AIRPORT_CACHE_SIZE:
+        max_size = settings.airport_connection_cache_size
+        while len(cache) > max_size:
             cache.popitem(last=False)
     return conn
 
