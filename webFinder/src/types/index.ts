@@ -76,7 +76,7 @@ export type ProcedureTuple = [string, string, [string, number, number][], [strin
 export type SID = Record<string, ProcedureTuple[]>
 export type STAR = Record<string, ProcedureTuple[]>
 
-export interface RouteNode extends Waypoint {}
+export type RouteNode = Waypoint
 
 export interface RouteResult {
   data_version: string

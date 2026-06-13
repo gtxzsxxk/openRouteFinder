@@ -22,8 +22,8 @@
     >
       <p class="text-error text-sm">{{ store.error }}</p>
       <button
-        @click="store.setError(null)"
         class="text-error/70 hover:text-error transition-colors"
+        @click="store.setError(null)"
       >
         <X class="w-4 h-4" />
       </button>
@@ -35,8 +35,8 @@
       <RouteHero
         :route="store.routeResult.route"
         :distance="store.routeResult.distance"
-        :totalTime="store.routeResult.total_time"
-        :dataVersion="store.routeResult.data_version"
+        :total-time="store.routeResult.total_time"
+        :data-version="store.routeResult.data_version"
       />
 
       <!-- Bento Grid -->

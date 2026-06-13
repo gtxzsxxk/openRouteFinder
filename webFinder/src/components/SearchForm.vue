@@ -12,12 +12,12 @@
       </div>
 
       <button
-        @click="swapAirports"
         :class="[
           'self-end h-14 w-14 flex items-center justify-center bg-bg-elevated rounded-xl border border-border text-text-secondary hover:text-text-primary hover:bg-bg-surface transition-all duration-200 shrink-0',
           isSwapping ? 'rotate-180' : '',
         ]"
         :title="$t('common.swap')"
+        @click="swapAirports"
       >
         <ArrowLeftRight class="w-5 h-5" />
       </button>
@@ -60,15 +60,15 @@
     <!-- Procedure Selection — compact, no card wrapper -->
     <div v-if="showProcedureSelectors" class="grid grid-cols-1 md:grid-cols-2 gap-4">
       <ProcedureSelector
+        v-model="sidExit"
         :icao="departure"
         type="sid"
-        v-model="sidExit"
         :cycle="selectedCycle"
       />
       <ProcedureSelector
+        v-model="starEntry"
         :icao="arrival"
         type="star"
-        v-model="starEntry"
         :cycle="selectedCycle"
       />
     </div>
@@ -76,9 +76,9 @@
     <!-- Search Button — prominent, standalone, centered capsule -->
     <div class="pt-2">
       <button
-        @click="onSearchClick"
         :disabled="!canSubmit || store.isLoading || !hasAnyCycle"
         class="w-full md:w-auto md:min-w-[280px] h-14 mx-auto block bg-accent hover:bg-accent-hover disabled:bg-bg-elevated disabled:text-text-tertiary disabled:cursor-not-allowed disabled:shadow-none text-white font-semibold rounded-full transition-all duration-200 flex items-center justify-center gap-2.5 shadow-md hover:shadow-lg active:scale-[0.98]"
+        @click="onSearchClick"
       >
         <Loader2 v-if="store.isLoading" class="w-5 h-5 animate-spin" />
         <Search v-else class="w-5 h-5" />
