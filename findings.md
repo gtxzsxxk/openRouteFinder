@@ -102,7 +102,7 @@
 | ~~84~~ | ~~`webFinder/vite.config.ts`~~ | ~~缺少 `sourcemap` 配置，生产调试困难~~ | ~~52-55 行~~ | ~~已设置 `build.sourcemap: true`~~ |
 | ~~85~~ | ~~`webFinder/package.json`~~ | ~~`version: "0.0.0"` 未维护~~ | ~~4 行~~ | ~~已更新为 `0.1.0`~~ |
 | ~~86~~ | ~~`webFinder/package.json`~~ | ~~缺少 `lint`、`test`、`typecheck` 脚本~~ | ~~7-9 行~~ | ~~已添加 `typecheck` 等脚本~~ |
-| 87 | `webFinder/package.json` | 缺少 `eslint`/`prettier`，代码风格无统一约束 | 23-30 行 | 已补充 typecheck/lint/test 脚本；eslint/prettier 配置仍待引入 |
+| ~~87~~ | ~~`webFinder/package.json`~~ | ~~缺少 `eslint`/`prettier`，代码风格无统一约束~~ | ~~23-30 行~~ | ~~已安装 eslint/prettier/vue/ts 依赖，新增 eslint.config.js、.prettierrc 及 lint/format 脚本~~ |
 
 ## 文档对齐问题
 
