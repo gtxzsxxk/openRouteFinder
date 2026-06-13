@@ -43,7 +43,7 @@ Not Available
 
 - Node.js 20+（前端 / for frontend）
 - Python 3.10+ with pip（后端 / for backend）
-- 导航数据文件 / Navigation data files: `airport_2206.air`, `navidata_2206.map`
+- 导航数据文件 / Navigation data files: `navdata_*.fb.zst` (FlatBuffers, modern) or legacy `airport_*.air` + `navidata_*.map`
 
 ### 开发环境 / Development
 
@@ -89,6 +89,10 @@ cd openRouterFinder && uvicorn api:app --host 0.0.0.0 --port 9807
 | GET | `/api/validcode` | 获取验证码 | Get captcha |
 | GET | `/health` | 健康检查 | Health check |
 | GET | `/api/admin` | 管理统计 | Admin statistics |
+| GET | `/api/admin/navdata` | 列出导航数据周期 | List navdata cycles |
+| GET | `/api/admin/navdata/builds` | 活跃构建列表 | Active builds |
+| GET | `/api/admin/navdata/{cycle}` | 单个周期元数据 | Cycle metadata |
+| DELETE | `/api/admin/navdata/{cycle}` | 删除导航数据周期 | Delete navdata cycle |
 | POST | `/api/admin/navdata/upload` | 上传 Fenix 导航数据 | Upload Fenix navdata |
 | GET | `/api/admin/navdata/build-progress/{build_id}` | 构建进度 SSE | Build progress SSE |
 

@@ -20,8 +20,10 @@ class Settings(BaseSettings):
     bing_maps_key: str = ""
     admin_key: str = ""
 
-    navdat_path: str = "data/navidata_2206.map"
-    apdat_path: str = "data/airport_2206.air"
+    # Navdata paths. Modern FlatBuffers files live in data/; legacy pickle files
+    # are only used if get_nav_graph() is called explicitly.
+    navdat_path: str = "data/navdata_2405.fb.zst"
+    apdat_path: str = "data/airport_2405.air"
     navdat_cycle: str = "AUTO"
 
     local_asdata_path: str = ""
@@ -31,6 +33,9 @@ class Settings(BaseSettings):
     # Each entry holds the full procedure graph for one airport; large airports
     # can be tens to hundreds of KB. Default 1000 covers ~1000 busy airports.
     airport_connection_cache_size: int = 1000
+
+    # METAR file location.
+    metar_path: str = "data/metar.txt"
 
     @staticmethod
     def _resolve_path(path: str) -> Path:
@@ -47,7 +52,7 @@ class Settings(BaseSettings):
 
     @property
     def metar_full_path(self) -> Path:
-        return PROJECT_ROOT / "data" / "metar.txt"
+        return self._resolve_path(self.metar_path)
 
 
 settings = Settings()

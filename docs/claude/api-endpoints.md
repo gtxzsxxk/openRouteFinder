@@ -27,7 +27,7 @@ Main route calculation endpoint.
 
 - `sidExit` / `starEntry`: Optional procedure filter waypoint names. `null` = auto-select.
 - `cycle`: Optional navdata cycle string. `null` = use latest.
-- `validCode` / `validToken`: CAPTCHA (skipped if `DISABLE_CAPTCHA=true`).
+- `validCode` / `validToken`: Required CAPTCHA fields (skipped if `DISABLE_CAPTCHA=true`).
 
 **Response (200):**
 ```json

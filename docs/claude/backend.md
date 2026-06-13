@@ -60,10 +60,10 @@ class RouteRequest(BaseModel):
 ```python
 _dijkstra_pool = ThreadPoolExecutor(max_workers=4)
 _build_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="navdata-build")
-_route_semaphore = asyncio.Semaphore(8)
+_route_semaphore = asyncio.Semaphore(4)
 ```
 
-Route calculation runs in `run_in_executor(_dijkstra_pool, ...)` because the A* engine is synchronous. The semaphore limits concurrent route requests to 8. Fenix navdata builds run serially in `_build_pool` so only one conversion happens at a time.
+Route calculation runs in `run_in_executor(_dijkstra_pool, ...)` because the A* engine is synchronous. The semaphore limits concurrent route requests to 4, matching the thread-pool size so extra requests queue without blocking the event loop. Fenix navdata builds run serially in `_build_pool` so only one conversion happens at a time.
 
 ### Airport Index
 
@@ -71,9 +71,9 @@ Route calculation runs in `run_in_executor(_dijkstra_pool, ...)` because the A* 
 
 ### Admin Endpoints
 
-- Require `x-admin-key` header matching `settings.admin_key`
-- Upload accepts zip containing Fenix `nd.db3`
-- Background build runs in separate thread, progress streamed via SSE
+- Require `x-admin-key` header matching `settings.admin_key`, validated by the shared `verify_admin_key` dependency.
+- Upload accepts zip containing Fenix `nd.db3` (max 200 MB compressed, 1 GB decompressed) with path-traversal and compression-bomb checks.
+- Background build runs in a separate thread, progress streamed via SSE. The SSE handler checks `request.is_disconnected()` to stop quickly when the client disconnects.
 
 ---
 
@@ -90,12 +90,13 @@ class Settings(BaseSettings):
     metar_update_minutes: int = 15
     bing_maps_key: str = ""
     admin_key: str = ""
-    navdat_path: str = "data/navidata_2206.map"
-    apdat_path: str = "data/airport_2206.air"
+    navdat_path: str = "data/navdata_2405.fb.zst"
+    apdat_path: str = "data/airport_2405.air"
     navdat_cycle: str = "AUTO"
     local_asdata_path: str = ""
     disable_captcha: bool = False
     airport_connection_cache_size: int = 1000
+    metar_path: str = "data/metar.txt"
 
     @property
     def navdat_full_path(self) -> Path: ...
@@ -126,7 +127,7 @@ class RouteEngine:
 
 `RouteEngine.search()` first attempts a **single mixed-graph A\*** over the combined airway + SID/STAR graph. If the mixed search cannot find a valid route that respects the requested SID/STAR constraints, it falls back to a **phase-separated search**: airway-only path between SID exit and STAR entry points, with procedure segments attached separately.
 
-1. **Candidate selection** — For each available SID/STAR procedure, calculate the boundary point's great-circle distance to the opposite airport. Keep the top 50 candidates (sorted by distance) and prune the rest. This is a simple distance-based filter, not algorithmic pruning; 50 candidates cover all standard routes without losing optimality.
+1. **Candidate selection** — For each available SID/STAR procedure, calculate the boundary point's great-circle distance to the opposite airport plus the actual procedure length. Keep the top 50 candidates (sorted by this combined score) and prune the rest. Adding procedure length prevents a long procedure that starts close to the airport from hiding a shorter but slightly farther candidate.
 2. **Start/end nodes** — SID airport node (`iid=-1`) and STAR airport node (`iid=-2`)
 3. **Priority queue** — Ordered by `f_score = g_score + heuristic`
 4. **Heuristic** — Great-circle distance to STAR airport node (admissible; satisfies triangle inequality on sphere).
@@ -144,7 +145,7 @@ class RouteEngine:
 - STAR temp nodes and edges: boundary → airport, internal edges, transition edges
 - Temp nodes use negative IIDs (starting at -3)
 
-Temp node boundary points are mapped to their corresponding airway nodes by **name** (not IID), avoiding negative-indexing bugs when the temp node's negative IID is used as a list index.
+Temp node boundary points are mapped to their corresponding airway nodes by `(name, lat, lon)` key via the precomputed `_node_index`, avoiding negative-indexing bugs when the temp node's negative IID is used as a list index.
 
 ### Pseudo-Edge Weights
 
@@ -253,7 +254,7 @@ Thread-safe: creates fresh `RouteEngine` per call. `AirportConnection` objects a
 ### registry.py — NavDataRegistry
 
 Thread-safe registry managing multiple navdata cycles:
-- Regex `^navdata_(\d{4})\.(fb|fb\.zst)$` identifies valid files
+- Regex `^navdata_(\d{4})\.((?:fb\.zst)|(?:fb))$` identifies valid files (`.fb.zst` is checked first so it is not mistaken for `.fb`)
 - `threading.RLock()` for thread safety
 - Hot reload via `_load_cycle()` (closes old mapping before replacing)
 - `get(cycle=None)` returns specific or latest cycle

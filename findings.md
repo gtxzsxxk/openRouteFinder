@@ -30,7 +30,7 @@
 |---|---|------|------|------|
 | ~~18~~ | ~~`core/dijkstra.py`~~ | ~~`search()` 维护两套独立路径（`_mixed_graph_astar` + phase-separated），行为容易不一致~~ | ~~115-409 / 1481-1802 行~~ | ~~已提取 `_build_route_response()` 共享 helper~~ |
 | 19 | `core/dijkstra.py` | T-route 过滤逻辑：当节点同时有 T 和非 T 边时，T 边被完全禁用，可能丢失最优解 | 611-621 行 | 重新评估 T-route 策略，或仅在高空航路时跳过 T 边 |
-| 20 | `core/dijkstra.py` | 候选剪枝 top 50 按到对端机场距离排序，可能丢弃综合最优解 | 1529-1545 行 | 增加说明注释，或改用 procedure 实际长度加权排序 |
+| ~~20~~ | ~~`core/dijkstra.py`~~ | ~~候选剪枝 top 50 按到对端机场距离排序，可能丢弃综合最优解~~ | ~~1529-1545 行~~ | ~~已改为 boundary distance + procedure length 综合评分排序~~ |
 | ~~21~~ | ~~`core/dijkstra.py`~~ | ~~负 IID 映射通过遍历 `node_list` 按名称找对应 airway node，O(N) 且未处理同名多节点~~ | ~~1556-1564 行~~ | ~~已改用 `_node_index` O(1) 精确匹配~~ |
 | ~~22~~ | ~~`core/dijkstra.py`~~ | ~~内联启发式计算与 `graph.py` 重复，使用局部 `_PI`/`_R`，修改不同步~~ | ~~1596-1600 行~~ | ~~已统一调用 `graph.heuristic_km`~~ |
 | ~~23~~ | ~~`core/dijkstra.py`~~ | ~~移除 airway 循环时丢弃重复 IID 后续节点，可能破坏路径连续性~~ | ~~1685-1698 行~~ | ~~已改为回溯到首次出现点并截断循环~~ |
@@ -48,7 +48,7 @@
 | 35 | `core/storage/builder.py` | `RunwayEndAddHeading` 写入 `TrueHeading`；地图渲染需要真北向，当前语义正确 | 575-579 行 | 无需修改，已在注释说明为真航向 |
 | ~~36~~ | ~~`core/storage/builder.py`~~ | ~~`_build_grid_mora` 用 `SELECT *` 硬编码 30 列，表结构变化会静默出错~~ | ~~1029-1057 行~~ | ~~已改为动态读取 `mora*` 列~~ |
 | ~~37~~ | ~~`core/data_loader.py`~~ | ~~`_sid_cache` / `_star_cache` 无大小限制，长时间运行无限增长~~ | ~~358-360 行~~ | ~~设置 LRU 或 maxlen~~ |
-| 38 | `core/data_loader.py` | `_parse_airport_detail` 依赖 legacy `NavGraph.airport_maps`，modern 路径未使用，代码已死 | 291-332 行 | 清理死代码 |
+| ~~38~~ | ~~`core/data_loader.py`~~ | ~~`_parse_airport_detail` 依赖 legacy `NavGraph.airport_maps`，modern 路径未使用，代码已死~~ | ~~291-332 行~~ | ~~已删除 `_parse_airport_detail` 及仅被其使用的 `_parse_runways`/`_opposite_runway`~~ |
 | ~~39~~ | ~~`core/data_loader.py`~~ | ~~`_init_registry()` 未加锁，多线程同时初始化可能创建多个 Registry~~ | ~~117-131 行~~ | ~~加锁保护~~ |
 | ~~40~~ | ~~`core/admin.py`~~ | ~~`unique_ips` 已改用 OrderedDict 实现 O(1) 检查/淘汰；`total_requests` 仍无限增长~~ | ~~18, 30-31 行~~ | ~~已改为 `deque(maxlen=2000)` 窗口~~ |
 | ~~41~~ | ~~`utils/metar.py`~~ | ~~`fetch_metar` 中 `requests.get` 成功后先写文件再更新内存，写文件失败则内存不更新~~ | ~~21-31 行~~ | ~~已改为先更新内存再原子写文件~~ |
@@ -57,12 +57,12 @@
 | ~~44~~ | ~~`utils/validcode.py`~~ | ~~`_get_font` 每次调用重新加载字体文件~~ | ~~11-20 行~~ | ~~缓存字体对象~~ |
 | ~~45~~ | ~~`utils/validcode.py`~~ | ~~使用 `random` 而非 `secrets` 生成验证码~~ | ~~25-35 行~~ | ~~改用 `secrets`~~ |
 | ~~46~~ | ~~`config.py`~~ | ~~`navdat_full_path` / `apdat_full_path` 未处理用户配置绝对路径的情况~~ | ~~31-36 行~~ | ~~判断路径是否为绝对路径~~ |
-| 47 | `config.py` | `navdat_path` / `apdat_path` 默认指向 legacy pickle 文件，但项目已转向 FlatBuffers | 23-24 行 | 默认改为 FlatBuffers 路径或明确文档说明 |
-| 48 | `api.py` | `admin` 接口在每个端点重复写相同的密钥校验，未使用 `Depends` | 537/546/562/577/590/723/813 行 | 抽取 `verify_admin_key` 依赖 |
-| 49 | `api.py` | `ThreadPoolExecutor(max_workers=4)` 与 `asyncio.Semaphore(8)` 组合不一致，第 5-8 个任务阻塞事件循环 | 165 行 | 统一信号量与线程池大小 |
+| ~~47~~ | ~~`config.py`~~ | ~~`navdat_path` / `apdat_path` 默认指向 legacy pickle 文件，但项目已转向 FlatBuffers~~ | ~~23-24 行~~ | ~~默认改为 FlatBuffers 占位路径；新增 `metar_path` 配置~~ |
+| ~~48~~ | ~~`api.py`~~ | ~~`admin` 接口在每个端点重复写相同的密钥校验，未使用 `Depends`~~ | ~~537/546/562/577/590/723/813 行~~ | ~~已提取 `verify_admin_key` 依赖并在所有 admin 端点使用~~ |
+| ~~49~~ | ~~`api.py`~~ | ~~`ThreadPoolExecutor(max_workers=4)` 与 `asyncio.Semaphore(8)` 组合不一致，第 5-8 个任务阻塞事件循环~~ | ~~165 行~~ | ~~信号量改为 4，与线程池大小一致~~ |
 | ~~50~~ | ~~`api.py`~~ | ~~`_do_build_navdata` 中压缩后数据直接 `write_bytes`，写入中断留下损坏文件~~ | ~~689-694 行~~ | ~~先写临时文件再原子重命名~~ |
 | ~~51~~ | ~~`api.py`~~ | ~~`_airport_prefix_index` 在 navdata 热更新后未重建~~ | ~~172-173 行~~ | ~~在 Registry 注册/注销 cycle 后触发索引重建~~ |
-| 52 | `api.py` | `loop.run_in_executor(None, ...)` 使用默认线程池，与 `_dijkstra_pool` 不一致 | 790 行 | 统一使用 `_dijkstra_pool` |
+| ~~52~~ | ~~`api.py`~~ | ~~`loop.run_in_executor(None, ...)` 使用默认线程池，与 `_dijkstra_pool` 不一致~~ | ~~790 行~~ | ~~代码已统一使用 `_build_pool`/`_dijkstra_pool`~~ |
 | ~~53~~ | ~~`webFinder/src/composables/useMap.ts`~~ | ~~`nodes.length === 0` 时提前 return 未重置 `isUpdating`，地图卡死~~ | ~~231-235 行~~ | ~~当前代码已有 try/finally，`isUpdating` 会被正确重置~~ |
 | ~~54~~ | ~~`webFinder/src/composables/useMap.ts`~~ | ~~`fitBounds` 每次更新都执行 1.5s 动画，用户正在平移/缩放时强制拉回~~ | ~~792-813 行~~ | ~~已增加 `isMoving()` 检测与首次动画~~ |
 | ~~55~~ | ~~`webFinder/src/composables/useMap.ts`~~ | ~~五个 `watch` 在 `routeResult` 大对象变更时都触发 `scheduleUpdate`~~ | ~~832-836 行~~ | ~~已合并为单个数组 watcher~~ |
@@ -72,37 +72,37 @@
 | ~~59~~ | ~~`webFinder/src/views/HomeView.vue`~~ | ~~Waypoints 列表使用 `:key="i"`（索引作为 key）~~ | ~~86-107 行~~ | ~~已改为 `node.name + i`~~ |
 | ~~60~~ | ~~`webFinder/src/components/SearchForm.vue`~~ | ~~`canSubmit` 仅校验 ICAO 长度为 4，用户可输入 `!!!!`~~ | ~~142-144 行~~ | ~~增加正则 `/^[A-Z0-9]{4}$/`~~ |
 | ~~61~~ | ~~`webFinder/src/components/ProcedureSelector.vue`~~ | ~~404 时设置 `options = []` 但不设置 error，用户无法区分"无数据"和"机场不存在"~~ | ~~64-104 行~~ | ~~404 时显示特定提示~~ |
-| 62 | `webFinder/src/components/SIDSelector.vue` | `selectedIndex` setter 接收 string（Vue 自动转换），类型存在隐式转换风险 | 45-48 行 | 显式 `Number(val)` |
+| ~~62~~ | ~~`webFinder/src/components/SIDSelector.vue`~~ | ~~`selectedIndex` setter 接收 string（Vue 自动转换），类型存在隐式转换风险~~ | ~~45-48 行~~ | ~~已显式 `Number(val)`~~ |
 | ~~63~~ | ~~`webFinder/src/i18n/locales/en.ts`~~ | ~~`weather.light/heavy` 值带尾部空格 `"Light "` / `"Heavy "`~~ | ~~en.ts~~ | ~~移除尾部空格~~ |
 
 ### 轻微（风格/文档/建议）
 
 | # | 模块 | 问题 | 证据 | 建议 |
 |---|---|------|------|------|
-| 64 | `core/dijkstra.py` | 分阶段搜索的交替优化最多 5 次，收敛条件只比较名称和 transition，不比较 boundary | 199-255 行 | 增加 boundary 比较或确认收敛充分 |
-| 65 | `core/dijkstra.py` | `_sort_route` 对空 airway name 的 bridge 段输出空字符串，route string 出现连续空格 | 1440-1446 行 | 空 name 时输出占位符或跳过 |
+| ~~64~~ | ~~`core/dijkstra.py`~~ | ~~分阶段搜索的交替优化最多 5 次，收敛条件只比较名称和 transition，不比较 boundary~~ | ~~199-255 行~~ | ~~已增加 boundary IID 比较~~ |
+| ~~65~~ | ~~`core/dijkstra.py`~~ | ~~`_sort_route` 对空 airway name 的 bridge 段输出空字符串，route string 出现连续空格~~ | ~~1440-1446 行~~ | ~~空 name 时跳过 edge name，只追加 node name~~ |
 | ~~66~~ | ~~`core/dijkstra.py`~~ | ~~`sid_info[1]` 和 `star_info[1]` 作为表达式无实际作用~~ | ~~1720 / 1725 行~~ | ~~已删除无效表达式~~ |
-| 67 | `core/graph.py` | `_haversine_a` 与 `great_circle_distance_km` 重复计算，未被任何调用方使用 | 29-39 行 | 删除死代码 |
-| 68 | `core/airport.py` | `_collect_procedures` 注释返回类型与实际不符（文档说 dict/dict/dict，实际是 list/dict/list） | 612-616 行注释 | 修正注释 |
+| ~~67~~ | ~~`core/graph.py`~~ | ~~`_haversine_a` 与 `great_circle_distance_km` 重复计算，未被任何调用方使用~~ | ~~29-39 行~~ | ~~经确认 `airport.py` 使用 `_haversine_a` 进行快速比较，保留~~ |
+| ~~68~~ | ~~`core/airport.py`~~ | ~~`_collect_procedures` 注释返回类型与实际不符（文档说 dict/dict/dict，实际是 list/dict/list）~~ | ~~612-616 行注释~~ | ~~代码注释已正确；已同步更新 `docs/claude/sid-star.md`~~ |
 | 69 | `core/storage/builder.py` | `flatbuffers.Builder(1024 * 1024)` 初始 1MB 对大型 navdata 可能频繁扩容 | 258 行 | 根据数据量估算初始容量 |
 | 70 | `core/storage/builder.py` | `sum(counts.values())` 结果未使用 | 276 行 | 删除 |
-| 71 | `core/storage/builder.py` | `_progress` 回调未捕获异常，外部回调抛错中断构建 | 279-281 行 | 包装 `try/except` |
-| 72 | `core/storage/builder.py` | `_build_procedure_transitions` 为每个 transition 独立遍历全部 legs，O(T * L) | 808-841 行 | 预按 transition 分组 |
-| 73 | `api.py` | 静态文件挂载路径基于 `settings.navdat_full_path.parent.parent`，配置为绝对路径时可能定位错误 | 849 行 | 统一使用 `PROJECT_ROOT` |
-| 74 | `api.py` | `admin_logging` 中间件未处理 `request.client` 为 None，且 `x-forwarded-for` 可伪造 | 260 行 | IP 规范化并限制长度 |
-| 75 | `api.py` | SSE 端点 `while True` + `asyncio.sleep(1)`，连接断开后不会立即感知 | 813 行 | 增加 `request.is_disconnected()` 检查 |
-| 76 | `api.py` | `startup` 中 `start_metar_updater()` 放在 `_build_airport_index()` 之后，启动失败时 METAR 线程仍可能启动 | 854 行 | 将 METAR 启动放最后并处理异常 |
-| 77 | `app.py` | `uvicorn.run` 直接运行模块级 `app`，缺少生产参数 | 9 行 | 通过 CLI 或配置启动 |
+| ~~71~~ | ~~`core/storage/builder.py`~~ | ~~`_progress` 回调未捕获异常，外部回调抛错中断构建~~ | ~~279-281 行~~ | ~~已用 `try/except` 包装回调~~ |
+| ~~72~~ | ~~`core/storage/builder.py`~~ | ~~`_build_procedure_transitions` 为每个 transition 独立遍历全部 legs，O(T * L)~~ | ~~808-841 行~~ | ~~已预按 transition name 分组 legs~~ |
+| ~~73~~ | ~~`api.py`~~ | ~~静态文件挂载路径基于 `settings.navdat_full_path.parent.parent`，配置为绝对路径时可能定位错误~~ | ~~849 行~~ | ~~已改为 `PROJECT_ROOT / "webFinder" / "dist"`~~ |
+| ~~74~~ | ~~`api.py`~~ | ~~`admin_logging` 中间件未处理 `request.client` 为 None，且 `x-forwarded-for` 可伪造~~ | ~~260 行~~ | ~~已拆分 x-forwarded-for/client 回退并截断 IP 长度~~ |
+| ~~75~~ | ~~`api.py`~~ | ~~SSE 端点 `while True` + `asyncio.sleep(1)`，连接断开后不会立即感知~~ | ~~813 行~~ | ~~已增加 `request.is_disconnected()` 检查~~ |
+| ~~76~~ | ~~`api.py`~~ | ~~`startup` 中 `start_metar_updater()` 放在 `_build_airport_index()` 之后，启动失败时 METAR 线程仍可能启动~~ | ~~854 行~~ | ~~已将 METAR 启动放最后并 try/except 隔离~~ |
+| ~~77~~ | ~~`app.py`~~ | ~~`uvicorn.run` 直接运行模块级 `app`，缺少生产参数~~ | ~~9 行~~ | ~~已添加 `proxy_headers=True`、`server_header=False`~~ |
 | ~~78~~ | ~~`config.py`~~ | ~~`env_file=".env"` 是相对路径，取决于工作目录~~ | ~~12 行~~ | ~~改为 `PROJECT_ROOT / ".env"`~~ |
-| 79 | `config.py` | `metar_full_path` 硬编码为 `data/metar.txt` | 39-41 行 | 可配置化 |
-| 80 | `utils/metar_parser.py` | `"NOT" in tokens and "AVAILABLE" in tokens` 过于宽松 | 85-86 行 | 匹配完整短语 |
-| 81 | `utils/metar_parser.py` | 能见度只解析单个 token，未处理 `1 1/2SM` 等 | 114-118 行 | 扩展解析 |
-| 82 | `utils/metar_parser.py` | 天气现象正则过于宽泛，可能误匹配 `TEMPO`、`BECMG` | 137-139 行 | 限制为已知天气代码集合 |
-| 83 | `webFinder/vite.config.ts` | PWA `manifest.icons` 仅含 `favicon.ico`，缺少多尺寸图标 | 16-36 行 | 补充 PNG/icon maskable 图标 |
-| 84 | `webFinder/vite.config.ts` | 缺少 `sourcemap` 配置，生产调试困难 | 52-55 行 | 增加 sourcemap 配置 |
-| 85 | `webFinder/package.json` | `version: "0.0.0"` 未维护 | 4 行 | 与实际版本对齐 |
-| 86 | `webFinder/package.json` | 缺少 `lint`、`test`、`typecheck` 脚本 | 7-9 行 | 补充脚本 |
-| 87 | `webFinder/package.json` | 缺少 `eslint`/`prettier`，代码风格无统一约束 | 23-30 行 | 引入 biome 或 eslint + prettier |
+| ~~79~~ | ~~`config.py`~~ | ~~`metar_full_path` 硬编码为 `data/metar.txt`~~ | ~~39-41 行~~ | ~~新增 `metar_path` 配置项~~ |
+| ~~80~~ | ~~`utils/metar_parser.py`~~ | ~~`"NOT" in tokens and "AVAILABLE" in tokens` 过于宽松~~ | ~~85-86 行~~ | ~~已改为正则匹配完整短语 `METAR NOT AVAILABLE`~~ |
+| ~~81~~ | ~~`utils/metar_parser.py`~~ | ~~能见度只解析单个 token，未处理 `1 1/2SM` 等~~ | ~~114-118 行~~ | ~~已支持 `1/2SM` 单 token 和 `1 1/2SM` 双 token 分数能见度~~ |
+| ~~82~~ | ~~`utils/metar_parser.py`~~ | ~~天气现象正则过于宽泛，可能误匹配 `TEMPO`、`BECMG`~~ | ~~137-139 行~~ | ~~已限制为已知天气代码集合（强度/修饰符 + 标准天气代码）~~ |
+| ~~83~~ | ~~`webFinder/vite.config.ts`~~ | ~~PWA `manifest.icons` 仅含 `favicon.ico`，缺少多尺寸图标~~ | ~~16-36 行~~ | ~~新增 `/icon.svg`（sizes any, purpose any maskable）~~ |
+| ~~84~~ | ~~`webFinder/vite.config.ts`~~ | ~~缺少 `sourcemap` 配置，生产调试困难~~ | ~~52-55 行~~ | ~~已设置 `build.sourcemap: true`~~ |
+| ~~85~~ | ~~`webFinder/package.json`~~ | ~~`version: "0.0.0"` 未维护~~ | ~~4 行~~ | ~~已更新为 `0.1.0`~~ |
+| ~~86~~ | ~~`webFinder/package.json`~~ | ~~缺少 `lint`、`test`、`typecheck` 脚本~~ | ~~7-9 行~~ | ~~已添加 `typecheck` 等脚本~~ |
+| 87 | `webFinder/package.json` | 缺少 `eslint`/`prettier`，代码风格无统一约束 | 23-30 行 | 已补充 typecheck/lint/test 脚本；eslint/prettier 配置仍待引入 |
 
 ## 文档对齐问题
 

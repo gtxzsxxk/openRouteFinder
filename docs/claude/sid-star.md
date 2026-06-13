@@ -39,7 +39,7 @@ class FlatbuffersAirportConnector:
 1. Get airport from navdata, create airport node (IID=-1)
 2. `_collect_procedures(icao, proc_type=1)` — collect all SID procedures
 3. `_apply_filter(filter_name, ...)` — keep only procedures containing the filter waypoint
-4. Build connections: airport → runway exit points (first point of path)
+4. Build connections: airport → runway exit points (**last** point of the SID path, i.e., the network-side exit)
 5. Build internal edges along procedure legs (airport→network order)
 6. Build transition edges between transition start/end
 7. Merge runway segments with common segments and transitions into `Procedure` objects
@@ -61,7 +61,7 @@ class FlatbuffersAirportConnector:
 7. Merge runway segments with common segments; prefer options with matching approach bridges
 8. Key procedures by network-side entry point (`merged_points[0][0]`)
 9. Merge approach bridges into STAR procedures so full path to runway is available
-10. Build connections from each procedure's first point (network-side entry) to the airport
+10. Build connections from each procedure's **first** point (network-side entry) to the airport
 11. Add internal edges for used approach bridges
 12. **Fallback**: when no STAR procedures exist (and no filter is active), create virtual STAR procedures from approach bridges
 13. `_ensure_continuous_paths()` — add missing edges for consecutive points in merged procedures

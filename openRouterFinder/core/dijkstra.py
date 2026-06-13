@@ -199,8 +199,10 @@ class RouteEngine:
 
         for _ in range(5):
             prev_sid_name = sid_proc.name
+            prev_sid_boundary_iid = sid_boundary.iid
             prev_sid_t = sid_transition_result[0] if sid_transition_result else None
             prev_star_name = star_proc.name if star_proc else None
+            prev_star_boundary_iid = star_boundary.iid if star_proc else None
             prev_star_t = star_t_name
 
             # Select best STAR for current SID boundary
@@ -245,13 +247,15 @@ class RouteEngine:
                         else:
                             sid_transition_pts = None
 
-            # Check convergence
+            # Check convergence (procedure name + transition + boundary IID)
             curr_sid_t = sid_transition_result[0] if sid_transition_result else None
             if (
                 sid_proc.name == prev_sid_name
                 and curr_sid_t == prev_sid_t
+                and sid_boundary.iid == prev_sid_boundary_iid
                 and star_proc.name == prev_star_name
                 and star_t_name == prev_star_t
+                and star_boundary.iid == prev_star_boundary_iid
             ):
                 break
 
@@ -1475,8 +1479,32 @@ class RouteEngine:
         compressed = self._compress_route(route_list)
         parts = [orig]
         for edge_name, node_name, _ in compressed:
-            parts.extend([edge_name, node_name])
+            if edge_name:
+                parts.extend([edge_name, node_name])
+            else:
+                parts.append(node_name)
         return " ".join(parts)
+
+    def _candidate_procedure_length(
+        self,
+        proc: Procedure,
+        transition_name: str | None,
+    ) -> float:
+        """Return the great-circle length (km) of a procedure or transition."""
+        points = proc.points
+        if transition_name is not None:
+            for t_name, t_pts in proc.transitions:
+                if t_name == transition_name:
+                    points = list(t_pts)
+                    break
+        if len(points) < 2:
+            return 0.0
+        return sum(
+            great_circle_distance_km(
+                points[i][1], points[i][2], points[i + 1][1], points[i + 1][2]
+            )
+            for i in range(len(points) - 1)
+        )
 
     def _build_node_info(
         self,
@@ -1557,23 +1585,31 @@ class RouteEngine:
         for proc, boundary, key, t_name in star_candidates:
             forbidden_keys.discard((boundary.name, round(boundary.px, 6), round(boundary.py, 6)))
 
-        # Prune candidates to the most promising N per side (by boundary
-        # distance to the opposite airport) to keep A* search fast.
+        # Prune candidates to the most promising N per side.  The score is the
+        # straight-line distance from the procedure boundary to the opposite
+        # airport plus the actual procedure length, so a long procedure that
+        # starts closer does not hide a shorter but slightly farther candidate.
         _MAX_CANDIDATES = 50
         if len(sid_candidates) > _MAX_CANDIDATES:
             sid_candidates = sorted(
                 sid_candidates,
-                key=lambda c: great_circle_distance_km(
-                    c[1].px, c[1].py,
-                    star_conn.airport_node.px, star_conn.airport_node.py,
+                key=lambda c: (
+                    great_circle_distance_km(
+                        c[1].px, c[1].py,
+                        star_conn.airport_node.px, star_conn.airport_node.py,
+                    )
+                    + self._candidate_procedure_length(c[0], c[3])
                 ),
             )[:_MAX_CANDIDATES]
         if len(star_candidates) > _MAX_CANDIDATES:
             star_candidates = sorted(
                 star_candidates,
-                key=lambda c: great_circle_distance_km(
-                    c[1].px, c[1].py,
-                    sid_conn.airport_node.px, sid_conn.airport_node.py,
+                key=lambda c: (
+                    great_circle_distance_km(
+                        c[1].px, c[1].py,
+                        sid_conn.airport_node.px, sid_conn.airport_node.py,
+                    )
+                    + self._candidate_procedure_length(c[0], c[3])
                 ),
             )[:_MAX_CANDIDATES]
 

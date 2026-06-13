@@ -278,7 +278,10 @@ def build_from_fenix(
 
         def _progress(step: str, current: int, total: int) -> None:
             if progress:
-                progress(step, current, total)
+                try:
+                    progress(step, current, total)
+                except Exception as e:
+                    print(f"Progress callback error: {e}")
 
         # Build all tables
         nodes, id_to_iid = _build_nodes(cursor, builder, lambda c, t: _progress("waypoints", c, t))
@@ -835,21 +838,30 @@ def _build_procedure_transitions(
     if not trans_names:
         return 0
 
+    # Pre-group legs by transition name once, avoiding O(T * L) scans.
+    terminal_legs = legs_by_terminal.get(terminal_id, [])
+    legs_by_trans_name: dict[str, list] = {}
+    for row in terminal_legs:
+        trans = row["Transition"] or ""
+        if not trans or trans == "ALL":
+            continue
+        legs_by_trans_name.setdefault(trans, []).append(row)
+
     trans_offsets = []
     for trans_name in trans_names:
-        name = builder.CreateString(trans_name)
         legs = _build_procedure_legs(
             builder,
-            legs_by_terminal.get(terminal_id, []),
+            legs_by_trans_name.get(trans_name, []),
             wp_names,
             is_main=False,
             transition_name=trans_name,
         )
-
+        if legs == 0:
+            continue
+        name = builder.CreateString(trans_name)
         ProcTransitionStart(builder)
         ProcTransitionAddName(builder, name)
-        if legs:
-            ProcTransitionAddLegs(builder, legs)
+        ProcTransitionAddLegs(builder, legs)
         trans_offsets.append(ProcTransitionEnd(builder))
 
     if not trans_offsets:

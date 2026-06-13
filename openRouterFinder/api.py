@@ -12,13 +12,13 @@ from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from fastapi import FastAPI, File, Header, HTTPException, Query, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from openRouterFinder.config import settings
+from openRouterFinder.config import PROJECT_ROOT, settings
 from openRouterFinder.core.admin import (
     get_stats as get_admin_stats,
 )
@@ -168,7 +168,7 @@ def _rename_single_runway_all(data: dict) -> dict:
 # --- Concurrency controls ---
 _dijkstra_pool = ThreadPoolExecutor(max_workers=4)
 _build_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="navdata-build")
-_route_semaphore = asyncio.Semaphore(8)
+_route_semaphore = asyncio.Semaphore(4)
 
 # --- Valid code storage ---
 
@@ -211,6 +211,18 @@ class _TTLCodeStore:
 
 
 _valid_codes = _TTLCodeStore()
+
+
+# --- Admin key verification ---
+
+def verify_admin_key(x_admin_key: str = Header(default="")) -> str:
+    """FastAPI dependency that validates the X-Admin-Key header."""
+    if not settings.admin_key or settings.admin_key == "set_yourself":
+        raise HTTPException(status_code=403, detail="Admin not configured")
+    if x_admin_key != settings.admin_key:
+        raise HTTPException(status_code=403, detail="Invalid key")
+    return x_admin_key
+
 
 # --- Airport prefix index ---
 _airport_prefix_index: dict[str, list] = {}
@@ -324,11 +336,14 @@ async def admin_logging(request: Request, call_next):
     start = time.time()
     response = await call_next(request)
     duration_ms = (time.time() - start) * 1000
-    client_ip = (
-        request.headers.get("x-forwarded-for", request.client.host if request.client else "unknown")
-        .split(",")[0]
-        .strip()
-    )
+    raw_ip = request.headers.get("x-forwarded-for")
+    if raw_ip:
+        client_ip = raw_ip.split(",")[0].strip()
+    elif request.client is not None:
+        client_ip = request.client.host
+    else:
+        client_ip = "unknown"
+    client_ip = client_ip[: 45]  # IPv6 max length
     record_request(client_ip, request.method, request.url.path, response.status_code, duration_ms)
     return response
 
@@ -597,20 +612,12 @@ def health_check():
 
 
 @app.get("/api/admin")
-def get_admin(x_admin_key: str = Header(default="")):
-    if not settings.admin_key or settings.admin_key == "set_yourself":
-        raise HTTPException(status_code=403, detail="Admin not configured")
-    if x_admin_key != settings.admin_key:
-        raise HTTPException(status_code=403, detail="Invalid key")
+def get_admin(_: str = Depends(verify_admin_key)):
     return get_admin_stats()
 
 
 @app.get("/api/admin/navdata")
-def list_navdata_cycles(x_admin_key: str = Header(default="")):
-    if not settings.admin_key or settings.admin_key == "set_yourself":
-        raise HTTPException(status_code=403, detail="Admin not configured")
-    if x_admin_key != settings.admin_key:
-        raise HTTPException(status_code=403, detail="Invalid key")
+def list_navdata_cycles(_: str = Depends(verify_admin_key)):
     reg = get_nav_registry()
     cycles = reg.list_cycles()
     result = []
@@ -622,12 +629,7 @@ def list_navdata_cycles(x_admin_key: str = Header(default="")):
 
 
 @app.get("/api/admin/navdata/builds")
-def list_active_builds(x_admin_key: str = Header(default="")):
-    if not settings.admin_key or settings.admin_key == "set_yourself":
-        raise HTTPException(status_code=403, detail="Admin not configured")
-    if x_admin_key != settings.admin_key:
-        raise HTTPException(status_code=403, detail="Invalid key")
-
+def list_active_builds(_: str = Depends(verify_admin_key)):
     _cleanup_finished_build_tasks()
     active = [
         {"build_id": bid, **task}
@@ -638,11 +640,7 @@ def list_active_builds(x_admin_key: str = Header(default="")):
 
 
 @app.get("/api/admin/navdata/{cycle}")
-def get_navdata_cycle_info(cycle: str, x_admin_key: str = Header(default="")):
-    if not settings.admin_key or settings.admin_key == "set_yourself":
-        raise HTTPException(status_code=403, detail="Admin not configured")
-    if x_admin_key != settings.admin_key:
-        raise HTTPException(status_code=403, detail="Invalid key")
+def get_navdata_cycle_info(cycle: str, _: str = Depends(verify_admin_key)):
     reg = get_nav_registry()
     info = reg.get_cycle_info(cycle)
     if info is None:
@@ -651,11 +649,7 @@ def get_navdata_cycle_info(cycle: str, x_admin_key: str = Header(default="")):
 
 
 @app.delete("/api/admin/navdata/{cycle}")
-def delete_navdata_cycle(cycle: str, x_admin_key: str = Header(default="")):
-    if not settings.admin_key or settings.admin_key == "set_yourself":
-        raise HTTPException(status_code=403, detail="Admin not configured")
-    if x_admin_key != settings.admin_key:
-        raise HTTPException(status_code=403, detail="Invalid key")
+def delete_navdata_cycle(cycle: str, _: str = Depends(verify_admin_key)):
     reg = get_nav_registry()
     if not reg.has_cycle(cycle):
         raise HTTPException(status_code=404, detail="Cycle not found")
@@ -791,14 +785,9 @@ def _is_path_traversal(name: str) -> bool:
 
 @app.post("/api/admin/navdata/upload")
 async def upload_navdata(
-    x_admin_key: str = Header(default=""),
+    _: str = Depends(verify_admin_key),
     file: UploadFile = File(...),
 ):
-    if not settings.admin_key or settings.admin_key == "set_yourself":
-        raise HTTPException(status_code=403, detail="Admin not configured")
-    if x_admin_key != settings.admin_key:
-        raise HTTPException(status_code=403, detail="Invalid key")
-
     import tempfile
     import zipfile
 
@@ -917,18 +906,19 @@ async def upload_navdata(
 
 
 @app.get("/api/admin/navdata/build-progress/{build_id}")
-async def build_progress(build_id: str, x_admin_key: str = Query(default="")):
-    if not settings.admin_key or settings.admin_key == "set_yourself":
-        raise HTTPException(status_code=403, detail="Admin not configured")
-    if x_admin_key != settings.admin_key:
-        raise HTTPException(status_code=403, detail="Invalid key")
-
+async def build_progress(
+    build_id: str,
+    request: Request,
+    _: str = Depends(verify_admin_key),
+):
     from fastapi.responses import StreamingResponse
 
     async def event_stream():
         _cleanup_finished_build_tasks()
         try:
             while True:
+                if await request.is_disconnected():
+                    break
                 task = _build_tasks.get(build_id)
                 if task is None:
                     yield f"event: error\ndata: {json.dumps({'detail': 'Build not found'})}\n\n"
@@ -960,7 +950,7 @@ async def build_progress(build_id: str, x_admin_key: str = Query(default="")):
 
 
 # Static files
-frontend_dist = settings.navdat_full_path.parent.parent / "webFinder" / "dist"
+frontend_dist = PROJECT_ROOT / "webFinder" / "dist"
 if frontend_dist.exists():
     app.mount("/", StaticFiles(directory=str(frontend_dist), html=True), name="static")
 
@@ -969,9 +959,15 @@ if frontend_dist.exists():
 def startup():
     print("OpenRouteFinder API starting...")
     print(f"Nav data version: {get_data_version()}")
-    _build_airport_index()
-    start_metar_updater()
-    print("METAR keeper started")
+    try:
+        _build_airport_index()
+    except Exception as e:
+        print(f"Failed to build airport index: {e}")
+    try:
+        start_metar_updater()
+        print("METAR keeper started")
+    except Exception as e:
+        print(f"Failed to start METAR updater: {e}")
 
 
 @app.on_event("shutdown")

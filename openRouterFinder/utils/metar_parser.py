@@ -82,7 +82,7 @@ def parse_metar(raw: str) -> ParsedMetar:
         return result
 
     # Detect non-standard "METAR NOT AVAILABLE" format
-    if "NOT" in tokens and "AVAILABLE" in tokens:
+    if re.search(r"METAR\s+NOT\s+AVAILABLE", result.raw):
         return result
 
     # Skip METAR/COR/SPECI prefix
@@ -110,12 +110,24 @@ def parse_metar(raw: str) -> ParsedMetar:
             result.wind_speed_unit = wind["unit"]
             idx += 1
 
-    # Visibility (may have two tokens for runway visibility, skip for now)
+    # Visibility: single token (CAVOK, 9999, 10SM, 1/2SM) or two-token fraction (1 1/2SM)
     if idx < len(tokens):
-        vis = _parse_visibility(tokens[idx])
-        if vis:
-            result.visibility = vis
+        vis_token = tokens[idx]
+        if (
+            vis_token == "CAVOK"
+            or re.match(r"^\d{4}$", vis_token)
+            or re.match(r"^\d+/\d+SM$", vis_token)
+            or re.match(r"^\d+SM$", vis_token)
+        ):
+            result.visibility = vis_token
             idx += 1
+        elif (
+            re.match(r"^\d+$", vis_token)
+            and idx + 1 < len(tokens)
+            and re.match(r"^\d+/\d+SM$", tokens[idx + 1])
+        ):
+            result.visibility = f"{vis_token} {tokens[idx + 1]}"
+            idx += 2
 
     # Weather phenomena and clouds (iterate until temp or pressure)
     while idx < len(tokens):
@@ -133,9 +145,11 @@ def parse_metar(raw: str) -> ParsedMetar:
             idx += 1
             continue
 
-        # Weather phenomenon
+        # Weather phenomenon: intensity/modifier + one or more known codes.
+        # This avoids matching tokens like TEMPO or BECMG.
         if re.match(
-            r"^[-+]?(RA|SN|FG|BR|HZ|FU|DU|SA|SS|DS|TS|SQ|FC|SH|BL|DR|MI|BC|PR|VC|PO|FC)+$", token
+            r"^[+-]?((MI|BC|PR|VC|SH|BL|DR|FZ|TS)?(DZ|RA|SN|SG|IC|PL|GR|GS|BR|FG|FU|VA|DU|SA|HZ|PY|PO|SQ|FC|SS|DS))+$",
+            token,
         ):
             result.weather.append(token)
             idx += 1

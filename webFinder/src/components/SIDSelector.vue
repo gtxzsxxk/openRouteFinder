@@ -44,7 +44,7 @@ const store = useRouteStore()
 
 const selectedIndex = computed({
   get: () => store.selectedSIDIndex,
-  set: (val) => store.setSelectedSID(val),
+  set: (val) => store.setSelectedSID(Number(val)),
 })
 
 // Defensive: reset index if it goes out of bounds after route changes
