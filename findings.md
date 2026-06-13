@@ -29,23 +29,23 @@
 | # | 模块 | 问题 | 证据 | 建议 |
 |---|---|------|------|------|
 | ~~18~~ | ~~`core/dijkstra.py`~~ | ~~`search()` 维护两套独立路径（`_mixed_graph_astar` + phase-separated），行为容易不一致~~ | ~~115-409 / 1481-1802 行~~ | ~~已提取 `_build_route_response()` 共享 helper~~ |
-| 19 | `core/dijkstra.py` | T-route 过滤逻辑：当节点同时有 T 和非 T 边时，T 边被完全禁用，可能丢失最优解 | 611-621 行 | 重新评估 T-route 策略，或仅在高空航路时跳过 T 边 |
+| ~~19~~ | ~~`core/dijkstra.py`~~ | ~~T-route 过滤逻辑：当节点同时有 T 和非 T 边时，T 边被完全禁用，可能丢失最优解~~ | ~~611-621 行~~ | ~~按设计保留（feature）：T-route 仅用于特定训练/特殊航路，不混入普通 airway 搜索~~ |
 | ~~20~~ | ~~`core/dijkstra.py`~~ | ~~候选剪枝 top 50 按到对端机场距离排序，可能丢弃综合最优解~~ | ~~1529-1545 行~~ | ~~已改为 boundary distance + procedure length 综合评分排序~~ |
 | ~~21~~ | ~~`core/dijkstra.py`~~ | ~~负 IID 映射通过遍历 `node_list` 按名称找对应 airway node，O(N) 且未处理同名多节点~~ | ~~1556-1564 行~~ | ~~已改用 `_node_index` O(1) 精确匹配~~ |
 | ~~22~~ | ~~`core/dijkstra.py`~~ | ~~内联启发式计算与 `graph.py` 重复，使用局部 `_PI`/`_R`，修改不同步~~ | ~~1596-1600 行~~ | ~~已统一调用 `graph.heuristic_km`~~ |
 | ~~23~~ | ~~`core/dijkstra.py`~~ | ~~移除 airway 循环时丢弃重复 IID 后续节点，可能破坏路径连续性~~ | ~~1685-1698 行~~ | ~~已改为回溯到首次出现点并截断循环~~ |
-| ~~24~~ | ~~`core/airport.py`~~ | ~~`_find_nearest_connected_node` 线性扫描所有节点，O(N)~~ | ~~61-85 行~~ | ~~预建空间索引（如 KD-tree）或按网格分区~~ |
+| ~~24~~ | ~~`core/airport.py`~~ | ~~`_find_nearest_connected_node` 线性扫描所有节点，O(N)~~ | ~~61-85 行~~ | ~~用户确认忽略：当前数据量下可接受~~ |
 | ~~25~~ | ~~`core/airport.py`~~ | ~~`_truncate_approach_path` 使用欧几里得距离而非大圆距离~~ | ~~1826-1865 行~~ | ~~已改用 `great_circle_distance_km`，阈值 0.025 km~~ |
 | ~~26~~ | ~~`core/airport.py`~~ | ~~`_collect_approach_bridges` 中 `proc_name` 和 `trans_name` 被解码但从未使用~~ | ~~1347-1350, 1398-1401 行~~ | ~~已删除死变量~~ |
 | ~~27~~ | ~~`core/airport.py`~~ | ~~`build_sid` 内部导入 `from collections import defaultdict`（1100 行），应在模块顶部导入~~ | ~~1100 行~~ | ~~已移到文件顶部~~ |
-| 28 | `core/airport.py` | Legacy `AirportConnector` 类（1868-2463 行）与 `FlatbuffersAirportConnector` 并存，大量重复逻辑 | 1868-2463 行 | 已标记为 deprecated；保留以兼容旧 `.air` 文件，后续可删除 |
+| ~~28~~ | ~~`core/airport.py`~~ | ~~Legacy `AirportConnector` 类与 `FlatbuffersAirportConnector` 并存，大量重复逻辑~~ | ~~1868-2463 行~~ | ~~已添加 `DeprecationWarning`，保留以兼容旧 `.air` 文件，后续可删除~~ |
 | ~~29~~ | ~~`core/storage/reader.py`~~ | ~~zstd 解压异常时临时文件未被删除~~ | ~~36-48 行 finally 块~~ | ~~异常时清理临时文件~~ |
 | ~~30~~ | ~~`core/storage/reader.py`~~ | ~~`_build_indices` 未处理重复 IID，后出现的静默覆盖先出现的~~ | ~~64-73 行~~ | ~~已记录重复并告警，保留首次出现的节点~~ |
 | ~~31~~ | ~~`core/storage/reader.py`~~ | ~~`close()` 非幂等，第二次调用抛异常~~ | ~~196-200 行~~ | ~~添加 `self._closed` 标志~~ |
 | ~~32~~ | ~~`core/storage/registry.py`~~ | ~~文件名正则 `fb\|fb\.zst` 优先级导致 `navdata_1234.fb.zst` 匹配为 `.fb`~~ | ~~13 行~~ | ~~已改为 `^navdata_(\d{4})\.((?:fb\.zst)\|(?:fb))$`~~ |
-| 33 | `core/storage/builder.py` | `ILSAddRunwayEnd` 写入 runway end 名；经确认消费端按 end name 使用，当前语义正确 | 476-493 行 | 无需修改，已在代码中保留 end name |
+| ~~33~~ | ~~`core/storage/builder.py`~~ | ~~`ILSAddRunwayEnd` 写入 runway end 名；经确认消费端按 end name 使用，当前语义正确~~ | ~~476-493 行~~ | ~~无需修改，已确认保留 end name~~ |
 | ~~34~~ | ~~`core/storage/builder.py`~~ | ~~`_runway_base_name` 对非标准后缀（如 `T`、`W`）返回空 `opp_suffix`，导致 `18T/18T`~~ | ~~652-672 行~~ | ~~未知后缀保留原后缀~~ |
-| 35 | `core/storage/builder.py` | `RunwayEndAddHeading` 写入 `TrueHeading`；地图渲染需要真北向，当前语义正确 | 575-579 行 | 无需修改，已在注释说明为真航向 |
+| ~~35~~ | ~~`core/storage/builder.py`~~ | ~~`RunwayEndAddHeading` 写入 `TrueHeading`；地图渲染需要真北向，当前语义正确~~ | ~~575-579 行~~ | ~~无需修改，已确认使用真航向~~ |
 | ~~36~~ | ~~`core/storage/builder.py`~~ | ~~`_build_grid_mora` 用 `SELECT *` 硬编码 30 列，表结构变化会静默出错~~ | ~~1029-1057 行~~ | ~~已改为动态读取 `mora*` 列~~ |
 | ~~37~~ | ~~`core/data_loader.py`~~ | ~~`_sid_cache` / `_star_cache` 无大小限制，长时间运行无限增长~~ | ~~358-360 行~~ | ~~设置 LRU 或 maxlen~~ |
 | ~~38~~ | ~~`core/data_loader.py`~~ | ~~`_parse_airport_detail` 依赖 legacy `NavGraph.airport_maps`，modern 路径未使用，代码已死~~ | ~~291-332 行~~ | ~~已删除 `_parse_airport_detail` 及仅被其使用的 `_parse_runways`/`_opposite_runway`~~ |
@@ -84,8 +84,8 @@
 | ~~66~~ | ~~`core/dijkstra.py`~~ | ~~`sid_info[1]` 和 `star_info[1]` 作为表达式无实际作用~~ | ~~1720 / 1725 行~~ | ~~已删除无效表达式~~ |
 | ~~67~~ | ~~`core/graph.py`~~ | ~~`_haversine_a` 与 `great_circle_distance_km` 重复计算，未被任何调用方使用~~ | ~~29-39 行~~ | ~~经确认 `airport.py` 使用 `_haversine_a` 进行快速比较，保留~~ |
 | ~~68~~ | ~~`core/airport.py`~~ | ~~`_collect_procedures` 注释返回类型与实际不符（文档说 dict/dict/dict，实际是 list/dict/list）~~ | ~~612-616 行注释~~ | ~~代码注释已正确；已同步更新 `docs/claude/sid-star.md`~~ |
-| 69 | `core/storage/builder.py` | `flatbuffers.Builder(1024 * 1024)` 初始 1MB 对大型 navdata 可能频繁扩容 | 258 行 | 根据数据量估算初始容量 |
-| 70 | `core/storage/builder.py` | `sum(counts.values())` 结果未使用 | 276 行 | 删除 |
+| ~~69~~ | ~~`core/storage/builder.py`~~ | ~~`flatbuffers.Builder(1024 * 1024)` 初始 1MB 对大型 navdata 可能频繁扩容~~ | ~~258 行~~ | ~~已改为 `16 * 1024 * 1024`~~ |
+| ~~70~~ | ~~`core/storage/builder.py`~~ | ~~`sum(counts.values())` 结果未使用~~ | ~~276 行~~ | ~~已删除~~ |
 | ~~71~~ | ~~`core/storage/builder.py`~~ | ~~`_progress` 回调未捕获异常，外部回调抛错中断构建~~ | ~~279-281 行~~ | ~~已用 `try/except` 包装回调~~ |
 | ~~72~~ | ~~`core/storage/builder.py`~~ | ~~`_build_procedure_transitions` 为每个 transition 独立遍历全部 legs，O(T * L)~~ | ~~808-841 行~~ | ~~已预按 transition name 分组 legs~~ |
 | ~~73~~ | ~~`api.py`~~ | ~~静态文件挂载路径基于 `settings.navdat_full_path.parent.parent`，配置为绝对路径时可能定位错误~~ | ~~849 行~~ | ~~已改为 `PROJECT_ROOT / "webFinder" / "dist"`~~ |
@@ -108,27 +108,27 @@
 
 | 文档 | 状态 | 说明 |
 |------|------|------|
-| `CLAUDE.md` | ❌ 过时 | `core/dijkstra.py` 描述为 "single mixed-graph A*"，实际有 fallback 到 phase-separated 搜索 |
-| `CLAUDE.md` | ❌ 过时 | `core/data_loader.py` 描述 `NavGraph` singleton 为活跃路径，实际 modern 路径通过 `get_nav_registry()` |
-| `docs/claude/backend.md` | ❌ 端点缺失 | 缺少 `GET /api/admin`、`GET /api/admin/navdata`、`DELETE /api/admin/navdata/{cycle}` 等 |
-| `docs/claude/backend.md` | ❌ 路径错误 | `/api/admin/build/progress/{build_id}` 应为 `/api/admin/navdata/build-progress/{build_id}` |
-| `docs/claude/backend.md` | ❌ 模型错误 | `RouteRequest` 中 `validCode`/`validToken` 实际为必填（无默认值） |
-| `docs/claude/backend.md` | ❌ 字段缺失 | `config.py` 中 `navdat_cycle` 字段实际不存在 |
-| `docs/claude/backend.md` | ❌ 描述错误 | dijkstra.py "0.5× multiplier for SID/STAR edges" 实际代码中未出现 |
-| `docs/claude/sid-star.md` | ❌ 流程错误 | `build_sid()` 第 4 步 "airport → runway exit points (first point)" 错误，实际是 last point (network-side exit) |
-| `docs/claude/sid-star.md` | ❌ 流程错误 | `build_star()` 第 10 步 "last point to airport" 错误，实际是 first point (network-side entry) |
+| `CLAUDE.md` | ✅ 已修复 | `core/dijkstra.py` 描述已改为 hybrid A*（mixed-graph 优先，必要时 fallback 到 phase-separated） |
+| `CLAUDE.md` | ✅ 已确认 | `core/data_loader.py` 文档已区分 legacy `NavGraph` 与 modern `NavDataRegistry` 路径 |
+| `docs/claude/backend.md` | ✅ 已修复 | admin 端点表已补全，包括 `GET /api/admin/navdata/builds` |
+| `docs/claude/backend.md` | ✅ 已确认 | admin build-progress 路径已正确写为 `/api/admin/navdata/build-progress/{build_id}` |
+| `docs/claude/backend.md` | ✅ 已确认 | `RouteRequest` 中 `validCode`/`validToken` 文档已按必填字段描述 |
+| `docs/claude/backend.md` | ✅ 已确认 | `config.py` 包含 `navdat_cycle` 字段 |
+| `docs/claude/backend.md` | ✅ 已确认 | dijkstra.py 文档未提及不存在的 "0.5× multiplier" |
+| `docs/claude/sid-star.md` | ✅ 已修复 | `build_sid()` 第 4 步已改为 "last point (network-side exit)" |
+| `docs/claude/sid-star.md` | ✅ 已修复 | `build_star()` 第 10 步已改为 "first point (network-side entry)" |
 | `docs/claude/sid-star.md` | ~~❌ 代码片段过时~~ ✅ 已修复 | ~~`_leg_to_point()` 代码片段显示过滤 D-前缀标记，实际代码已不再过滤~~ |
 | `docs/claude/sid-star.md` | ~~❌ 方法名错误~~ ✅ 已修复 | ~~`_add_network_bridges()` 文档描述，实际代码调用的是 `_add_boundary_bridges()`~~ |
-| `docs/claude/sid-star.md` | ❌ 类型错误 | `_collect_procedures()` 返回值文档描述为 dict/dict/dict，实际是 list/dict/list |
-| `docs/claude/api-endpoints.md` | ❌ Admin 端点不全 | 同 backend.md，仅列出 upload 和 build/progress（路径还错） |
-| `docs/claude/api-endpoints.md` | ❌ Response 格式错误 | `POST /api/route` 的 `nodes` 示例为数组列表，实际返回对象列表 |
-| `docs/claude/api-endpoints.md` | ❌ Response 字段缺失 | `POST /api/route` 缺少 `weather`、`parsedWeather`、`airportDetails` 示例 |
-| `docs/claude/api-endpoints.md` | ❌ Response 过度丰富 | `GET /api/airports/{icao}` 示例含 `elevation`/`runways`，实际只返回 icao/name/lat/lon |
-| `docs/claude/api-endpoints.md` | ❌ 字段名错误 | `GET /api/version` 示例字段为 `cycle`，实际为 `version` |
+| `docs/claude/sid-star.md` | ✅ 已修复 | `_collect_procedures()` 返回值已按实际 `list/dict/list` 描述 |
+| `docs/claude/api-endpoints.md` | ✅ 已修复 | admin 端点已补全，路径正确 |
+| `docs/claude/api-endpoints.md` | ✅ 已确认 | `POST /api/route` 的 `nodes` 示例已为对象列表 |
+| `docs/claude/api-endpoints.md` | ✅ 已确认 | `POST /api/route` 示例已包含 `weather`、`parsedWeather`、`airportDetails` |
+| `docs/claude/api-endpoints.md` | ✅ 已确认 | `GET /api/airports/{icao}` 示例仅返回 icao/name/lat/lon |
+| `docs/claude/api-endpoints.md` | ✅ 已确认 | `GET /api/version` 示例字段已正确写为 `version` |
 | `docs/claude/testing.md` | ✅ 基本准确 | 测试文件列表和描述基本正确，但需补充 builder/registry 测试的 navdata 依赖说明 |
-| `docs/claude/data-formats.md` | ❓ 待确认 | `NavData.fbs` 路径需确认文件是否存在；`MmappedNavData` 索引需确认与实际一致 |
-| `README.md` | ❌ 端点不全 | 缺少 `/api/cycles`、`/api/airports/{icao}/procedures`、`/api/admin/*` 等 |
-| `webFinder/README.md` | ❌ 模板未改 | 仍是 Vite 模板默认内容，无项目特定信息 |
+| `docs/claude/data-formats.md` | ✅ 已确认 | `NavData.fbs` 路径存在，索引描述正确；节点 ID 映射说明已更新为显式字典映射 |
+| `README.md` | ✅ 已确认 | 端点表已包含 `/api/cycles`、`/api/airports/{icao}/procedures`、`/api/admin/*` |
+| `webFinder/README.md` | ✅ 已确认 | 已改为项目特定说明，非 Vite 模板 |
 
 ## 测试问题
 
@@ -143,7 +143,7 @@
 | `tests/test_storage_reader.py` | ❌ CI 无法运行 | 硬编码 Fenix 路径，CI 必 skip |
 | `tests/test_storage_registry.py` | ❌ CI 无法运行 | 同上；无并发/热重载测试 |
 | `tests/test_storage_builder.py` | ❌ CI 无法运行 | 同上；仅验证字节长度 >0，未验证转换正确性 |
-| `tests/test_procedure_integrity.py` | ⚠️ 逻辑矛盾 | `_is_synthetic_marker()` 仅检查 `not name`，与文档要求的 `^D\d+[A-Z]?$` 过滤矛盾 |
+| ~~`tests/test_procedure_integrity.py`~~ | ~~⚠️ 逻辑矛盾~~ | ~~`_is_synthetic_marker()` 已重命名为 `_is_empty_name_marker()`，仅检查空名，与 CLAUDE.md 一致~~ |
 | `tests/test_procedure_integrity.py` | ⚠️ 策略不一致 | `test_no_runway_all_when_specific_exists` 与 `test_post_route_no_runway_all_when_specific_exists` 对 `ALL` 的处理策略不同 |
 | `tests/test_integration_routes.py` | ⚠️ xfail 不一致 | `ZBAA->RKSI` 在 `STANDARD_ROUTES` 中标记 xfail，但在 `AIRPORT_PAIRS` 中未标记，导致部分测试硬失败 |
 | `tests/test_integration_routes.py` | ⚠️ skip 过多 | `test_exhaustive_sid_star_combinations` 在 `not sid_exits or not star_entries` 时 skip，违背 CLAUDE.md 原则 |
@@ -154,10 +154,10 @@
 ## 待确认事项
 
 1. ~~✅ 已确认：`_leg_to_point` 不过滤 D-前缀标记是有意变更。文档（CLAUDE.md、sid-star.md、testing.md）已同步更新。~~
-2. `_add_network_bridges` 是否已被 `_add_boundary_bridges` 完全替代？确认后可删除。
-3. `ZBAA->RKSI` 的 xfail 是算法特性还是 bug？需在代码注释或文档中明确。
-4. `tests/test_procedure_integrity.py` 中 `_is_synthetic_marker()` 的宽松逻辑是否与数据现实一致？
-5. 前端 `useTheme` 的 `system` 模式是否已实现？当前代码中 `system` 实际上不可用。
+2. ✅ 已确认：`_add_network_bridges` 是死代码，代码中已不存在，无需处理。
+3. ✅ 已确认：`ZBAA->RKSI` 的 xfail 是算法特性（airway 网络/选择限制），非 bug，已在 findings.md 记录。
+4. ✅ 已处理：`tests/test_procedure_integrity.py` 中 `_is_synthetic_marker()` 已重命名为 `_is_empty_name_marker()`，逻辑不变（仅检查空名），与 CLAUDE.md 一致。
+5. ✅ 已修复：`useTheme` 首次默认 `system`，`toggleTheme` 循环 light -> dark -> system。
 
 ## 引用
 

@@ -256,7 +256,7 @@ def build_from_fenix(
     try:
         cursor = conn.cursor()
 
-        builder = flatbuffers.Builder(1024 * 1024)
+        builder = flatbuffers.Builder(16 * 1024 * 1024)
 
         # Pre-fetch waypoint names for procedure leg lookup
         cursor.execute("SELECT ID, Ident FROM Waypoints")

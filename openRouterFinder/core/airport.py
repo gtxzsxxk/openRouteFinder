@@ -3,6 +3,7 @@
 import heapq
 import math
 import re
+import warnings
 from collections import defaultdict
 from dataclasses import dataclass, field
 
@@ -1802,6 +1803,11 @@ class AirportConnector:
     """
 
     def __init__(self, airport_maps: dict[str, str], node_index: dict):
+        warnings.warn(
+            "AirportConnector is deprecated; use FlatbuffersAirportConnector for .fb.zst navdata.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.airport_maps = airport_maps
         self.node_index = node_index
         self._temp_nodes: dict[str, Node] = {}

@@ -99,7 +99,7 @@ def _point_dist_km(p1, p2) -> float:
     return 2 * R * atan2(sqrt(a), sqrt(1 - a))
 
 
-def _is_synthetic_marker(name: str) -> bool:
+def _is_empty_name_marker(name: str) -> bool:
     # Fenix navdata stores every procedure waypoint in the Waypoints table.
     # D-prefixed identifiers (e.g. D321Y) are real waypoints, not synthetic
     # heading+distance markers.  Only flag empty names.
@@ -127,8 +127,8 @@ def _all_procedure_tuples(data: dict):
 
 
 @pytest.mark.parametrize("icao", TEST_AIRPORTS)
-def test_no_synthetic_markers_in_procedures(icao):
-    """D#### markers must not appear as standalone points in any procedure."""
+def test_no_empty_name_markers_in_procedures(icao):
+    """Empty-name markers must not appear as standalone points in any procedure."""
     data = _get_procedures(icao)
 
     for label, _key, proc in _all_procedure_tuples(data):
@@ -137,13 +137,13 @@ def test_no_synthetic_markers_in_procedures(icao):
         transitions = proc[3]
 
         for pt in points:
-            assert not _is_synthetic_marker(pt[0]), (
-                f"{icao} {label} {proc_name}: synthetic marker {pt[0]} in points"
+            assert not _is_empty_name_marker(pt[0]), (
+                f"{icao} {label} {proc_name}: empty-name marker {pt[0]} in points"
             )
         for t_name, t_pts in transitions:
             for pt in t_pts:
-                assert not _is_synthetic_marker(pt[0]), (
-                    f"{icao} {label} {proc_name}: synthetic marker {pt[0]} in transition {t_name}"
+                assert not _is_empty_name_marker(pt[0]), (
+                    f"{icao} {label} {proc_name}: empty-name marker {pt[0]} in transition {t_name}"
                 )
 
 
@@ -500,8 +500,8 @@ def test_star_final_approach_reasonable(icao):
         for proc in proc_list:
             points = proc[2]
             for pt in points:
-                assert not _is_synthetic_marker(pt[0]), (
-                    f"{icao} STAR {proc[0]}: synthetic marker {pt[0]} in points"
+                assert not _is_empty_name_marker(pt[0]), (
+                    f"{icao} STAR {proc[0]}: empty-name marker {pt[0]} in points"
                 )
             if len(points) < 2:
                 continue

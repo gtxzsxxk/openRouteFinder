@@ -50,6 +50,7 @@ class RouteRequest(BaseModel):
 | GET | `/health` | Health check |
 | GET | `/api/admin` | Admin statistics |
 | GET | `/api/admin/navdata` | List navdata cycles with metadata |
+| GET | `/api/admin/navdata/builds` | Active navdata builds |
 | GET | `/api/admin/navdata/{cycle}` | Cycle metadata |
 | DELETE | `/api/admin/navdata/{cycle}` | Delete a navdata cycle |
 | POST | `/api/admin/navdata/upload` | Upload Fenix A320 nd.db3 zip |
