@@ -70,14 +70,22 @@ class MmappedNavData:
         # Node index by (name, lat, lon)
         for i in range(self._nav.NodesLength()):
             n = self._nav.Nodes(i)
+            iid = n.Iid()
+            if iid in self._node_by_iid:
+                existing = self._node_by_iid[iid]
+                print(
+                    f"Warning: duplicate IID {iid} in navdata "
+                    f"(existing={existing.name!r}, new={n.Name()!r}); keeping first"
+                )
+                continue
             gn = GraphNode(
-                iid=n.Iid(),
+                iid=iid,
                 name=n.Name().decode("utf-8") if n.Name() else "",
                 px=n.Lat(),
                 py=n.Lon(),
             )
             self._node_index[gn.node_key()] = gn
-            self._node_by_iid[n.Iid()] = gn
+            self._node_by_iid[iid] = gn
 
         # Attach edges to nodes
         for i in range(self._nav.EdgesLength()):

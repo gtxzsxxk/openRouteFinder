@@ -35,14 +35,14 @@
 | ~~22~~ | ~~`core/dijkstra.py`~~ | ~~内联启发式计算与 `graph.py` 重复，使用局部 `_PI`/`_R`，修改不同步~~ | ~~1596-1600 行~~ | ~~已统一调用 `graph.heuristic_km`~~ |
 | ~~23~~ | ~~`core/dijkstra.py`~~ | ~~移除 airway 循环时丢弃重复 IID 后续节点，可能破坏路径连续性~~ | ~~1685-1698 行~~ | ~~已改为回溯到首次出现点并截断循环~~ |
 | ~~24~~ | ~~`core/airport.py`~~ | ~~`_find_nearest_connected_node` 线性扫描所有节点，O(N)~~ | ~~61-85 行~~ | ~~预建空间索引（如 KD-tree）或按网格分区~~ |
-| 25 | `core/airport.py` | `_truncate_approach_path` 使用欧几里得距离而非大圆距离 | 1826-1865 行 | 改用 `great_circle_distance_km` |
-| 26 | `core/airport.py` | `_collect_approach_bridges` 中 `proc_name` 和 `trans_name` 被解码但从未使用 | 1347-1350, 1398-1401 行 | 删除死变量 |
-| 27 | `core/airport.py` | `build_sid` 内部导入 `from collections import defaultdict`（1100 行），应在模块顶部导入 | 1100 行 | 移到文件顶部 |
-| 28 | `core/airport.py` | Legacy `AirportConnector` 类（1868-2463 行）与 `FlatbuffersAirportConnector` 并存，大量重复逻辑 | 1868-2463 行 | 评估是否可以删除 legacy 类，或标记为 deprecated |
+| ~~25~~ | ~~`core/airport.py`~~ | ~~`_truncate_approach_path` 使用欧几里得距离而非大圆距离~~ | ~~1826-1865 行~~ | ~~已改用 `great_circle_distance_km`，阈值 0.025 km~~ |
+| ~~26~~ | ~~`core/airport.py`~~ | ~~`_collect_approach_bridges` 中 `proc_name` 和 `trans_name` 被解码但从未使用~~ | ~~1347-1350, 1398-1401 行~~ | ~~已删除死变量~~ |
+| ~~27~~ | ~~`core/airport.py`~~ | ~~`build_sid` 内部导入 `from collections import defaultdict`（1100 行），应在模块顶部导入~~ | ~~1100 行~~ | ~~已移到文件顶部~~ |
+| 28 | `core/airport.py` | Legacy `AirportConnector` 类（1868-2463 行）与 `FlatbuffersAirportConnector` 并存，大量重复逻辑 | 1868-2463 行 | 已标记为 deprecated；保留以兼容旧 `.air` 文件，后续可删除 |
 | ~~29~~ | ~~`core/storage/reader.py`~~ | ~~zstd 解压异常时临时文件未被删除~~ | ~~36-48 行 finally 块~~ | ~~异常时清理临时文件~~ |
-| 30 | `core/storage/reader.py` | `_build_indices` 未处理重复 IID，后出现的静默覆盖先出现的 | 64-73 行 | 记录重复并告警 |
+| ~~30~~ | ~~`core/storage/reader.py`~~ | ~~`_build_indices` 未处理重复 IID，后出现的静默覆盖先出现的~~ | ~~64-73 行~~ | ~~已记录重复并告警，保留首次出现的节点~~ |
 | ~~31~~ | ~~`core/storage/reader.py`~~ | ~~`close()` 非幂等，第二次调用抛异常~~ | ~~196-200 行~~ | ~~添加 `self._closed` 标志~~ |
-| 32 | `core/storage/registry.py` | 文件名正则 `fb\|fb\.zst` 优先级导致 `navdata_1234.fb.zst` 匹配为 `.fb` | 13 行 | 改为 `^navdata_(\d{4})\.((?:fb\.zst)\|(?:fb))$` |
+| ~~32~~ | ~~`core/storage/registry.py`~~ | ~~文件名正则 `fb\|fb\.zst` 优先级导致 `navdata_1234.fb.zst` 匹配为 `.fb`~~ | ~~13 行~~ | ~~已改为 `^navdata_(\d{4})\.((?:fb\.zst)\|(?:fb))$`~~ |
 | 33 | `core/storage/builder.py` | `ILSAddRunwayEnd` 写入 runway end 名；经确认消费端按 end name 使用，当前语义正确 | 476-493 行 | 无需修改，已在代码中保留 end name |
 | ~~34~~ | ~~`core/storage/builder.py`~~ | ~~`_runway_base_name` 对非标准后缀（如 `T`、`W`）返回空 `opp_suffix`，导致 `18T/18T`~~ | ~~652-672 行~~ | ~~未知后缀保留原后缀~~ |
 | 35 | `core/storage/builder.py` | `RunwayEndAddHeading` 写入 `TrueHeading`；地图渲染需要真北向，当前语义正确 | 575-579 行 | 无需修改，已在注释说明为真航向 |
@@ -51,7 +51,7 @@
 | 38 | `core/data_loader.py` | `_parse_airport_detail` 依赖 legacy `NavGraph.airport_maps`，modern 路径未使用，代码已死 | 291-332 行 | 清理死代码 |
 | ~~39~~ | ~~`core/data_loader.py`~~ | ~~`_init_registry()` 未加锁，多线程同时初始化可能创建多个 Registry~~ | ~~117-131 行~~ | ~~加锁保护~~ |
 | ~~40~~ | ~~`core/admin.py`~~ | ~~`unique_ips` 已改用 OrderedDict 实现 O(1) 检查/淘汰；`total_requests` 仍无限增长~~ | ~~18, 30-31 行~~ | ~~已改为 `deque(maxlen=2000)` 窗口~~ |
-| 41 | `utils/metar.py` | `fetch_metar` 中 `requests.get` 成功后先写文件再更新内存，写文件失败则内存不更新 | 21-31 行 | 先更新内存或统一事务 |
+| ~~41~~ | ~~`utils/metar.py`~~ | ~~`fetch_metar` 中 `requests.get` 成功后先写文件再更新内存，写文件失败则内存不更新~~ | ~~21-31 行~~ | ~~已改为先更新内存再原子写文件~~ |
 | ~~42~~ | ~~`utils/metar.py`~~ | ~~`read_metar` fallback 读文件未加锁，与 `fetch_metar` 写文件可能并发读到半写文件~~ | ~~56 行~~ | ~~加锁或临时文件+重命名~~ |
 | ~~43~~ | ~~`utils/metar.py`~~ | ~~`start_metar_updater` 线程在应用关闭时无法优雅停止~~ | ~~68-80 行~~ | ~~使用 `threading.Event` 控制退出~~ |
 | ~~44~~ | ~~`utils/validcode.py`~~ | ~~`_get_font` 每次调用重新加载字体文件~~ | ~~11-20 行~~ | ~~缓存字体对象~~ |

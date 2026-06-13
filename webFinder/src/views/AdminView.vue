@@ -438,15 +438,16 @@ function handleDelete(cycle: string) {
   deleteCycle(cycle)
 }
 
-let activeEsCleanup: (() => void) | null = null
+const activeEsCleanups = new Map<string, () => void>()
 
 function attachProgress(buildId: string) {
-  if (activeEsCleanup) {
-    activeEsCleanup()
-    activeEsCleanup = null
+  const existing = activeEsCleanups.get(buildId)
+  if (existing) {
+    existing()
+    activeEsCleanups.delete(buildId)
   }
   isBuilding.value = true
-  activeEsCleanup = connectProgress(buildId, (p) => {
+  const cleanup = connectProgress(buildId, (p) => {
     buildProgress.value = {
       status: p.status,
       step: p.step,
@@ -455,7 +456,7 @@ function attachProgress(buildId: string) {
     }
     if (p.status === 'done' || p.status === 'error') {
       isBuilding.value = false
-      activeEsCleanup = null
+      activeEsCleanups.delete(buildId)
       setTimeout(() => {
         showProgressModal.value = false
         hasSelectedFile.value = false
@@ -463,6 +464,7 @@ function attachProgress(buildId: string) {
       }, p.status === 'done' ? 1500 : 4000)
     }
   })
+  activeEsCleanups.set(buildId, cleanup)
 }
 
 async function handleUpload() {
@@ -514,10 +516,10 @@ function formatTime(iso: string): string {
 }
 
 onUnmounted(() => {
-  if (activeEsCleanup) {
-    activeEsCleanup()
-    activeEsCleanup = null
+  for (const cleanup of activeEsCleanups.values()) {
+    cleanup()
   }
+  activeEsCleanups.clear()
 })
 </script>
 

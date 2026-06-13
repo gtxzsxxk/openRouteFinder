@@ -26,15 +26,17 @@ def fetch_metar() -> str:
                 headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"},
                 timeout=(5, 15),
             )
+            # Update in-memory cache first so readers see the new data even if
+            # the subsequent file write fails.
+            with _metar_lock:
+                global _metar_data
+                _metar_data = r.text
             # Atomic write so readers never see a half-written file.
             with _metar_file_lock:
                 tmp_path = settings.metar_full_path.with_suffix(".tmp")
                 with open(tmp_path, "w") as f:
                     f.write(r.text)
                 tmp_path.replace(settings.metar_full_path)
-            with _metar_lock:
-                global _metar_data
-                _metar_data = r.text
             return r.text
         except Exception as e:
             print(f"METAR update attempt {attempt}/3 failed: {e}")

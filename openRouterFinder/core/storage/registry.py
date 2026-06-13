@@ -72,7 +72,7 @@ class _NavDataRef:
 class NavDataRegistry:
     """Thread-safe registry of mmapped navdata versions."""
 
-    _FILENAME_RE = re.compile(r"^navdata_(\d{4})\.(fb|fb\.zst)$")
+    _FILENAME_RE = re.compile(r"^navdata_(\d{4})\.((?:fb\.zst)|(?:fb))$")
 
     def __init__(self, data_dir: Path):
         self._data_dir = data_dir

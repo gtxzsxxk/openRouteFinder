@@ -1036,8 +1036,6 @@ class FlatbuffersAirportConnector:
         # For transition-only procedures (no main legs), merge all options of
         # the same (name, runway) into one Procedure with transitions so each
         # option remains selectable in the frontend.
-        from collections import defaultdict
-
         runway_groups = defaultdict(list)
         for proc_name, runway, exit_node, points, transitions, is_main in runway_segments:
             runway_groups[(proc_name, runway)].append((exit_node, points, transitions, is_main))
@@ -1283,11 +1281,6 @@ class FlatbuffersAirportConnector:
             if proc.Type() != 3:
                 continue
 
-            (
-                proc.Name().decode("utf-8")
-                if isinstance(proc.Name(), bytes)
-                else (proc.Name() or "")
-            )
             runway = (
                 proc.Runway().decode("utf-8")
                 if isinstance(proc.Runway(), bytes)
@@ -1334,11 +1327,6 @@ class FlatbuffersAirportConnector:
             # after splitting), fall back to the full transition points.
             for j in range(proc.TransitionsLength()):
                 trans = proc.Transitions(j)
-                (
-                    trans.Name().decode("utf-8")
-                    if isinstance(trans.Name(), bytes)
-                    else (trans.Name() or "")
-                )
 
                 segments = self._extract_transition_segments(trans, proc_type=3)
                 full_points = self._get_transition_points(trans)
@@ -1778,13 +1766,13 @@ class FlatbuffersAirportConnector:
             return []
 
         rwy_lat, rwy_lon = runway_coords
-        RUNWAY_MATCH_THRESHOLD = 0.0002  # degrees, ~22 meters
+        RUNWAY_MATCH_THRESHOLD_KM = 0.025  # ~22 meters
 
         # Strategy 1: unnamed runway threshold marker
         for i, (name, lat, lon) in enumerate(points):
             if not name:
-                dist = ((lat - rwy_lat) ** 2 + (lon - rwy_lon) ** 2) ** 0.5
-                if dist <= RUNWAY_MATCH_THRESHOLD:
+                dist = great_circle_distance_km(lat, lon, rwy_lat, rwy_lon)
+                if dist <= RUNWAY_MATCH_THRESHOLD_KM:
                     return points[:i]
 
         # Strategy 2: explicit missed approach point
@@ -1796,7 +1784,7 @@ class FlatbuffersAirportConnector:
         min_dist = float("inf")
         min_idx = 0
         for i, (_name, lat, lon) in enumerate(points):
-            dist = ((lat - rwy_lat) ** 2 + (lon - rwy_lon) ** 2) ** 0.5
+            dist = great_circle_distance_km(lat, lon, rwy_lat, rwy_lon)
             if dist < min_dist:
                 min_dist = dist
                 min_idx = i
@@ -1805,7 +1793,13 @@ class FlatbuffersAirportConnector:
 
 
 class AirportConnector:
-    """Builds temporary airport connections without modifying shared node list."""
+    """Builds temporary airport connections without modifying shared node list.
+
+    .. deprecated::
+        Legacy pickle-based connector. FlatbuffersAirportConnector is the
+        active implementation for .fb.zst navdata. This class is kept only for
+        backwards compatibility with old .air files and should not be extended.
+    """
 
     def __init__(self, airport_maps: dict[str, str], node_index: dict):
         self.airport_maps = airport_maps
