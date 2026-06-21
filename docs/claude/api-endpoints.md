@@ -227,7 +227,10 @@ Health check.
 
 ## Admin (Protected)
 
-All admin endpoints require `x-admin-key` header matching `settings.admin_key`.
+All admin endpoints require `x-admin-key` matching `settings.admin_key`, supplied
+either as the `X-Admin-Key` header or as an `x_admin_key` query parameter. The
+query-param form exists for the SSE build-progress stream, since `EventSource`
+cannot set custom request headers.
 
 ### GET `/api/admin`
 

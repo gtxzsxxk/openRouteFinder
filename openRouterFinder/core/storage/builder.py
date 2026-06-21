@@ -527,11 +527,11 @@ def _build_airports(cursor, builder, wp_names: dict[int, str], progress=None) ->
         LEFT JOIN TerminalLegsEx tle ON tl.ID = tle.ID
         ORDER BY tl.TerminalID, {seq_col}
     """)
+    # Rows arrive already ordered by the SQL ORDER BY (TerminalID, seq_col),
+    # so per-terminal grouping preserves that order — no re-sort needed.
     legs_by_terminal: dict[int, list] = {}
     for row in cursor.fetchall():
         legs_by_terminal.setdefault(row["TerminalID"], []).append(row)
-    for terminal_id, legs in legs_by_terminal.items():
-        legs.sort(key=lambda r: r.get("SeqNumber") or r["ID"])
 
     # 6. Fetch all transitions in one query
     cursor.execute("""

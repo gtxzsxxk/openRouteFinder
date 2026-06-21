@@ -12,7 +12,7 @@ from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -215,13 +215,21 @@ _valid_codes = _TTLCodeStore()
 
 # --- Admin key verification ---
 
-def verify_admin_key(x_admin_key: str = Header(default="")) -> str:
-    """FastAPI dependency that validates the X-Admin-Key header."""
+def verify_admin_key(
+    x_admin_key: str = Header(default=""),
+    x_admin_key_query: str = Query(default="", alias="x_admin_key"),
+) -> str:
+    """Validate the admin key from the X-Admin-Key header or x_admin_key query param.
+
+    The query-param fallback exists for EventSource/SSE clients (e.g. the
+    build-progress stream), which cannot set custom request headers.
+    """
+    key = x_admin_key or x_admin_key_query
     if not settings.admin_key or settings.admin_key == "set_yourself":
         raise HTTPException(status_code=403, detail="Admin not configured")
-    if x_admin_key != settings.admin_key:
+    if key != settings.admin_key:
         raise HTTPException(status_code=403, detail="Invalid key")
-    return x_admin_key
+    return key
 
 
 # --- Airport prefix index ---
