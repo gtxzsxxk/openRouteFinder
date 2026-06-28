@@ -37,11 +37,17 @@ cd openRouterFinder && uvicorn api:app --host 0.0.0.0 --port 9807   # production
 ```
 
 ### Testing
+
+Two-layer suite: `tests/unit/` (direct object/function tests) and `tests/e2e/`
+(boots a real uvicorn server and drives it over HTTP). Config is in
+`pyproject.toml`; the e2e layer has `tests/e2e/conftest.py`.
+
 ```bash
-pytest                   # run all tests
-pytest tests/test_dijkstra.py -v   # single test file
-pytest tests/test_airport.py::test_build_sid_with_filter -v   # single test
-PYTHONPATH=. DISABLE_CAPTCHA=true pytest tests/test_integration_routes.py -v
+PYTHONPATH=. DISABLE_CAPTCHA=true pytest      # all tests
+pytest tests/unit -v                          # unit layer only
+pytest tests/e2e -v                           # e2e layer (boots a server)
+pytest tests/unit/test_dijkstra.py -v         # single file
+pytest tests/unit/test_airport_unit.py::test_build_sid_with_filter -v   # single test
 ```
 
 ### Linting
@@ -93,7 +99,7 @@ Key modules:
 2. **FlatBuffers `.fb.zst` files** — modern format, mmapped, supports multiple cycles. This is the active path for new features.
 3. **Fenix A320 `nd.db3`** — uploaded via admin API, converted to FlatBuffers in a background thread.
 
-**Testing**: Pure pytest, no `pytest.ini` or `setup.cfg`. Tests in `tests/` import directly from `openRouterFinder.*`.
+**Testing**: Two layers — `tests/unit/` (direct object/function tests) and `tests/e2e/` (real uvicorn server over HTTP). pytest config is in `pyproject.toml [tool.pytest.ini_options]`; e2e fixtures live in `tests/e2e/conftest.py`. Tests import directly from `openRouterFinder.*`.
 
 ### Frontend (`webFinder/`)
 
