@@ -970,6 +970,56 @@ class FlatbuffersAirportConnector:
         # STAR transition: airport side is the last point
         return self._resolve_node(points[-1][0], points[-1][1], points[-1][2])
 
+    # Maximum airport->fix distance (nm) for the synthetic vector fallback.
+    # Kept well under the no-teleportation test thresholds (domestic <=100 nm,
+    # international <=300 nm) so the synthetic leg never trips those invariants.
+    _VECTOR_FALLBACK_MAX_NM = 50.0
+
+    def _add_synthetic_vector_fallback(self, conn: "AirportConnection", proc_type: int) -> None:
+        """Connect a vector-only airport directly to the nearest airway fix.
+
+        Some airports (e.g. CYVR) publish only radar-vector SIDs/STARs: every
+        leg is a heading-to-altitude / heading-to-manual-termination leg with no
+        waypoint, so the normal builder yields zero procedures and the route
+        engine has nothing to start from.  Real-world departures from such
+        airports fly a heading and are vectored onto the enroute network at the
+        first convenient fix.  We model that by synthesising a single
+        ``RADAR VECTORS`` procedure from the airport to the nearest connected
+        fix.  ``proc_type``: 1 = SID (airport -> network), 2 = STAR
+        (network -> airport).  No-op if a fix cannot be found within range.
+        """
+        airport_node = conn.airport_node
+        fix = self._find_nearest_connected_node(
+            airport_node.px, airport_node.py, exclude_iid=airport_node.iid
+        )
+        if fix is None:
+            return
+
+        dist_nm = great_circle_distance_km(airport_node.px, airport_node.py, fix.px, fix.py) / 1.852
+        if dist_nm > self._VECTOR_FALLBACK_MAX_NM:
+            # Nearest fix is too far to be a plausible radar vector; leave the
+            # airport unroutable rather than fabricate a teleporting leg.
+            return
+
+        airport_pt = (airport_node.name, airport_node.px, airport_node.py)
+        fix_pt = (fix.name, fix.px, fix.py)
+        if proc_type == 1:  # SID: airport -> network fix
+            points = [airport_pt, fix_pt]
+            edge = Edge(nfrom=airport_node.iid, nend=fix.iid, name="SID")
+        else:  # STAR: network fix -> airport
+            points = [fix_pt, airport_pt]
+            edge = Edge(nfrom=fix.iid, nend=airport_node.iid, name="STAR")
+
+        # runway="" (Fenix's "unassigned/common" convention) — NOT "ALL".
+        # A synthetic radar-vector leg has no real assigned runway; the
+        # controller assigns one at departure/arrival.  Empty string is the
+        # only non-runway value the procedure-integrity invariants permit
+        # ("ALL" is explicitly forbidden in frontend procedure lists).
+        proc = Procedure(name="RADAR VECTORS", runway="", points=points, transitions=[])
+        conn.procedures.setdefault(fix.name, []).append(proc)
+        conn.connections.append(edge)
+        conn.internal_edges.append(edge)
+
     def build_sid(self, icao: str, filter_name: str | None = None) -> AirportConnection | None:
         """Build departure (SID) connections for an airport."""
         icao = icao.upper()
@@ -1245,6 +1295,10 @@ class FlatbuffersAirportConnector:
             temp_nodes=list(self._temp_nodes.values()),
             internal_edges=[],
         )
+        if not result.procedures:
+            # Vector-only airport (no waypoint SIDs): connect directly to the
+            # nearest airway fix so departures remain routable.
+            self._add_synthetic_vector_fallback(result, 1)
         self._add_boundary_bridges(result, 1)
         return result
 
@@ -1666,6 +1720,10 @@ class FlatbuffersAirportConnector:
             temp_nodes=list(self._temp_nodes.values()),
             internal_edges=[],
         )
+        if not result.procedures:
+            # Vector-only airport (no waypoint STARs): connect the nearest
+            # airway fix directly to the airport so arrivals remain routable.
+            self._add_synthetic_vector_fallback(result, 2)
         self._add_boundary_bridges(result, 2)
         return result
 

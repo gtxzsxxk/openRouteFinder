@@ -41,6 +41,7 @@ AIRPORT_PAIRS = [
     ("ZBAA", "TNCM"),
     ("ZBAA", "ZGSZ"),
     ("VHHH", "RCTP"),
+    ("CYVR", "KSFO"),
 ]
 
 # 需要跑完整 SID × STAR 笛卡尔积的航线
@@ -1103,8 +1104,7 @@ def _assert_api_response_structure(data: dict, orig: str, dest: str):
                 if not isinstance(proc, list) or len(proc) != 4:
                     proc_len = len(proc) if isinstance(proc, list) else "N/A"
                     errors.append(
-                        f"{label}[{key!r}] procedure shape "
-                        f"{type(proc).__name__} len={proc_len}"
+                        f"{label}[{key!r}] procedure shape {type(proc).__name__} len={proc_len}"
                     )
                     continue
                 pname, prunway, ppoints, ptrans = proc
@@ -1395,8 +1395,7 @@ def _verify_sid_star_complete_path(
             # Check boundary conditions
             if label == "SID" and proc_seg_nodes and proc_seg_nodes[0] != proc_names[0]:
                 continue
-            if (label == "STAR" and proc_seg_nodes
-                    and proc_seg_nodes[-1] != proc_names[-1]):
+            if label == "STAR" and proc_seg_nodes and proc_seg_nodes[-1] != proc_names[-1]:
                 continue
 
             valid_procs.append(proc)
@@ -1430,13 +1429,12 @@ def _verify_sid_star_complete_path(
             f"SID segment: {seg_nodes}"
         )
 
-    if (label == "STAR" and proc_seg_nodes and proc_names
-            and proc_seg_nodes[-1] != proc_names[-1]):
+    if label == "STAR" and proc_seg_nodes and proc_names and proc_seg_nodes[-1] != proc_names[-1]:
         errors.append(
-                f"{orig}->{dest} STAR: last proc node {proc_seg_nodes[-1]!r} != "
-                f"procedure last point {proc_names[-1]!r} ({best_proc[0]} rwy={best_proc[1]}). "
-                f"STAR segment: {seg_nodes}"
-            )
+            f"{orig}->{dest} STAR: last proc node {proc_seg_nodes[-1]!r} != "
+            f"procedure last point {proc_names[-1]!r} ({best_proc[0]} rwy={best_proc[1]}). "
+            f"STAR segment: {seg_nodes}"
+        )
 
     return errors
 
