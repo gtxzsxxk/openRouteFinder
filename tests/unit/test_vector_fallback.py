@@ -21,11 +21,13 @@ from openRouterFinder.core.data_loader import search_route
 from openRouterFinder.core.graph import Node, great_circle_distance_km
 from openRouterFinder.core.storage.reader import MmappedNavData
 
-DATA_PATH = Path(__file__).parent.parent / "data" / "navdata_2604.fb.zst"
+DATA_PATH = Path(__file__).parent.parent.parent / "data" / "navdata_2604.fb.zst"
 
 
 @pytest.fixture(scope="module")
 def navdata_fb():
+    if not DATA_PATH.exists():
+        pytest.skip("navdata_2604.fb.zst not available")
     nav = MmappedNavData(DATA_PATH)
     yield nav
     nav.close()
