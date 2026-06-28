@@ -401,7 +401,27 @@ export function useMap(
       const sidRouteName = routeResult.value?.sidRouteNodeName || routeResult.value?.sidNodeName
       const starRouteName = routeResult.value?.starRouteNodeName || routeResult.value?.starNodeName
       const sidIdx = nodes.findIndex(n => n.name === sidRouteName)
-      const starIdx = nodes.findIndex(n => n.name === starRouteName)
+
+      // The enroute line is cut where the STAR begins so the STAR can be drawn
+      // separately. That cut must follow the *currently selected* STAR, not the
+      // static starRouteNodeName from the route result: when the user switches
+      // to a STAR that joins the route at a different fix, keeping the cut at
+      // the auto-selected STAR's entry orphans the segment in between (e.g. the
+      // route enters via RBG for STINS4, but PYE3 joins at ENI — the RBG->ENI
+      // leg must stay on the enroute line). Cut at the earliest route node that
+      // belongs to the selected STAR (main points or selected transition);
+      // fall back to the static name when nothing matches.
+      const selectedStarNames = new Set<string>()
+      if (selectedSTAR.value) {
+        for (const p of selectedSTAR.value.points) selectedStarNames.add(p.name)
+        if (selectedSTARTransition.value) {
+          for (const p of selectedSTARTransition.value.points) selectedStarNames.add(p.name)
+        }
+      }
+      let starIdx = selectedStarNames.size
+        ? nodes.findIndex(n => selectedStarNames.has(n.name))
+        : -1
+      if (starIdx < 0) starIdx = nodes.findIndex(n => n.name === starRouteName)
 
       // Route point features: exclude SID/STAR internal points so the map only
       // shows the user-selected procedure points, not the A* route's internal ones.
