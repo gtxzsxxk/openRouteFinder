@@ -28,6 +28,7 @@ def test_build_sid_with_filter():
     nav = get_nav_data()
     if nav is None:
         import pytest
+
         pytest.skip("Navdata not available")
 
     conn = FlatbuffersAirportConnector(nav)
@@ -49,6 +50,7 @@ def test_build_star_with_filter():
     nav = get_nav_data()
     if nav is None:
         import pytest
+
         pytest.skip("Navdata not available")
 
     conn = FlatbuffersAirportConnector(nav)
