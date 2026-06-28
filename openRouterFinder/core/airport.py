@@ -1295,9 +1295,12 @@ class FlatbuffersAirportConnector:
             temp_nodes=list(self._temp_nodes.values()),
             internal_edges=[],
         )
-        if not result.procedures:
+        if not result.procedures and not filter_name:
             # Vector-only airport (no waypoint SIDs): connect directly to the
-            # nearest airway fix so departures remain routable.
+            # nearest airway fix so departures remain routable.  Guarded by
+            # `not filter_name`: an empty result caused by a non-matching
+            # filter means the requested procedure does not exist, so we must
+            # return empty rather than fabricate a radar-vector leg.
             self._add_synthetic_vector_fallback(result, 1)
         self._add_boundary_bridges(result, 1)
         return result
@@ -1720,9 +1723,12 @@ class FlatbuffersAirportConnector:
             temp_nodes=list(self._temp_nodes.values()),
             internal_edges=[],
         )
-        if not result.procedures:
+        if not result.procedures and not filter_name:
             # Vector-only airport (no waypoint STARs): connect the nearest
             # airway fix directly to the airport so arrivals remain routable.
+            # Guarded by `not filter_name`: an empty result caused by a
+            # non-matching filter means the requested procedure does not exist,
+            # so we must return empty rather than fabricate a radar-vector leg.
             self._add_synthetic_vector_fallback(result, 2)
         self._add_boundary_bridges(result, 2)
         return result
