@@ -70,6 +70,7 @@ class RouteEngine:
         node_list: tuple[Node | None, ...],
         data_version: str,
         node_index: dict[tuple[str, float, float], Node] | None = None,
+        cache: dict | None = None,
     ):
         self.node_list = node_list
         self.data_version = data_version
@@ -84,34 +85,46 @@ class RouteEngine:
                 if node is not None:
                     self._node_index[node.node_key()] = node
 
-        # Precompute edge distances once (edges are shared, so this only
-        # needs to run on the first RouteEngine instantiation).
-        for node in node_list:
-            if node is not None:
-                for edge in node.next_list:
-                    if edge.dist == 0.0 and edge.nend < self.num_nodes:
-                        next_node = node_list[edge.nend]
-                        if next_node is not None:
-                            edge.dist = great_circle_distance_km(
-                                node.px,
-                                node.py,
-                                next_node.px,
-                                next_node.py,
-                            )
+        # Preprocessing below is a pure function of the immutable, shared graph,
+        # so it is memoised on the caller-supplied `cache` (the navdata's
+        # process-lifetime cache). A new RouteEngine is built per request; without
+        # this cache these full-graph scans would re-run on every query and
+        # dominate latency. When no cache is supplied (tests, synthetic graphs)
+        # fall back to a private dict so the work still runs once per engine.
+        cache = cache if cache is not None else {}
+
+        # Precompute edge distances once. Edges are shared and mutated in place,
+        # so the backfill is idempotent; the one-time flag skips re-scanning the
+        # whole edge set on subsequent engines built over the same graph.
+        if not cache.get("_edges_dist_done"):
+            for node in node_list:
+                if node is not None:
+                    for edge in node.next_list:
+                        if edge.dist == 0.0 and edge.nend < self.num_nodes:
+                            next_node = node_list[edge.nend]
+                            if next_node is not None:
+                                edge.dist = great_circle_distance_km(
+                                    node.px,
+                                    node.py,
+                                    next_node.px,
+                                    next_node.py,
+                                )
+            cache["_edges_dist_done"] = True
 
         # Precompute T-route skip cache per node for fast _should_skip_edge.
-        self._node_has_non_t: list[bool] = [False] * self.num_nodes
-        for node in node_list:
-            if node is not None:
-                self._node_has_non_t[node.iid] = any(
-                    not (
-                        e.name
-                        and e.name[0] == "T"
-                        and len(e.name) > 1
-                        and e.name[1:].isdigit()
+        node_has_non_t = cache.get("_node_has_non_t")
+        if node_has_non_t is None:
+            node_has_non_t = [False] * self.num_nodes
+            for node in node_list:
+                if node is not None:
+                    node_has_non_t[node.iid] = any(
+                        not (
+                            e.name and e.name[0] == "T" and len(e.name) > 1 and e.name[1:].isdigit()
+                        )
+                        for e in node.next_list
                     )
-                    for e in node.next_list
-                )
+            cache["_node_has_non_t"] = node_has_non_t
+        self._node_has_non_t = node_has_non_t
 
     def search(
         self,
@@ -1500,9 +1513,7 @@ class RouteEngine:
         if len(points) < 2:
             return 0.0
         return sum(
-            great_circle_distance_km(
-                points[i][1], points[i][2], points[i + 1][1], points[i + 1][2]
-            )
+            great_circle_distance_km(points[i][1], points[i][2], points[i + 1][1], points[i + 1][2])
             for i in range(len(points) - 1)
         )
 
@@ -1595,8 +1606,10 @@ class RouteEngine:
                 sid_candidates,
                 key=lambda c: (
                     great_circle_distance_km(
-                        c[1].px, c[1].py,
-                        star_conn.airport_node.px, star_conn.airport_node.py,
+                        c[1].px,
+                        c[1].py,
+                        star_conn.airport_node.px,
+                        star_conn.airport_node.py,
                     )
                     + self._candidate_procedure_length(c[0], c[3])
                 ),
@@ -1606,8 +1619,10 @@ class RouteEngine:
                 star_candidates,
                 key=lambda c: (
                     great_circle_distance_km(
-                        c[1].px, c[1].py,
-                        sid_conn.airport_node.px, sid_conn.airport_node.py,
+                        c[1].px,
+                        c[1].py,
+                        sid_conn.airport_node.px,
+                        sid_conn.airport_node.py,
                     )
                     + self._candidate_procedure_length(c[0], c[3])
                 ),
@@ -1684,8 +1699,13 @@ class RouteEngine:
                         if next_node.node_key() in forbidden:
                             continue
                         ename = edge.name
-                        if (ename and ename[0] == "T" and len(ename) > 1
-                                and ename[1:].isdigit() and has_non_t[curr]):
+                        if (
+                            ename
+                            and ename[0] == "T"
+                            and len(ename) > 1
+                            and ename[1:].isdigit()
+                            and has_non_t[curr]
+                        ):
                             continue
                         nd = g_score + edge.dist
                         if nd < dists[nend]:

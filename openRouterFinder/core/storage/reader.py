@@ -37,6 +37,12 @@ class MmappedNavData:
         self._node_by_iid: dict[int, GraphNode] = {}
         self._airport_by_icao: dict[str, int] = {}
         self._navaid_by_ident: dict[str, list[int]] = {}
+        # Process-lifetime cache for derived structures that are pure functions
+        # of this immutable navdata (spatial index, T-route skip table, edge
+        # distance backfill flag). Lives on the shared MmappedNavData — NOT on
+        # the per-request _NavDataRef wrapper — so it is built once per cycle and
+        # reused across every request instead of being rebuilt each query.
+        self._cache: dict = {}
 
         actual_path = fb_path
         if str(fb_path).endswith(".fb.zst"):
@@ -46,10 +52,10 @@ class MmappedNavData:
                 dctx = zstd.ZstdDecompressor()
                 with open(fb_path, "rb") as zst_in, dctx.stream_reader(zst_in) as reader:
                     while True:
-                            chunk = reader.read(1024 * 1024)
-                            if not chunk:
-                                break
-                            os.write(tmp_fd, chunk)
+                        chunk = reader.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        os.write(tmp_fd, chunk)
             finally:
                 os.close(tmp_fd)
             actual_path = Path(tmp_name)

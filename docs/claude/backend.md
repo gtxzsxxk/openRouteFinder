@@ -115,7 +115,8 @@ class Settings(BaseSettings):
 
 ```python
 class RouteEngine:
-    def __init__(self, node_list: Tuple[Node, ...], data_version: str)
+    def __init__(self, node_list: Tuple[Node, ...], data_version: str,
+                 node_index: Optional[dict] = None, cache: Optional[dict] = None)
     def search(self, orig: str, dest: str,
                sid_conn: Optional[AirportConnection],
                star_conn: Optional[AirportConnection],
@@ -241,12 +242,14 @@ Flow:
 2. Get navdata for cycle (or latest)
 3. Validate airports exist
 4. `FlatbuffersAirportConnector(nav)` → cached `build_sid(orig)` / `build_star(dest)` via LRU caches
-5. `RouteEngine(nav.node_list, nav.cycle)` → `engine.search(...)`
+5. `RouteEngine(nav.node_list, nav.cycle, cache=nav._cache)` → `engine.search(...)`
 6. Parse JSON result
 7. Enrich with airport details and runway info
 8. Return dict
 
 Thread-safe: creates fresh `RouteEngine` per call. `AirportConnection` objects are cached and `dataclasses.replace()` is used to give each request isolated `temp_nodes`. Cache size is controlled by `AIRPORT_CONNECTION_CACHE_SIZE`.
+
+**Per-cycle derived-structure cache (`MmappedNavData._cache`).** Structures that are pure functions of the immutable navdata — the `_ConnectedNodeIndex` spatial grid, `RouteEngine._node_has_non_t` T-route skip table, and the one-time `edge.dist` backfill flag — are memoised on a `_cache` dict that lives on the long-lived **shared `MmappedNavData`**, not on the per-request `_NavDataRef` wrapper. The wrapper has no `_cache` of its own; access falls through `__getattr__` to the shared object. `search_route` passes `nav._cache` into `RouteEngine`, so these full-graph scans run once per cycle instead of on every query. This is what keeps a warm route query at ~15 ms (the A\* search itself is ~12 ms) rather than ~120 ms — without it, each request rebuilt the spatial index and skip table from scratch. The first request after load still pays the one-time build.
 
 ---
 

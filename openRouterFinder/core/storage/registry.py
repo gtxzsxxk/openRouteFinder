@@ -20,14 +20,13 @@ class _NavDataRef:
     even if a caller forgets to use the context manager or call release().
     """
 
-    __slots__ = ("__weakref__", "_cache", "_cycle", "_finalizer", "_nav", "_registry", "_released")
+    __slots__ = ("__weakref__", "_cycle", "_finalizer", "_nav", "_registry", "_released")
 
     def __init__(self, nav: MmappedNavData, cycle: str, registry: "NavDataRegistry"):
         self._nav = nav
         self._cycle = cycle
         self._registry = registry
         self._released = False
-        self._cache = {}
         # Finalizer holds a weak reference to self via a ref object, so it does
         # not keep the wrapper alive.  It resurrects self briefly only to call
         # release() if that has not already happened.

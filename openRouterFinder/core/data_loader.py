@@ -266,7 +266,12 @@ def search_route(
         if not sid_conn.connections or not star_conn.connections:
             return None
 
-        engine = RouteEngine(nav.node_list, nav.cycle, node_index=nav.node_index)
+        engine = RouteEngine(
+            nav.node_list,
+            nav.cycle,
+            node_index=nav.node_index,
+            cache=nav._cache,
+        )
         result_json = engine.search(
             orig,
             dest,
