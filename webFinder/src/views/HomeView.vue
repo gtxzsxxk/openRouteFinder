@@ -22,8 +22,8 @@
     >
       <p class="text-error text-sm">{{ store.error }}</p>
       <button
-        @click="store.setError(null)"
         class="text-error/70 hover:text-error transition-colors"
+        @click="store.setError(null)"
       >
         <X class="w-4 h-4" />
       </button>
@@ -35,8 +35,8 @@
       <RouteHero
         :route="store.routeResult.route"
         :distance="store.routeResult.distance"
-        :totalTime="store.routeResult.total_time"
-        :dataVersion="store.routeResult.data_version"
+        :total-time="store.routeResult.total_time"
+        :data-version="store.routeResult.data_version"
       />
 
       <!-- Bento Grid -->
@@ -85,7 +85,7 @@
           <div class="absolute top-[3.75rem] bottom-6 left-6 right-6 overflow-y-auto space-y-0">
             <div
               v-for="(node, i) in store.routeResult.nodes"
-              :key="i"
+              :key="`${node.name}-${i}`"
               class="flex items-center justify-between py-4 border-b border-border last:border-0"
             >
               <div class="flex items-center gap-3">
@@ -112,7 +112,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, onUnmounted } from 'vue'
 import { X } from '@lucide/vue'
 import { useRouteStore } from '@/stores/routeStore'
 import { useRouteQuery } from '@/composables/useRouteQuery'
@@ -130,15 +130,22 @@ const { mutate: searchRoute } = useRouteQuery()
 
 const queryTime = ref(0)
 let timer: ReturnType<typeof setInterval> | null = null
+let queryStartTime = 0
 
 function handleSearch(params: { orig: string; dest: string; validCode: string; validToken: string; sidExit: string; starEntry: string; cycle: string }) {
   store.setLoading(true)
   store.setError(null)
   queryTime.value = 0
+  queryStartTime = performance.now()
+
+  if (timer) {
+    clearInterval(timer)
+    timer = null
+  }
 
   timer = setInterval(() => {
-    queryTime.value += 0.01
-  }, 10)
+    queryTime.value = Number(((performance.now() - queryStartTime) / 1000).toFixed(2))
+  }, 100)
 
   searchRoute(params, {
     onSuccess: (data) => {
@@ -156,6 +163,13 @@ function handleSearch(params: { orig: string; dest: string; validCode: string; v
 
 watch(() => store.isLoading, (loading) => {
   if (!loading && timer) {
+    clearInterval(timer)
+    timer = null
+  }
+})
+
+onUnmounted(() => {
+  if (timer) {
     clearInterval(timer)
     timer = null
   }

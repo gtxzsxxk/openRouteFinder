@@ -1,18 +1,21 @@
 """In-memory admin statistics collection."""
 
-from collections import deque
+from collections import OrderedDict, deque
 from datetime import datetime, timezone
 from typing import Any
 
-# All deques have maxlen to prevent unbounded memory growth.
+# Bounded structures to prevent unbounded memory growth. unique_ips uses an
+# OrderedDict as an insertion-ordered set so membership checks are O(1).
 _data = {
     "start_time": datetime.now(timezone.utc),
-    "total_requests": 0,
-    "unique_ips": deque(maxlen=5000),
+    "total_requests": deque(maxlen=2000),
+    "unique_ips": OrderedDict(),  # ip -> None, maxlen enforced manually
     "recent_requests": deque(maxlen=200),
     "route_searches": deque(maxlen=200),
     "errors": deque(maxlen=100),
 }
+_UNIQUE_IP_MAXLEN = 5000
+_TOTAL_REQUESTS_MAXLEN = 2000
 
 # Paths that create noise and should not be logged.
 _SKIP_PATHS = frozenset({"/api/validcode", "/api/admin", "/health", "/favicon.ico"})
@@ -27,9 +30,16 @@ def _should_log(path: str) -> bool:
 def record_request(ip: str, method: str, path: str, status: int, duration_ms: float) -> None:
     if not _should_log(path):
         return
-    _data["total_requests"] += 1
-    if ip not in _data["unique_ips"]:
-        _data["unique_ips"].append(ip)
+    _data["total_requests"].append(
+        {"time": datetime.now(timezone.utc).isoformat(), "path": path}
+    )
+    ips = _data["unique_ips"]
+    if ip in ips:
+        ips.move_to_end(ip)
+    else:
+        ips[ip] = None
+        if len(ips) > _UNIQUE_IP_MAXLEN:
+            ips.popitem(last=False)
     entry = {
         "time": datetime.now(timezone.utc).isoformat(),
         "ip": ip,
@@ -82,8 +92,8 @@ def get_stats() -> dict[str, Any]:
     return {
         "start_time": _data["start_time"].isoformat(),
         "uptime_seconds": uptime,
-        "total_requests": _data["total_requests"],
-        "unique_visitors": len(set(_data["unique_ips"])),
+        "total_requests": len(_data["total_requests"]),
+        "unique_visitors": len(_data["unique_ips"]),
         "recent_requests": list(_data["recent_requests"]),
         "route_searches": list(_data["route_searches"]),
         "errors": list(_data["errors"]),

@@ -27,7 +27,7 @@ function isDarkMode() {
 
 export function useMap(
   containerRef: Ref<HTMLElement | null>,
-  routeResult: Ref<RouteResult | null>,
+  routeResult: Ref<RouteResult | null> | Readonly<Ref<RouteResult | null>>,
   selectedSID: Ref<ProcedureData | null>,
   selectedSTAR: Ref<ProcedureData | null>,
   selectedSIDTransition: Ref<TransitionData | null>,
@@ -40,6 +40,10 @@ export function useMap(
   const pendingUpdate = ref(false)
   const updateTimer = ref<ReturnType<typeof setTimeout> | null>(null)
   const currentStyle = ref(isDarkMode() ? STYLE_DARK : STYLE_LIGHT)
+  const mqRef = ref<MediaQueryList | null>(null)
+  const mqCallbackRef = ref<((e: MediaQueryListEvent | MediaQueryList) => void) | null>(null)
+  const observerRef = ref<MutationObserver | null>(null)
+  const hasFittedBounds = ref(false)
 
   function getColors() {
     const dark = isDarkMode()
@@ -75,6 +79,7 @@ export function useMap(
     })
 
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    mqRef.value = mq
     const onMediaChange = (e: MediaQueryListEvent | MediaQueryList) => {
       if (document.documentElement.getAttribute('data-theme')) return
       const newStyle = e.matches ? STYLE_DARK : STYLE_LIGHT
@@ -86,6 +91,7 @@ export function useMap(
         })
       }
     }
+    mqCallbackRef.value = onMediaChange
     if (mq.addEventListener) {
       mq.addEventListener('change', onMediaChange)
     } else if ((mq as any).addListener) {
@@ -107,7 +113,45 @@ export function useMap(
         }
       }
     })
+    observerRef.value = observer
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+  }
+
+  function destroyMap() {
+    if (updateTimer.value) {
+      clearTimeout(updateTimer.value)
+      updateTimer.value = null
+    }
+
+    const mq = mqRef.value
+    const cb = mqCallbackRef.value
+    if (mq && cb) {
+      if (mq.removeEventListener) {
+        mq.removeEventListener('change', cb)
+      } else if ((mq as any).removeListener) {
+        (mq as any).removeListener(cb)
+      }
+    }
+    mqRef.value = null
+    mqCallbackRef.value = null
+
+    const observer = observerRef.value
+    if (observer) {
+      observer.disconnect()
+      observerRef.value = null
+    }
+
+    const m = map.value
+    if (m) {
+      try {
+        m.remove()
+      } catch {
+        // ignore
+      }
+      map.value = null
+      isMapReady.value = false
+      hasFittedBounds.value = false
+    }
   }
 
   function safeRemoveLayer(m: any, id: string) {
@@ -357,7 +401,27 @@ export function useMap(
       const sidRouteName = routeResult.value?.sidRouteNodeName || routeResult.value?.sidNodeName
       const starRouteName = routeResult.value?.starRouteNodeName || routeResult.value?.starNodeName
       const sidIdx = nodes.findIndex(n => n.name === sidRouteName)
-      const starIdx = nodes.findIndex(n => n.name === starRouteName)
+
+      // The enroute line is cut where the STAR begins so the STAR can be drawn
+      // separately. That cut must follow the *currently selected* STAR, not the
+      // static starRouteNodeName from the route result: when the user switches
+      // to a STAR that joins the route at a different fix, keeping the cut at
+      // the auto-selected STAR's entry orphans the segment in between (e.g. the
+      // route enters via RBG for STINS4, but PYE3 joins at ENI — the RBG->ENI
+      // leg must stay on the enroute line). Cut at the earliest route node that
+      // belongs to the selected STAR (main points or selected transition);
+      // fall back to the static name when nothing matches.
+      const selectedStarNames = new Set<string>()
+      if (selectedSTAR.value) {
+        for (const p of selectedSTAR.value.points) selectedStarNames.add(p.name)
+        if (selectedSTARTransition.value) {
+          for (const p of selectedSTARTransition.value.points) selectedStarNames.add(p.name)
+        }
+      }
+      let starIdx = selectedStarNames.size
+        ? nodes.findIndex(n => selectedStarNames.has(n.name))
+        : -1
+      if (starIdx < 0) starIdx = nodes.findIndex(n => n.name === starRouteName)
 
       // Route point features: exclude SID/STAR internal points so the map only
       // shows the user-selected procedure points, not the A* route's internal ones.
@@ -810,7 +874,11 @@ export function useMap(
       origRunways.forEach(r => r.thresholds.forEach(t => bounds.extend([t.lon, t.lat])))
       destRunways.forEach(r => r.thresholds.forEach(t => bounds.extend([t.lon, t.lat])))
 
-      m.fitBounds(bounds, { padding: 60, maxZoom: 12, duration: 1500 })
+      if (!m.isMoving()) {
+        const duration = hasFittedBounds.value ? 0 : 1500
+        m.fitBounds(bounds, { padding: 60, maxZoom: 12, duration })
+        hasFittedBounds.value = true
+      }
     } catch (err) {
       console.error('[useMap] updateMap error:', err)
     } finally {
@@ -829,11 +897,10 @@ export function useMap(
     }, 50)
   }
 
-  watch(routeResult, () => { scheduleUpdate() })
-  watch(selectedSID, () => { scheduleUpdate() })
-  watch(selectedSTAR, () => { scheduleUpdate() })
-  watch(selectedSIDTransition, () => { scheduleUpdate() })
-  watch(selectedSTARTransition, () => { scheduleUpdate() })
+  watch(
+    [routeResult, selectedSID, selectedSTAR, selectedSIDTransition, selectedSTARTransition],
+    scheduleUpdate,
+  )
 
-  return { map, isMapReady, initMap, updateMap }
+  return { map, isMapReady, initMap, updateMap, destroyMap }
 }

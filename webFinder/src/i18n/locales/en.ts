@@ -33,6 +33,7 @@ export default {
     noSTAR: 'No STAR available',
     navdataVersion: 'Navdata Version',
     noNavdata: 'No navdata available',
+    airportNotFound: 'Airport not found',
   },
   captcha: {
     title: 'Security Check',
@@ -63,8 +64,8 @@ export default {
     pressure: 'Pressure',
     departure: 'Departure',
     arrival: 'Arrival',
-    light: 'Light ',
-    heavy: 'Heavy ',
+    light: 'Light',
+    heavy: 'Heavy',
     noClouds: 'No clouds',
     few: 'Few',
     scattered: 'Scattered',

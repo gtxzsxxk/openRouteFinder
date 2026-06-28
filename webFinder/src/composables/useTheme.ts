@@ -24,8 +24,10 @@ export function useTheme() {
   }
 
   function toggleTheme() {
-    // 只在 light / dark 之间切换
-    applyTheme(mode.value === 'light' ? 'dark' : 'light')
+    // cycle light -> dark -> system -> light
+    const order: ThemeMode[] = ['light', 'dark', 'system']
+    const idx = order.indexOf(mode.value)
+    applyTheme(order[(idx + 1) % order.length])
   }
 
   function syncWithSystem() {
@@ -38,13 +40,7 @@ export function useTheme() {
 
   onMounted(() => {
     const saved = localStorage.getItem(THEME_STORAGE_KEY) as ThemeMode | null
-    let initialMode: ThemeMode
-    if (saved && ['light', 'dark'].includes(saved)) {
-      initialMode = saved
-    } else {
-      // 首次访问：直接根据系统偏好设置，不从 system 开始
-      initialMode = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-    }
+    const initialMode: ThemeMode = saved && ['light', 'dark', 'system'].includes(saved) ? saved : 'system'
 
     applyTheme(initialMode)
 

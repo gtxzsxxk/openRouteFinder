@@ -5,18 +5,20 @@ import contextlib
 import json
 import os
 import shutil
+import threading
 import time
 import uuid
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from fastapi import FastAPI, File, Header, HTTPException, Query, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from openRouterFinder.config import settings
+from openRouterFinder.config import PROJECT_ROOT, settings
 from openRouterFinder.core.admin import (
     get_stats as get_admin_stats,
 )
@@ -29,10 +31,12 @@ from openRouterFinder.core.data_loader import (
     get_data_version,
     get_nav_data,
     get_nav_registry,
+    get_sid_connection,
+    get_star_connection,
     search_route,
 )
 from openRouterFinder.core.storage.builder import build_from_fenix
-from openRouterFinder.utils.metar import read_metar, start_metar_updater
+from openRouterFinder.utils.metar import read_metar, start_metar_updater, stop_metar_updater
 from openRouterFinder.utils.validcode import generate_captcha_b64
 
 # --- Procedure response filtering ---
@@ -163,10 +167,70 @@ def _rename_single_runway_all(data: dict) -> dict:
 
 # --- Concurrency controls ---
 _dijkstra_pool = ThreadPoolExecutor(max_workers=4)
-_route_semaphore = asyncio.Semaphore(8)
+_build_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="navdata-build")
+_route_semaphore = asyncio.Semaphore(4)
 
 # --- Valid code storage ---
-_valid_codes: dict[str, str] = {}
+
+class _TTLCodeStore:
+    """Thread-safe captcha token store with TTL and bounded size."""
+
+    def __init__(self, ttl: int = 600, maxsize: int = 10000):
+        self._ttl = ttl
+        self._maxsize = maxsize
+        self._data: OrderedDict[str, tuple[str, float]] = OrderedDict()
+        self._lock = threading.Lock()
+
+    def _cleanup(self, now: float):
+        """Drop expired entries from the front of the ordered dict."""
+        while self._data:
+            _, (_, ts) = next(iter(self._data.items()))
+            if now - ts <= self._ttl:
+                break
+            self._data.popitem(last=False)
+
+    def set(self, token: str, code: str):
+        now = time.time()
+        with self._lock:
+            self._cleanup(now)
+            if len(self._data) >= self._maxsize:
+                self._data.popitem(last=False)
+            self._data[token] = (code, now)
+
+    def pop(self, token: str) -> str | None:
+        now = time.time()
+        with self._lock:
+            self._cleanup(now)
+            item = self._data.pop(token, None)
+            if item is None:
+                return None
+            code, ts = item
+            if now - ts > self._ttl:
+                return None
+            return code
+
+
+_valid_codes = _TTLCodeStore()
+
+
+# --- Admin key verification ---
+
+def verify_admin_key(
+    x_admin_key: str = Header(default=""),
+    x_admin_key_query: str = Query(default="", alias="x_admin_key"),
+) -> str:
+    """Validate the admin key from the X-Admin-Key header or x_admin_key query param.
+
+    The query-param fallback exists for EventSource/SSE clients (e.g. the
+    build-progress stream), which cannot set custom request headers.
+    """
+    key = x_admin_key or x_admin_key_query
+    if not settings.admin_key or settings.admin_key == "set_yourself":
+        raise HTTPException(status_code=403, detail="Admin not configured")
+    if key != settings.admin_key:
+        raise HTTPException(status_code=403, detail="Invalid key")
+    return key
+
 
 # --- Airport prefix index ---
 _airport_prefix_index: dict[str, list] = {}
@@ -174,37 +238,56 @@ _airport_list: list = []
 
 # --- Build progress tracking ---
 _build_tasks: dict[str, dict] = {}
+_BUILD_TASK_TTL_SECONDS = 300  # keep finished tasks around for 5 minutes
+
+
+def _cleanup_finished_build_tasks() -> None:
+    """Remove done/error build entries older than the TTL."""
+    now = time.time()
+    expired = [
+        bid
+        for bid, task in _build_tasks.items()
+        if task.get("status") in ("done", "error")
+        and now - task.get("finished_at", now) > _BUILD_TASK_TTL_SECONDS
+    ]
+    for bid in expired:
+        _build_tasks.pop(bid, None)
 
 
 def _build_airport_index():
-    """Build prefix index for O(1) airport autocomplete lookups."""
+    """Build prefix index for O(1) airport autocomplete lookups.
+
+    The index and list are replaced atomically so readers never see a
+    half-built structure while a rebuild is in progress (e.g. after navdata
+    hot reload).
+    """
     global _airport_prefix_index, _airport_list
     airports = []
 
     nav = get_nav_data()
     if nav is not None:
-        for icao in nav.list_airport_icaos():
-            ap = nav.get_airport(icao)
-            if ap is None:
-                continue
-            name = ap.Name()
-            name = name.decode("utf-8") if isinstance(name, bytes) else (name or icao)
-            airports.append(
-                {"icao": icao, "name": name, "lat": float(ap.Lat()), "lon": float(ap.Lon())}
-            )
+        with nav:
+            for icao in nav.list_airport_icaos():
+                ap = nav.get_airport(icao)
+                if ap is None:
+                    continue
+                name = ap.Name()
+                name = name.decode("utf-8") if isinstance(name, bytes) else (name or icao)
+                airports.append(
+                    {"icao": icao, "name": name, "lat": float(ap.Lat()), "lon": float(ap.Lon())}
+                )
 
-    _airport_list = airports
-
-    # Build prefix index for ICAO codes
+    prefix_index: dict[str, list] = {}
     for ap in airports:
         icao = ap["icao"]
         for i in range(1, len(icao) + 1):
             prefix = icao[:i]
-            if prefix not in _airport_prefix_index:
-                _airport_prefix_index[prefix] = []
-            _airport_prefix_index[prefix].append(ap)
+            prefix_index.setdefault(prefix, []).append(ap)
 
-    print(f"Airport index built: {len(airports)} airports, {len(_airport_prefix_index)} prefixes")
+    _airport_list = airports
+    _airport_prefix_index = prefix_index
+
+    print(f"Airport index built: {len(airports)} airports, {len(prefix_index)} prefixes")
 
 
 def _search_airports(q: str, limit: int = 50) -> list:
@@ -261,11 +344,14 @@ async def admin_logging(request: Request, call_next):
     start = time.time()
     response = await call_next(request)
     duration_ms = (time.time() - start) * 1000
-    client_ip = (
-        request.headers.get("x-forwarded-for", request.client.host if request.client else "unknown")
-        .split(",")[0]
-        .strip()
-    )
+    raw_ip = request.headers.get("x-forwarded-for")
+    if raw_ip:
+        client_ip = raw_ip.split(",")[0].strip()
+    elif request.client is not None:
+        client_ip = request.client.host
+    else:
+        client_ip = "unknown"
+    client_ip = client_ip[: 45]  # IPv6 max length
     record_request(client_ip, request.method, request.url.path, response.status_code, duration_ms)
     return response
 
@@ -310,112 +396,111 @@ def get_airport(icao: str, cycle: str | None = None):
     nav = get_nav_data(cycle)
     if nav is None:
         raise HTTPException(status_code=503, detail="Navdata not available")
-    ap = nav.get_airport(icao)
-    if ap is None:
-        raise HTTPException(status_code=404, detail="Airport not found")
-    name = ap.Name()
-    name = name.decode("utf-8") if isinstance(name, bytes) else (name or icao)
-    return {
-        "icao": icao,
-        "name": name,
-        "lat": float(ap.Lat()),
-        "lon": float(ap.Lon()),
-    }
+    with nav:
+        ap = nav.get_airport(icao)
+        if ap is None:
+            raise HTTPException(status_code=404, detail="Airport not found")
+        name = ap.Name()
+        name = name.decode("utf-8") if isinstance(name, bytes) else (name or icao)
+        return {
+            "icao": icao,
+            "name": name,
+            "lat": float(ap.Lat()),
+            "lon": float(ap.Lon()),
+        }
 
 
 @app.get("/api/airports/{icao}/procedures")
 def get_airport_procedures(icao: str, cycle: str | None = None, detail: bool = False):
     icao = icao.upper()
 
-    from openRouterFinder.core.airport import FlatbuffersAirportConnector
-
     nav = get_nav_data(cycle)
     if nav is None:
         raise HTTPException(status_code=503, detail="Navdata not available")
-    if nav.get_airport(icao) is None:
-        raise HTTPException(status_code=404, detail="Airport not found")
-    connector = FlatbuffersAirportConnector(nav)
+    with nav:
+        if nav.get_airport(icao) is None:
+            raise HTTPException(status_code=404, detail="Airport not found")
 
-    sid_conn = connector.build_sid(icao)
-    star_conn = connector.build_star(icao)
+        sid_conn = get_sid_connection(nav, icao, cycle)
+        star_conn = get_star_connection(nav, icao, cycle)
 
-    sid_exits = []
-    if sid_conn and sid_conn.procedures:
-        seen = set()
-        for exit_name, proc_list in sid_conn.procedures.items():
-            if exit_name in seen:
-                continue
-            seen.add(exit_name)
-            sid_exits.append(
-                {
-                    "name": exit_name,
-                    "procedures": list(dict.fromkeys(p.name for p in proc_list)),
-                }
-            )
-
-    star_entries = []
-    if star_conn and star_conn.procedures:
-        seen = set()
-        for entry_name, proc_list in star_conn.procedures.items():
-            if entry_name in seen:
-                continue
-            seen.add(entry_name)
-            star_entries.append(
-                {
-                    "name": entry_name,
-                    "procedures": list(dict.fromkeys(p.name for p in proc_list)),
-                }
-            )
-
-    result = {
-        "icao": icao,
-        "sid": {"exits": sid_exits},
-        "star": {"entries": star_entries},
-    }
-
-    if detail and (sid_conn or star_conn):
-        # Return full procedure tuples (same shape as /api/route SID/STAR fields)
-        def _proc_tuple(proc):
-            return [
-                proc.name,
-                proc.runway,
-                [[p[0], p[1], p[2]] for p in proc.points],
-                [[t[0], [[p[0], p[1], p[2]] for p in t[1]]] for t in proc.transitions],
-            ]
-
+        sid_exits = []
         if sid_conn and sid_conn.procedures:
-            result["sidDetails"] = {
-                key: [_proc_tuple(p) for p in proc_list]
-                for key, proc_list in sid_conn.procedures.items()
-            }
+            seen = set()
+            for exit_name, proc_list in sid_conn.procedures.items():
+                if exit_name in seen:
+                    continue
+                seen.add(exit_name)
+                sid_exits.append(
+                    {
+                        "name": exit_name,
+                        "procedures": list(dict.fromkeys(p.name for p in proc_list)),
+                    }
+                )
+
+        star_entries = []
         if star_conn and star_conn.procedures:
-            result["starDetails"] = {
-                key: [_proc_tuple(p) for p in proc_list]
-                for key, proc_list in star_conn.procedures.items()
-            }
+            seen = set()
+            for entry_name, proc_list in star_conn.procedures.items():
+                if entry_name in seen:
+                    continue
+                seen.add(entry_name)
+                star_entries.append(
+                    {
+                        "name": entry_name,
+                        "procedures": list(dict.fromkeys(p.name for p in proc_list)),
+                    }
+                )
 
-    if detail:
-        if "sidDetails" in result:
-            result["sidDetails"] = _filter_runway_all_from_response(
-                {"SID": result["sidDetails"]}
-            ).get("SID", {})
-        if "starDetails" in result:
-            result["starDetails"] = _filter_runway_all_from_response(
-                {"STAR": result["starDetails"]}
-            ).get("STAR", {})
+        result = {
+            "icao": icao,
+            "sid": {"exits": sid_exits},
+            "star": {"entries": star_entries},
+        }
 
-    return result
+        if detail and (sid_conn or star_conn):
+            # Return full procedure tuples (same shape as /api/route SID/STAR fields)
+            def _proc_tuple(proc):
+                return [
+                    proc.name,
+                    proc.runway,
+                    [[p[0], p[1], p[2]] for p in proc.points],
+                    [[t[0], [[p[0], p[1], p[2]] for p in t[1]]] for t in proc.transitions],
+                ]
+
+            if sid_conn and sid_conn.procedures:
+                result["sidDetails"] = {
+                    key: [_proc_tuple(p) for p in proc_list]
+                    for key, proc_list in sid_conn.procedures.items()
+                }
+            if star_conn and star_conn.procedures:
+                result["starDetails"] = {
+                    key: [_proc_tuple(p) for p in proc_list]
+                    for key, proc_list in star_conn.procedures.items()
+                }
+
+        if detail:
+            if "sidDetails" in result:
+                result["sidDetails"] = _filter_runway_all_from_response(
+                    {"SID": result["sidDetails"]}
+                ).get("SID", {})
+            if "starDetails" in result:
+                result["starDetails"] = _filter_runway_all_from_response(
+                    {"STAR": result["starDetails"]}
+                ).get("STAR", {})
+
+        return result
 
 
 @app.post("/api/route")
 async def post_route(req: RouteRequest):
     # Validate captcha (skip if disabled via config)
     if not settings.disable_captcha:
-        if req.validToken not in _valid_codes:
+        expected_code = _valid_codes.pop(req.validToken)
+        if expected_code is None:
             raise HTTPException(status_code=401, detail="验证码已过期")
-        if _valid_codes[req.validToken] != req.validCode:
+        if expected_code != req.validCode:
             raise HTTPException(status_code=401, detail="验证码错误")
-        del _valid_codes[req.validToken]
 
     try:
         async with _route_semaphore:
@@ -522,7 +607,7 @@ def get_valid_code():
 
     num = random.randint(1000, 9999)
     token = str(uuid.uuid4())
-    _valid_codes[token] = str(num)
+    _valid_codes.set(token, str(num))
     return {
         "token": token,
         "image": generate_captcha_b64(num),
@@ -535,20 +620,12 @@ def health_check():
 
 
 @app.get("/api/admin")
-def get_admin(x_admin_key: str = Header(default="")):
-    if not settings.admin_key or settings.admin_key == "set_yourself":
-        raise HTTPException(status_code=403, detail="Admin not configured")
-    if x_admin_key != settings.admin_key:
-        raise HTTPException(status_code=403, detail="Invalid key")
+def get_admin(_: str = Depends(verify_admin_key)):
     return get_admin_stats()
 
 
 @app.get("/api/admin/navdata")
-def list_navdata_cycles(x_admin_key: str = Header(default="")):
-    if not settings.admin_key or settings.admin_key == "set_yourself":
-        raise HTTPException(status_code=403, detail="Admin not configured")
-    if x_admin_key != settings.admin_key:
-        raise HTTPException(status_code=403, detail="Invalid key")
+def list_navdata_cycles(_: str = Depends(verify_admin_key)):
     reg = get_nav_registry()
     cycles = reg.list_cycles()
     result = []
@@ -560,12 +637,8 @@ def list_navdata_cycles(x_admin_key: str = Header(default="")):
 
 
 @app.get("/api/admin/navdata/builds")
-def list_active_builds(x_admin_key: str = Header(default="")):
-    if not settings.admin_key or settings.admin_key == "set_yourself":
-        raise HTTPException(status_code=403, detail="Admin not configured")
-    if x_admin_key != settings.admin_key:
-        raise HTTPException(status_code=403, detail="Invalid key")
-
+def list_active_builds(_: str = Depends(verify_admin_key)):
+    _cleanup_finished_build_tasks()
     active = [
         {"build_id": bid, **task}
         for bid, task in _build_tasks.items()
@@ -575,11 +648,7 @@ def list_active_builds(x_admin_key: str = Header(default="")):
 
 
 @app.get("/api/admin/navdata/{cycle}")
-def get_navdata_cycle_info(cycle: str, x_admin_key: str = Header(default="")):
-    if not settings.admin_key or settings.admin_key == "set_yourself":
-        raise HTTPException(status_code=403, detail="Admin not configured")
-    if x_admin_key != settings.admin_key:
-        raise HTTPException(status_code=403, detail="Invalid key")
+def get_navdata_cycle_info(cycle: str, _: str = Depends(verify_admin_key)):
     reg = get_nav_registry()
     info = reg.get_cycle_info(cycle)
     if info is None:
@@ -588,23 +657,12 @@ def get_navdata_cycle_info(cycle: str, x_admin_key: str = Header(default="")):
 
 
 @app.delete("/api/admin/navdata/{cycle}")
-def delete_navdata_cycle(cycle: str, x_admin_key: str = Header(default="")):
-    if not settings.admin_key or settings.admin_key == "set_yourself":
-        raise HTTPException(status_code=403, detail="Admin not configured")
-    if x_admin_key != settings.admin_key:
-        raise HTTPException(status_code=403, detail="Invalid key")
+def delete_navdata_cycle(cycle: str, _: str = Depends(verify_admin_key)):
     reg = get_nav_registry()
     if not reg.has_cycle(cycle):
         raise HTTPException(status_code=404, detail="Cycle not found")
     reg.unregister(cycle)
-    data_dir = settings.navdat_full_path.parent
-    fb_path = data_dir / f"navdata_{cycle}.fb.zst"
-    if fb_path.exists():
-        os.remove(fb_path)
-    # Also clean up legacy .fb if present
-    legacy_fb = data_dir / f"navdata_{cycle}.fb"
-    if legacy_fb.exists():
-        os.remove(legacy_fb)
+    _build_airport_index()
     return {"success": True, "cycle": cycle}
 
 
@@ -617,32 +675,32 @@ def _validate_fenix_db(db_path: Path) -> dict:
     import sqlite3
 
     conn = sqlite3.connect(db_path)
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
 
-    # Check required tables exist
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-    tables = {row[0] for row in cursor.fetchall()}
-    required = {"config", "Waypoints", "Airports", "TerminalLegs", "Terminals"}
-    missing = required - tables
-    if missing:
+        # Check required tables exist
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tables = {row[0] for row in cursor.fetchall()}
+        required = {"config", "Waypoints", "Airports", "TerminalLegs", "Terminals"}
+        missing = required - tables
+        if missing:
+            raise ValueError(
+                f"Missing required tables: {', '.join(missing)}. Not a valid Fenix A320 navdata."
+            )
+
+        # Extract cycle info from config table — column names vary by Fenix version
+        cursor.execute("PRAGMA table_info(config)")
+        cols = {row[1].lower() for row in cursor.fetchall()}
+        key_col = next((c for c in cols if c == "key" or c == "name"), None)
+        val_col = next((c for c in cols if c in ("value", "val", "data")), None)
+        if not key_col or not val_col:
+            raise ValueError(f"Config table has unexpected schema: columns={cols}")
+
+        in_clause = "'CycleName', 'CycleStartDate', 'CycleEndDate'"
+        cursor.execute(f"SELECT {key_col}, {val_col} FROM config WHERE {key_col} IN ({in_clause})")
+        config = {row[0]: row[1] for row in cursor.fetchall()}
+    finally:
         conn.close()
-        raise ValueError(
-            f"Missing required tables: {', '.join(missing)}. Not a valid Fenix A320 navdata."
-        )
-
-    # Extract cycle info from config table — column names vary by Fenix version
-    cursor.execute("PRAGMA table_info(config)")
-    cols = {row[1].lower() for row in cursor.fetchall()}
-    key_col = next((c for c in cols if c == "key" or c == "name"), None)
-    val_col = next((c for c in cols if c in ("value", "val", "data")), None)
-    if not key_col or not val_col:
-        conn.close()
-        raise ValueError(f"Config table has unexpected schema: columns={cols}")
-
-    in_clause = "'CycleName', 'CycleStartDate', 'CycleEndDate'"
-    cursor.execute(f"SELECT {key_col}, {val_col} FROM config WHERE {key_col} IN ({in_clause})")
-    config = {row[0]: row[1] for row in cursor.fetchall()}
-    conn.close()
 
     cycle = config.get("CycleName", "").strip()
     effective_from = config.get("CycleStartDate", "").strip()
@@ -694,11 +752,13 @@ def _do_build_navdata(
         fb_path.write_bytes(compressed)
         reg = get_nav_registry()
         reg.register(cycle, fb_path)
+        _build_airport_index()
         info = reg.get_cycle_info(cycle)
         _build_tasks[build_id] = {
             "status": "done",
             "cycle": cycle,
             "info": info,
+            "finished_at": time.time(),
         }
         size_mb = len(compressed) / 1024 / 1024
         raw_mb = len(raw) / 1024 / 1024
@@ -715,21 +775,27 @@ def _do_build_navdata(
         _build_tasks[build_id] = {
             "status": "error",
             "detail": detail,
+            "finished_at": time.time(),
         }
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
+# Upload limits for navdata zip files
+_MAX_UPLOAD_SIZE = 200 * 1024 * 1024  # 200 MB
+_MAX_DECOMPRESSED_SIZE = 1024 * 1024 * 1024  # 1 GB
+
+
+def _is_path_traversal(name: str) -> bool:
+    """Detect archive members that escape the extraction directory."""
+    return name.startswith("/") or ".." in Path(name).parts
+
+
 @app.post("/api/admin/navdata/upload")
 async def upload_navdata(
-    x_admin_key: str = Header(default=""),
+    _: str = Depends(verify_admin_key),
     file: UploadFile = File(...),
 ):
-    if not settings.admin_key or settings.admin_key == "set_yourself":
-        raise HTTPException(status_code=403, detail="Admin not configured")
-    if x_admin_key != settings.admin_key:
-        raise HTTPException(status_code=403, detail="Invalid key")
-
     import tempfile
     import zipfile
 
@@ -738,29 +804,66 @@ async def upload_navdata(
     db_path = None
 
     try:
-        # Save uploaded file
+        # Save uploaded file with size limit
         upload_path = Path(tmp_dir) / "upload.zip"
+        total_size = 0
         with open(upload_path, "wb") as f:
-            shutil.copyfileobj(file.file, f)
+            while True:
+                chunk = file.file.read(8192)
+                if not chunk:
+                    break
+                total_size += len(chunk)
+                if total_size > _MAX_UPLOAD_SIZE:
+                    raise HTTPException(status_code=413, detail="Upload too large")
+                f.write(chunk)
 
-        # Extract zip
+        if not zipfile.is_zipfile(upload_path):
+            raise HTTPException(status_code=400, detail="Uploaded file is not a valid zip archive")
+
+        # Extract zip with decompression-bomb and path-traversal protection
         with zipfile.ZipFile(upload_path, "r") as zf:
-            zf.extractall(tmp_dir)
+            decompressed_total = sum(info.file_size for info in zf.infolist())
+            if decompressed_total > _MAX_DECOMPRESSED_SIZE:
+                raise HTTPException(status_code=413, detail="Zip contents too large")
+
+            extracted_total = 0
+            for info in zf.infolist():
+                if info.is_dir():
+                    continue
+                if _is_path_traversal(info.filename):
+                    raise HTTPException(
+                        status_code=400, detail=f"Invalid archive member: {info.filename}"
+                    )
+
+                target = Path(tmp_dir) / info.filename
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with zf.open(info) as src, open(target, "wb") as dst:
+                    while True:
+                        chunk = src.read(8192)
+                        if not chunk:
+                            break
+                        extracted_total += len(chunk)
+                        if extracted_total > _MAX_DECOMPRESSED_SIZE:
+                            raise HTTPException(
+                                status_code=413, detail="Decompressed size exceeds limit"
+                            )
+                        dst.write(chunk)
 
         # Find .db3 file (Fenix navdata)
+        db3_files = []
         for root, _dirs, files in os.walk(tmp_dir):
             for name in files:
                 if name.lower().endswith(".db3"):
-                    db_path = Path(root) / name
-                    break
-            if db_path:
-                break
+                    db3_files.append(Path(root) / name)
 
-        if db_path is None:
+        if len(db3_files) == 0:
             record_error(
                 "Upload failed: no .db3 file found in zip", "/api/admin/navdata/upload", "POST", 400
             )
             raise HTTPException(status_code=400, detail="No .db3 file found in uploaded zip")
+        if len(db3_files) > 1:
+            raise HTTPException(status_code=400, detail="Multiple .db3 files found in uploaded zip")
+        db_path = db3_files[0]
 
         # Validate and extract cycle info from db
         try:
@@ -788,7 +891,7 @@ async def upload_navdata(
 
         loop = asyncio.get_event_loop()
         loop.run_in_executor(
-            None,
+            _build_pool,
             _do_build_navdata,
             build_id,
             db_path,
@@ -811,32 +914,41 @@ async def upload_navdata(
 
 
 @app.get("/api/admin/navdata/build-progress/{build_id}")
-async def build_progress(build_id: str, x_admin_key: str = Query(default="")):
-    if not settings.admin_key or settings.admin_key == "set_yourself":
-        raise HTTPException(status_code=403, detail="Admin not configured")
-    if x_admin_key != settings.admin_key:
-        raise HTTPException(status_code=403, detail="Invalid key")
-
+async def build_progress(
+    build_id: str,
+    request: Request,
+    _: str = Depends(verify_admin_key),
+):
     from fastapi.responses import StreamingResponse
 
     async def event_stream():
-        while True:
+        _cleanup_finished_build_tasks()
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                task = _build_tasks.get(build_id)
+                if task is None:
+                    yield f"event: error\ndata: {json.dumps({'detail': 'Build not found'})}\n\n"
+                    break
+
+                data = json.dumps(task)
+                if task["status"] == "done":
+                    yield f"event: done\ndata: {data}\n\n"
+                    break
+                elif task["status"] == "error":
+                    yield f"event: error\ndata: {data}\n\n"
+                    break
+                else:
+                    yield f"event: progress\ndata: {data}\n\n"
+
+                await asyncio.sleep(1)
+        finally:
+            # Once a finished task has been delivered, drop it so the dict
+            # does not grow without bound across many uploads.
             task = _build_tasks.get(build_id)
-            if task is None:
-                yield f"event: error\ndata: {json.dumps({'detail': 'Build not found'})}\n\n"
-                break
-
-            data = json.dumps(task)
-            if task["status"] == "done":
-                yield f"event: done\ndata: {data}\n\n"
-                break
-            elif task["status"] == "error":
-                yield f"event: error\ndata: {data}\n\n"
-                break
-            else:
-                yield f"event: progress\ndata: {data}\n\n"
-
-            await asyncio.sleep(1)
+            if task is not None and task.get("status") in ("done", "error"):
+                _build_tasks.pop(build_id, None)
 
     return StreamingResponse(
         event_stream(),
@@ -846,7 +958,7 @@ async def build_progress(build_id: str, x_admin_key: str = Query(default="")):
 
 
 # Static files
-frontend_dist = settings.navdat_full_path.parent.parent / "webFinder" / "dist"
+frontend_dist = PROJECT_ROOT / "webFinder" / "dist"
 if frontend_dist.exists():
     app.mount("/", StaticFiles(directory=str(frontend_dist), html=True), name="static")
 
@@ -855,6 +967,24 @@ if frontend_dist.exists():
 def startup():
     print("OpenRouteFinder API starting...")
     print(f"Nav data version: {get_data_version()}")
-    _build_airport_index()
-    start_metar_updater()
-    print("METAR keeper started")
+    try:
+        _build_airport_index()
+    except Exception as e:
+        print(f"Failed to build airport index: {e}")
+    try:
+        start_metar_updater()
+        print("METAR keeper started")
+    except Exception as e:
+        print(f"Failed to start METAR updater: {e}")
+
+
+@app.on_event("shutdown")
+def shutdown():
+    print("OpenRouteFinder API shutting down...")
+    stop_metar_updater()
+    _dijkstra_pool.shutdown(wait=True)
+    _build_pool.shutdown(wait=True)
+    reg = get_nav_registry()
+    if reg is not None:
+        reg.close_all()
+    print("Shutdown complete")

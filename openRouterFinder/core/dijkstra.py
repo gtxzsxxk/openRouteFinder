@@ -10,6 +10,7 @@ from openRouterFinder.core.airport import AirportConnection, Procedure
 from openRouterFinder.core.graph import (
     Node,
     great_circle_distance_km,
+    heuristic_km,
 )
 
 
@@ -69,6 +70,7 @@ class RouteEngine:
         node_list: tuple[Node | None, ...],
         data_version: str,
         node_index: dict[tuple[str, float, float], Node] | None = None,
+        cache: dict | None = None,
     ):
         self.node_list = node_list
         self.data_version = data_version
@@ -83,34 +85,46 @@ class RouteEngine:
                 if node is not None:
                     self._node_index[node.node_key()] = node
 
-        # Precompute edge distances once (edges are shared, so this only
-        # needs to run on the first RouteEngine instantiation).
-        for node in node_list:
-            if node is not None:
-                for edge in node.next_list:
-                    if edge.dist == 0.0 and edge.nend < self.num_nodes:
-                        next_node = node_list[edge.nend]
-                        if next_node is not None:
-                            edge.dist = great_circle_distance_km(
-                                node.px,
-                                node.py,
-                                next_node.px,
-                                next_node.py,
-                            )
+        # Preprocessing below is a pure function of the immutable, shared graph,
+        # so it is memoised on the caller-supplied `cache` (the navdata's
+        # process-lifetime cache). A new RouteEngine is built per request; without
+        # this cache these full-graph scans would re-run on every query and
+        # dominate latency. When no cache is supplied (tests, synthetic graphs)
+        # fall back to a private dict so the work still runs once per engine.
+        cache = cache if cache is not None else {}
+
+        # Precompute edge distances once. Edges are shared and mutated in place,
+        # so the backfill is idempotent; the one-time flag skips re-scanning the
+        # whole edge set on subsequent engines built over the same graph.
+        if not cache.get("_edges_dist_done"):
+            for node in node_list:
+                if node is not None:
+                    for edge in node.next_list:
+                        if edge.dist == 0.0 and edge.nend < self.num_nodes:
+                            next_node = node_list[edge.nend]
+                            if next_node is not None:
+                                edge.dist = great_circle_distance_km(
+                                    node.px,
+                                    node.py,
+                                    next_node.px,
+                                    next_node.py,
+                                )
+            cache["_edges_dist_done"] = True
 
         # Precompute T-route skip cache per node for fast _should_skip_edge.
-        self._node_has_non_t: list[bool] = [False] * self.num_nodes
-        for node in node_list:
-            if node is not None:
-                self._node_has_non_t[node.iid] = any(
-                    not (
-                        e.name
-                        and e.name[0] == "T"
-                        and len(e.name) > 1
-                        and e.name[1:].isdigit()
+        node_has_non_t = cache.get("_node_has_non_t")
+        if node_has_non_t is None:
+            node_has_non_t = [False] * self.num_nodes
+            for node in node_list:
+                if node is not None:
+                    node_has_non_t[node.iid] = any(
+                        not (
+                            e.name and e.name[0] == "T" and len(e.name) > 1 and e.name[1:].isdigit()
+                        )
+                        for e in node.next_list
                     )
-                    for e in node.next_list
-                )
+            cache["_node_has_non_t"] = node_has_non_t
+        self._node_has_non_t = node_has_non_t
 
     def search(
         self,
@@ -198,8 +212,10 @@ class RouteEngine:
 
         for _ in range(5):
             prev_sid_name = sid_proc.name
+            prev_sid_boundary_iid = sid_boundary.iid
             prev_sid_t = sid_transition_result[0] if sid_transition_result else None
             prev_star_name = star_proc.name if star_proc else None
+            prev_star_boundary_iid = star_boundary.iid if star_proc else None
             prev_star_t = star_t_name
 
             # Select best STAR for current SID boundary
@@ -244,13 +260,15 @@ class RouteEngine:
                         else:
                             sid_transition_pts = None
 
-            # Check convergence
+            # Check convergence (procedure name + transition + boundary IID)
             curr_sid_t = sid_transition_result[0] if sid_transition_result else None
             if (
                 sid_proc.name == prev_sid_name
                 and curr_sid_t == prev_sid_t
+                and sid_boundary.iid == prev_sid_boundary_iid
                 and star_proc.name == prev_star_name
                 and star_t_name == prev_star_t
+                and star_boundary.iid == prev_star_boundary_iid
             ):
                 break
 
@@ -299,10 +317,10 @@ class RouteEngine:
         if airway_route is not None:
             airway_route = self._reassign_airways(airway_route, sid_boundary.iid)
 
-        # Fallback: if filtered STAR is unreachable via pure airway graph,
-        # try auto-selected STAR (matches old mixed-graph behaviour where
-        # all procedures were implicitly available).
-        if airway_route is None and star_entry:
+        # Fallback: if no STAR filter was requested and the selected STAR is
+        # unreachable via pure airway graph, try auto-selected STAR (matches old
+        # mixed-graph behaviour where all procedures were implicitly available).
+        if airway_route is None and not star_entry:
             fallback_candidates = self._collect_procedure_candidates(
                 star_conn, is_sid=False, filter_name=None, sid_conn=sid_conn, star_conn=star_conn
             )
@@ -343,69 +361,18 @@ class RouteEngine:
             sid_transition_pts=sid_transition_pts,
         )
 
-        # Recalculate distance
-        dist_km = self._calc_route_distance(route_list, sid_conn, star_conn)
-        dist_nm = dist_km / 1.852
-        dist_str = f"{dist_nm:.2f} nm / {dist_km:.2f} km"
-
-        route_total = self._sort_route(orig, route_list)
-        node_info = self._build_node_info(sid_conn, star_conn, route_list)
-        route_segments = self._build_route_segments(sid_conn, route_list)
-
-        # SID/STAR node names (procedure keys)
-        sid_node_name = sid_proc.points[-1][0] if sid_proc.points else None
-        star_node_name = star_proc.points[0][0] if star_proc.points else None
-
-        # Boundary nodes: the last route node belonging to the SID procedure
-        # and the first route node belonging to the STAR procedure.
-        # This correctly handles single-point procedures where the airway
-        # ends at the procedure point (the point is skipped in the STAR loop
-        # because it duplicates the last airway node).
-        sid_route_node_name = None
-        if sid_proc and sid_proc.points:
-            sid_names = {p[0] for p in sid_proc.points}
-            for _, node_name, _ in route_list:
-                if node_name in sid_names:
-                    sid_route_node_name = node_name
-
-        star_route_node_name = None
-        if star_proc and star_proc.points:
-            star_names = {p[0] for p in star_proc.points}
-            for t_name, t_pts in star_proc.transitions:
-                star_names.update(p[0] for p in t_pts)
-            for _, node_name, _ in route_list:
-                if node_name in star_names:
-                    star_route_node_name = node_name
-                    break
-
-        # Active transitions
-        route_node_names = {node_name for _, node_name, _ in route_list}
-        active_sid_transition = self._find_active_transition(
-            sid_proc, route_node_names, is_sid=True
-        )
-        active_star_transition = self._find_active_transition(
-            star_proc, route_node_names, is_sid=False
-        )
-
-        time_total = time.time() - timestart
-        sttime = "%.2f" % (time_total * 1000)
-
-        return build_route_info(
-            self.data_version,
-            sttime,
-            route_total,
-            dist_str,
-            node_info,
-            sid_conn.procedures,
-            star_conn.procedures,
+        return self._build_route_response(
+            route_list,
+            sid_proc,
+            star_proc,
+            sid_boundary,
+            star_boundary,
+            sid_transition_pts,
+            sid_conn,
+            star_conn,
             airport_names,
-            active_sid_transition,
-            active_star_transition,
-            route_segments,
-            sid_node_name,
-            star_node_name,
-            sid_route_node_name,
-            star_route_node_name,
+            orig,
+            timestart,
         )
 
     def _select_procedure(
@@ -1210,6 +1177,18 @@ class RouteEngine:
                     return temp
         return None
 
+    def _map_boundary_to_airway_iid(self, boundary: Node) -> int:
+        """Map a temporary procedure boundary node to its airway node IID.
+
+        Uses the prebuilt (name, lat, lon) index for O(1) exact lookup instead
+        of scanning the entire node list by name.
+        """
+        if 0 <= boundary.iid < self.num_nodes:
+            return boundary.iid
+        key = (boundary.name, round(boundary.px, 6), round(boundary.py, 6))
+        node = self._node_index.get(key)
+        return node.iid if node is not None else boundary.iid
+
     def _calc_route_distance(
         self,
         route_list: list[tuple[str, str, int]],
@@ -1274,6 +1253,77 @@ class RouteEngine:
                 best = t_name
 
         return best
+
+    def _build_route_response(
+        self,
+        route_list: list[tuple[str, str, int]],
+        sid_proc: Procedure,
+        star_proc: Procedure,
+        sid_boundary: Node,
+        star_boundary: Node,
+        sid_transition_pts: list | None,
+        sid_conn: AirportConnection,
+        star_conn: AirportConnection,
+        airport_names: list[str],
+        orig: str,
+        timestart: float,
+    ) -> str:
+        """Build the final JSON response shared by all search paths."""
+        dist_km = self._calc_route_distance(route_list, sid_conn, star_conn)
+        dist_nm = dist_km / 1.852
+        dist_str = f"{dist_nm:.2f} nm / {dist_km:.2f} km"
+        route_total = self._sort_route(orig, route_list)
+        node_info = self._build_node_info(sid_conn, star_conn, route_list)
+        route_segments = self._build_route_segments(sid_conn, route_list)
+
+        sid_node_name = sid_proc.points[-1][0] if sid_proc.points else None
+        star_node_name = star_proc.points[0][0] if star_proc.points else None
+
+        sid_route_node_name = None
+        if sid_proc and sid_proc.points:
+            sid_names = {p[0] for p in sid_proc.points}
+            for _, node_name, _ in route_list:
+                if node_name in sid_names:
+                    sid_route_node_name = node_name
+
+        star_route_node_name = None
+        if star_proc and star_proc.points:
+            star_names = {p[0] for p in star_proc.points}
+            for t_name, t_pts in star_proc.transitions:
+                star_names.update(p[0] for p in t_pts)
+            for _, node_name, _ in route_list:
+                if node_name in star_names:
+                    star_route_node_name = node_name
+                    break
+
+        route_node_names = {node_name for _, node_name, _ in route_list}
+        active_sid_transition = self._find_active_transition(
+            sid_proc, route_node_names, is_sid=True
+        )
+        active_star_transition = self._find_active_transition(
+            star_proc, route_node_names, is_sid=False
+        )
+
+        time_total = time.time() - timestart
+        sttime = "%.2f" % (time_total * 1000)
+
+        return build_route_info(
+            self.data_version,
+            sttime,
+            route_total,
+            dist_str,
+            node_info,
+            sid_conn.procedures,
+            star_conn.procedures,
+            airport_names,
+            active_sid_transition,
+            active_star_transition,
+            route_segments,
+            sid_node_name,
+            star_node_name,
+            sid_route_node_name,
+            star_route_node_name,
+        )
 
     @staticmethod
     def _bearing(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -1442,8 +1492,30 @@ class RouteEngine:
         compressed = self._compress_route(route_list)
         parts = [orig]
         for edge_name, node_name, _ in compressed:
-            parts.extend([edge_name, node_name])
+            if edge_name:
+                parts.extend([edge_name, node_name])
+            else:
+                parts.append(node_name)
         return " ".join(parts)
+
+    def _candidate_procedure_length(
+        self,
+        proc: Procedure,
+        transition_name: str | None,
+    ) -> float:
+        """Return the great-circle length (km) of a procedure or transition."""
+        points = proc.points
+        if transition_name is not None:
+            for t_name, t_pts in proc.transitions:
+                if t_name == transition_name:
+                    points = list(t_pts)
+                    break
+        if len(points) < 2:
+            return 0.0
+        return sum(
+            great_circle_distance_km(points[i][1], points[i][2], points[i + 1][1], points[i + 1][2])
+            for i in range(len(points) - 1)
+        )
 
     def _build_node_info(
         self,
@@ -1503,44 +1575,56 @@ class RouteEngine:
         if not sid_candidates or not star_candidates:
             return None
 
-        # Build forbidden set from all procedure point names and transition
-        # point names.  Use names instead of IIDs because temp_nodes may be
-        # cleared in cached connections.
-        forbidden_names = set()
+        # Build forbidden set from all procedure point coordinates.  Use
+        # (name, lat, lon) keys instead of names alone so that airway nodes
+        # sharing a name but located elsewhere are not blocked.
+        forbidden_keys = set()
         for proc, boundary, key, t_name in sid_candidates:
             for pt in proc.points:
-                forbidden_names.add(pt[0])
+                forbidden_keys.add((pt[0], round(pt[1], 6), round(pt[2], 6)))
             for _trans_name, trans_pts in proc.transitions:
                 for pt in trans_pts:
-                    forbidden_names.add(pt[0])
+                    forbidden_keys.add((pt[0], round(pt[1], 6), round(pt[2], 6)))
         for proc, boundary, key, t_name in star_candidates:
             for pt in proc.points:
-                forbidden_names.add(pt[0])
+                forbidden_keys.add((pt[0], round(pt[1], 6), round(pt[2], 6)))
             for _trans_name, trans_pts in proc.transitions:
                 for pt in trans_pts:
-                    forbidden_names.add(pt[0])
+                    forbidden_keys.add((pt[0], round(pt[1], 6), round(pt[2], 6)))
 
         # STAR boundaries must be reachable from airway, so remove them from forbidden
         for proc, boundary, key, t_name in star_candidates:
-            forbidden_names.discard(boundary.name)
+            forbidden_keys.discard((boundary.name, round(boundary.px, 6), round(boundary.py, 6)))
 
-        # Prune candidates to the most promising N per side (by boundary
-        # distance to the opposite airport) to keep A* search fast.
+        # Prune candidates to the most promising N per side.  The score is the
+        # straight-line distance from the procedure boundary to the opposite
+        # airport plus the actual procedure length, so a long procedure that
+        # starts closer does not hide a shorter but slightly farther candidate.
         _MAX_CANDIDATES = 50
         if len(sid_candidates) > _MAX_CANDIDATES:
             sid_candidates = sorted(
                 sid_candidates,
-                key=lambda c: great_circle_distance_km(
-                    c[1].px, c[1].py,
-                    star_conn.airport_node.px, star_conn.airport_node.py,
+                key=lambda c: (
+                    great_circle_distance_km(
+                        c[1].px,
+                        c[1].py,
+                        star_conn.airport_node.px,
+                        star_conn.airport_node.py,
+                    )
+                    + self._candidate_procedure_length(c[0], c[3])
                 ),
             )[:_MAX_CANDIDATES]
         if len(star_candidates) > _MAX_CANDIDATES:
             star_candidates = sorted(
                 star_candidates,
-                key=lambda c: great_circle_distance_km(
-                    c[1].px, c[1].py,
-                    sid_conn.airport_node.px, sid_conn.airport_node.py,
+                key=lambda c: (
+                    great_circle_distance_km(
+                        c[1].px,
+                        c[1].py,
+                        sid_conn.airport_node.px,
+                        sid_conn.airport_node.py,
+                    )
+                    + self._candidate_procedure_length(c[0], c[3])
                 ),
             )[:_MAX_CANDIDATES]
 
@@ -1556,12 +1640,7 @@ class RouteEngine:
         sid_pseudo = []
         for proc, boundary, key, t_name in sid_candidates:
             weight = self._calc_procedure_distance(proc, sid_conn, t_name)
-            target_iid = boundary.iid
-            if target_iid < 0 or target_iid >= self.num_nodes:
-                for node in self.node_list:
-                    if node is not None and node.name == boundary.name:
-                        target_iid = node.iid
-                        break
+            target_iid = self._map_boundary_to_airway_iid(boundary)
             sid_pseudo.append((target_iid, weight, proc, boundary, key, t_name))
 
         # STAR pseudo-edges: boundary -> airport, weight = GC distance
@@ -1574,12 +1653,7 @@ class RouteEngine:
                 star_conn.airport_node.px,
                 star_conn.airport_node.py,
             )
-            source_iid = boundary.iid
-            if source_iid < 0 or source_iid >= self.num_nodes:
-                for node in self.node_list:
-                    if node is not None and node.name == boundary.name:
-                        source_iid = node.iid
-                        break
+            source_iid = self._map_boundary_to_airway_iid(boundary)
             star_pseudo.append((source_iid, weight, proc, boundary, key, t_name))
 
         # A* on mixed graph
@@ -1593,12 +1667,7 @@ class RouteEngine:
         # Local bindings for hot loop
         node_list = self.node_list
         has_non_t = self._node_has_non_t
-        _PI = 3.1415926535898
-        _R = 6378.137
-        _end_rlat = end_lat * _PI / 180.0
-        _end_rlon = end_lon * _PI / 180.0
-        _ce = math.cos(_end_rlat)
-        forbidden = forbidden_names
+        forbidden = forbidden_keys
         num_nodes = self.num_nodes
 
         while queue:
@@ -1616,13 +1685,7 @@ class RouteEngine:
                         dists[target_iid] = nd
                         prev[target_iid] = (curr, "SID", key, proc, t_name, boundary)
                         target_node = node_list[target_iid]
-                        _rlat = target_node.px * _PI / 180.0
-                        _rlon = target_node.py * _PI / 180.0
-                        _dlat = _rlat - _end_rlat
-                        _dlon = _rlon - _end_rlon
-                        _a = (math.sin(_dlat / 2) ** 2
-                              + math.cos(_rlat) * _ce * math.sin(_dlon / 2) ** 2)
-                        h = 2.0 * math.asin(math.sqrt(min(1.0, _a))) * _R
+                        h = heuristic_km(target_node.px, target_node.py, end_lat, end_lon)
                         heapq.heappush(queue, (nd + h, nd, target_iid))
                 continue
 
@@ -1633,23 +1696,22 @@ class RouteEngine:
                     for edge in curr_node.next_list:
                         nend = edge.nend
                         next_node = node_list[nend]
-                        if next_node.name in forbidden:
+                        if next_node.node_key() in forbidden:
                             continue
                         ename = edge.name
-                        if (ename and ename[0] == "T" and len(ename) > 1
-                                and ename[1:].isdigit() and has_non_t[curr]):
+                        if (
+                            ename
+                            and ename[0] == "T"
+                            and len(ename) > 1
+                            and ename[1:].isdigit()
+                            and has_non_t[curr]
+                        ):
                             continue
                         nd = g_score + edge.dist
                         if nd < dists[nend]:
                             dists[nend] = nd
                             prev[nend] = (curr, ename, None, None, None, None)
-                            _rlat = next_node.px * _PI / 180.0
-                            _rlon = next_node.py * _PI / 180.0
-                            _dlat = _rlat - _end_rlat
-                            _dlon = _rlon - _end_rlon
-                            _a = (math.sin(_dlat / 2) ** 2
-                                  + math.cos(_rlat) * _ce * math.sin(_dlon / 2) ** 2)
-                            h = 2.0 * math.asin(math.sqrt(min(1.0, _a))) * _R
+                            h = heuristic_km(next_node.px, next_node.py, end_lat, end_lon)
                             heapq.heappush(queue, (nd + h, nd, nend))
 
             # STAR pseudo-edges to end node
@@ -1682,19 +1744,34 @@ class RouteEngine:
             curr = from_iid
         path.reverse()
 
-        # Remove cycles from airway portion (same node visited multiple times)
-        seen_iids = set()
-        clean_path = []
+        # Remove cycles from the airway portion.  When a node is visited twice,
+        # backtrack to its first occurrence and discard the loop.  This keeps the
+        # resulting path a valid graph walk instead of simply dropping the repeat.
+        clean_path: list = []
+        iid_index: dict[int, int] = {}
+
+        def _rebuild_iid_index():
+            iid_index.clear()
+            for idx, it in enumerate(clean_path):
+                if it[0] not in ("SID", "STAR"):
+                    iid_index[it[2]] = idx
+
         for item in path:
             if item[0] in ("SID", "STAR"):
                 clean_path.append(item)
                 if item[0] == "SID":
-                    seen_iids.clear()
+                    iid_index.clear()
+                continue
+
+            iid = item[2]
+            if iid in iid_index:
+                # Truncate to (and including) the first occurrence of this node.
+                clean_path = clean_path[: iid_index[iid] + 1]
+                _rebuild_iid_index()
             else:
-                iid = item[2]
-                if iid not in seen_iids:
-                    clean_path.append(item)
-                    seen_iids.add(iid)
+                clean_path.append(item)
+                iid_index[iid] = len(clean_path) - 1
+
         path = clean_path
 
         # Extract SID/STAR and airway route
@@ -1717,13 +1794,10 @@ class RouteEngine:
 
         sid_proc = sid_info[2]
         sid_boundary = sid_info[4]
-        sid_info[1]
         sid_t_name = sid_info[3]
 
         star_proc = star_info[2]
         star_boundary = star_info[4]
-        star_info[1]
-        star_info[3]
 
         # Get SID transition points
         sid_transition_pts = None
@@ -1745,58 +1819,16 @@ class RouteEngine:
             sid_transition_pts=sid_transition_pts,
         )
 
-        dist_km = self._calc_route_distance(route_list, sid_conn, star_conn)
-        dist_nm = dist_km / 1.852
-        dist_str = f"{dist_nm:.2f} nm / {dist_km:.2f} km"
-        route_total = self._sort_route(orig, route_list)
-        node_info = self._build_node_info(sid_conn, star_conn, route_list)
-        route_segments = self._build_route_segments(sid_conn, route_list)
-
-        sid_node_name = sid_proc.points[-1][0] if sid_proc.points else None
-        star_node_name = star_proc.points[0][0] if star_proc.points else None
-
-        sid_route_node_name = None
-        if sid_proc and sid_proc.points:
-            sid_names = {p[0] for p in sid_proc.points}
-            for _, node_name, _ in route_list:
-                if node_name in sid_names:
-                    sid_route_node_name = node_name
-
-        star_route_node_name = None
-        if star_proc and star_proc.points:
-            star_names = {p[0] for p in star_proc.points}
-            for t_name, t_pts in star_proc.transitions:
-                star_names.update(p[0] for p in t_pts)
-            for _, node_name, _ in route_list:
-                if node_name in star_names:
-                    star_route_node_name = node_name
-                    break
-
-        route_node_names = {node_name for _, node_name, _ in route_list}
-        active_sid_transition = self._find_active_transition(
-            sid_proc, route_node_names, is_sid=True
-        )
-        active_star_transition = self._find_active_transition(
-            star_proc, route_node_names, is_sid=False
-        )
-
-        time_total = time.time() - timestart
-        sttime = "%.2f" % (time_total * 1000)
-
-        return build_route_info(
-            self.data_version,
-            sttime,
-            route_total,
-            dist_str,
-            node_info,
-            sid_conn.procedures,
-            star_conn.procedures,
+        return self._build_route_response(
+            route_list,
+            sid_proc,
+            star_proc,
+            sid_boundary,
+            star_boundary,
+            sid_transition_pts,
+            sid_conn,
+            star_conn,
             airport_names,
-            active_sid_transition,
-            active_star_transition,
-            route_segments,
-            sid_node_name,
-            star_node_name,
-            sid_route_node_name,
-            star_route_node_name,
+            orig,
+            timestart,
         )

@@ -40,9 +40,9 @@
                 {{ loginError }}
               </p>
               <button
-                @click="handleLogin"
                 :disabled="isLoading || !inputKey"
                 class="w-full h-12 bg-accent hover:bg-accent-hover text-white font-semibold rounded-full shadow-md hover:shadow-lg active:scale-[0.98] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                @click="handleLogin"
               >
                 <Loader2 v-if="isLoading" class="w-4 h-4 animate-spin" />
                 <span>{{ $t('admin.submit') }}</span>
@@ -50,8 +50,8 @@
             </div>
             <div class="mt-6 text-center">
               <button
-                @click="goHome"
                 class="text-sm text-text-secondary hover:text-text-primary transition-colors duration-150"
+                @click="goHome"
               >
                 {{ $t('admin.back') }}
               </button>
@@ -92,9 +92,9 @@
               <span class="font-mono">LIVE</span>
             </div>
             <button
-              @click="handleLogout"
               class="w-9 h-9 flex items-center justify-center rounded-xl bg-bg-elevated border border-border text-text-secondary hover:text-text-primary hover:bg-bg-surface transition-all duration-150 active:scale-95"
               :title="$t('admin.back')"
+              @click="handleLogout"
             >
               <ArrowLeft class="w-4 h-4" />
             </button>
@@ -149,9 +149,9 @@
                   @change="hasSelectedFile = !!fileInput?.files?.length"
                 />
                 <button
-                  @click="handleUpload"
                   :disabled="isUploading || isBuilding || !hasSelectedFile"
                   class="px-4 h-9 bg-accent hover:bg-accent-hover text-white text-xs font-semibold rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 shrink-0"
+                  @click="handleUpload"
                 >
                   <Loader2 v-if="isUploading" class="w-3.5 h-3.5 animate-spin" />
                   <span>{{ isUploading ? $t('admin.navdataUploading') : $t('common.confirm') }}</span>
@@ -222,9 +222,9 @@
                     <td class="py-2 pr-3 text-right font-mono text-text-secondary">{{ c.procedure_count.toLocaleString() }}</td>
                     <td class="py-2 text-right">
                       <button
-                        @click="handleDelete(c.cycle)"
                         :disabled="isDeleting"
                         class="px-2 py-1 rounded text-xs bg-error/10 text-error hover:bg-error/20 transition-colors disabled:opacity-50"
+                        @click="handleDelete(c.cycle)"
                       >
                         {{ $t('admin.navdataDelete') }}
                       </button>
@@ -334,7 +334,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   Shield,
@@ -438,12 +438,16 @@ function handleDelete(cycle: string) {
   deleteCycle(cycle)
 }
 
-let activeEsCleanup: (() => void) | null = null
+const activeEsCleanups = new Map<string, () => void>()
 
 function attachProgress(buildId: string) {
-  if (activeEsCleanup) return
+  const existing = activeEsCleanups.get(buildId)
+  if (existing) {
+    existing()
+    activeEsCleanups.delete(buildId)
+  }
   isBuilding.value = true
-  activeEsCleanup = connectProgress(buildId, (p) => {
+  const cleanup = connectProgress(buildId, (p) => {
     buildProgress.value = {
       status: p.status,
       step: p.step,
@@ -452,7 +456,7 @@ function attachProgress(buildId: string) {
     }
     if (p.status === 'done' || p.status === 'error') {
       isBuilding.value = false
-      activeEsCleanup = null
+      activeEsCleanups.delete(buildId)
       setTimeout(() => {
         showProgressModal.value = false
         hasSelectedFile.value = false
@@ -460,6 +464,7 @@ function attachProgress(buildId: string) {
       }, p.status === 'done' ? 1500 : 4000)
     }
   })
+  activeEsCleanups.set(buildId, cleanup)
 }
 
 async function handleUpload() {
@@ -509,6 +514,13 @@ function formatTime(iso: string): string {
   const d = new Date(iso)
   return d.toLocaleTimeString('en-GB', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
+
+onUnmounted(() => {
+  for (const cleanup of activeEsCleanups.values()) {
+    cleanup()
+  }
+  activeEsCleanups.clear()
+})
 </script>
 
 <script lang="ts">

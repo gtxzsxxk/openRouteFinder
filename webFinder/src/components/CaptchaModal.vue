@@ -48,15 +48,15 @@
           <!-- Actions -->
           <div class="flex gap-3">
             <button
-              @click="close"
               class="flex-1 h-12 bg-bg-elevated hover:bg-bg-page text-text-primary font-medium rounded-xl transition-all duration-150 border border-border"
+              @click="close"
             >
               {{ $t('common.cancel') }}
             </button>
             <button
-              @click="confirm"
               :disabled="validCodeInput.length !== 4 || isLoading"
               class="flex-1 h-12 bg-accent hover:bg-accent-hover disabled:bg-bg-elevated disabled:text-text-tertiary disabled:cursor-not-allowed text-white font-semibold rounded-xl transition-all duration-150 flex items-center justify-center gap-2"
+              @click="confirm"
             >
               <Loader2 v-if="isLoading" class="w-4 h-4 animate-spin" />
               <span>{{ $t('common.confirm') }}</span>

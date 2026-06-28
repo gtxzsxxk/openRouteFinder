@@ -27,7 +27,7 @@ Main route calculation endpoint.
 
 - `sidExit` / `starEntry`: Optional procedure filter waypoint names. `null` = auto-select.
 - `cycle`: Optional navdata cycle string. `null` = use latest.
-- `validCode` / `validToken`: CAPTCHA (skipped if `DISABLE_CAPTCHA=true`).
+- `validCode` / `validToken`: Required CAPTCHA fields (skipped if `DISABLE_CAPTCHA=true`).
 
 **Response (200):**
 ```json
@@ -36,29 +36,35 @@ Main route calculation endpoint.
   "distance": "1234.56 nm / 2286.41 km",
   "total_time": "2h 34m",
   "data_version": "2604",
-  "nodes": [["ZBAA", 40.08, 116.58], ["AA111", 40.2, 116.4], ...],
+  "nodes": [
+    { "name": "ZBAA", "lat": 40.08, "lon": 116.58 },
+    { "name": "AA111", "lat": 40.2, "lon": 116.4 }
+  ],
   "route_segments": [
-    {"from": "ZBAA", "to": "AA111", "airway": "SID"},
-    ...
+    { "from": "ZBAA", "to": "AA111", "airway": "SID" }
   ],
   "sid": {
-    "exits": ["AA111", "AA112", ...],
+    "exits": ["AA111", "AA112"],
     "procedures": {
-      "AA111": [["RUSDO", "36L", [[...]], [[...]]], ...]
+      "AA111": [["RUSDO", "36L", [[...]], [[...]]]]
     }
   },
   "star": {
-    "entries": ["GG001", ...],
+    "entries": ["GG001"],
     "procedures": {
-      "GG001": [["IDKEX", "02L", [[...]], [[...]]], ...]
+      "GG001": [["IDKEX", "02L", [[...]], [[...]]]]
     }
   },
   "activeSIDTransition": "AA113",
   "activeSTARTransition": null,
-  "departure_airport": { "icao": "ZBAA", "name": "...", "runways": [...] },
-  "arrival_airport": { "icao": "ZGGG", "name": "...", "runways": [...] },
-  "departure_metar": "METAR ZBAA ...",
-  "arrival_metar": "METAR ZGGG ..."
+  "airportDetails": {
+    "orig": { "icao": "ZBAA", "name": "...", "lat": 40.08, "lon": 116.58 },
+    "dest": { "icao": "ZGGG", "name": "...", "lat": 23.4, "lon": 113.3 }
+  },
+  "origRunways": [...],
+  "destRunways": [...],
+  "weather": ["METAR ZBAA ...", "METAR ZGGG ..."],
+  "parsedWeather": [{...}, {...}]
 }
 ```
 
@@ -94,7 +100,7 @@ Uses O(1) prefix index for ICAO codes, falls back to name search.
 
 ### GET `/api/airports/{icao}`
 
-Airport details with runways.
+Airport basic info.
 
 **Response (200):**
 ```json
@@ -102,22 +108,11 @@ Airport details with runways.
   "icao": "ZBAA",
   "name": "Beijing Capital International",
   "lat": 40.08,
-  "lon": 116.58,
-  "elevation": 116,
-  "runways": [
-    {
-      "name": "18L/36R",
-      "length": 3800,
-      "width": 60,
-      "surface": "CONC",
-      "ends": [
-        { "name": "18L", "lat": 40.09, "lon": 116.58, "heading": 179 },
-        { "name": "36R", "lat": 40.07, "lon": 116.58, "heading": 359 }
-      ]
-    }
-  ]
+  "lon": 116.58
 }
 ```
+
+Runways and elevation are available from `/api/airports/{icao}/procedures?detail=true` or `/api/route`.
 
 ---
 
@@ -166,7 +161,7 @@ Returns current navdata cycle.
 
 **Response (200):**
 ```json
-{ "cycle": "2604" }
+{ "version": "2604" }
 ```
 
 ---
@@ -232,42 +227,12 @@ Health check.
 
 ## Admin (Protected)
 
-All admin endpoints require `x-admin-key` header matching `settings.admin_key`.
+All admin endpoints require `x-admin-key` matching `settings.admin_key`, supplied
+either as the `X-Admin-Key` header or as an `x_admin_key` query parameter. The
+query-param form exists for the SSE build-progress stream, since `EventSource`
+cannot set custom request headers.
 
-### POST `/api/admin/navdata/upload`
-
-Upload Fenix A320 navdata zip.
-
-**Request:** `multipart/form-data` with `file` field (zip containing `nd.db3`)
-
-**Response (200):**
-```json
-{ "build_id": "uuid", "message": "Build started" }
-```
-
----
-
-### GET `/api/admin/build/progress/{build_id}`
-
-SSE stream for real-time build progress.
-
-**Response:** `text/event-stream`
-
-Events:
-```
-event: progress
-data: {"step": "nodes", "current": 100, "total": 5000}
-
-event: complete
-data: {"status": "success", "cycle": "2604"}
-
-event: error
-data: {"status": "error", "message": "..."}
-```
-
----
-
-### GET `/api/admin/stats`
+### GET `/api/admin`
 
 Admin statistics.
 
@@ -283,3 +248,81 @@ Admin statistics.
   "errors": [...]
 }
 ```
+
+---
+
+### GET `/api/admin/navdata`
+
+List all navdata cycles with metadata.
+
+**Response (200):**
+```json
+{
+  "cycles": [
+    {
+      "cycle": "2604",
+      "file_size_mb": 22.5,
+      "node_count": 318000,
+      "edge_count": 420000,
+      "airport_count": 17000,
+      "procedure_count": 120000
+    }
+  ]
+}
+```
+
+---
+
+### GET `/api/admin/navdata/{cycle}`
+
+Metadata for a single cycle.
+
+**Response (200):** Same object as an entry in `/api/admin/navdata`.
+
+**Response (404):** Cycle not found.
+
+---
+
+### DELETE `/api/admin/navdata/{cycle}`
+
+Delete a navdata cycle.
+
+**Response (200):**
+```json
+{ "success": true, "cycle": "2604" }
+```
+
+---
+
+### POST `/api/admin/navdata/upload`
+
+Upload Fenix A320 navdata zip.
+
+**Request:** `multipart/form-data` with `file` field (zip containing `nd.db3`)
+
+**Response (200):**
+```json
+{ "build_id": "uuid", "status": "building", "cycle": "2604" }
+```
+
+---
+
+### GET `/api/admin/navdata/build-progress/{build_id}`
+
+SSE stream for real-time build progress.
+
+**Response:** `text/event-stream`
+
+Events:
+```
+event: progress
+data: {"status": "building", "step": "nodes", "current": 100, "total": 5000}
+
+event: done
+data: {"status": "done", "cycle": "2604", "info": {...}}
+
+event: error
+data: {"status": "error", "detail": "..."}
+```
+
+The stream removes finished tasks after delivery so `_build_tasks` does not grow without bound.

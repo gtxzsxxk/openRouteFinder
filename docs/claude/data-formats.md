@@ -81,7 +81,7 @@ Uploaded via admin API, converted to FlatBuffers in background thread.
 
 ### Conversion Details
 
-- Nodes: ID converted to 0-based IID (`(row["ID"] or 1) - 1`)
+- Nodes: explicit `source ID → internal IID` dictionary mapping; IIDs do not require contiguous source IDs
 - Edges: joins `AirwayLegs` + `Airways`, maps level string to `AirwayLevel` enum
 - Airports: batch-queries runways, ILS, terminals in single queries
 - Runways: pairs ends by base name (e.g., "18L/36R")

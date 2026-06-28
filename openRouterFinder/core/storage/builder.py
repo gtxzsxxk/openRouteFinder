@@ -253,146 +253,152 @@ def build_from_fenix(
     """Read Fenix nd.db3 and return serialized FlatBuffers bytes."""
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
 
-    builder = flatbuffers.Builder(1024 * 1024)
+        builder = flatbuffers.Builder(16 * 1024 * 1024)
 
-    # Pre-fetch waypoint names for procedure leg lookup
-    cursor.execute("SELECT ID, Ident FROM Waypoints")
-    wp_names: dict[int, str] = {row["ID"]: row["Ident"] or "" for row in cursor.fetchall()}
+        # Pre-fetch waypoint names for procedure leg lookup
+        cursor.execute("SELECT ID, Ident FROM Waypoints")
+        wp_names: dict[int, str] = {row["ID"]: row["Ident"] or "" for row in cursor.fetchall()}
 
-    # Count rows for progress tracking
-    counts = {
-        "waypoints": _count_table(cursor, "Waypoints"),
-        "airways": _count_table(cursor, "AirwayLegs"),
-        "airports": _count_table(cursor, "Airports"),
-        "navaids": _count_table(cursor, "Navaids"),
-        "holdings": _count_table(cursor, "Holdings"),
-        "markers": _count_table(cursor, "Markers"),
-        "gls": _count_table(cursor, "GLS"),
-        "grid_mora": _count_table(cursor, "GridMora"),
-        "airport_comms": _count_table(cursor, "AirportComms"),
-    }
-    sum(counts.values())
-    processed = 0
+        # Count rows for progress tracking
+        counts = {
+            "waypoints": _count_table(cursor, "Waypoints"),
+            "airways": _count_table(cursor, "AirwayLegs"),
+            "airports": _count_table(cursor, "Airports"),
+            "navaids": _count_table(cursor, "Navaids"),
+            "holdings": _count_table(cursor, "Holdings"),
+            "markers": _count_table(cursor, "Markers"),
+            "gls": _count_table(cursor, "GLS"),
+            "grid_mora": _count_table(cursor, "GridMora"),
+            "airport_comms": _count_table(cursor, "AirportComms"),
+        }
+        processed = 0
 
-    def _progress(step: str, current: int, total: int) -> None:
-        if progress:
-            progress(step, current, total)
+        def _progress(step: str, current: int, total: int) -> None:
+            if progress:
+                try:
+                    progress(step, current, total)
+                except Exception as e:
+                    print(f"Progress callback error: {e}")
 
-    # Build all tables
-    nodes = _build_nodes(cursor, builder, lambda c, t: _progress("waypoints", c, t))
-    processed += counts["waypoints"]
-    _progress("waypoints", counts["waypoints"], counts["waypoints"])
+        # Build all tables
+        nodes, id_to_iid = _build_nodes(cursor, builder, lambda c, t: _progress("waypoints", c, t))
+        processed += counts["waypoints"]
+        _progress("waypoints", counts["waypoints"], counts["waypoints"])
 
-    edges = _build_edges(cursor, builder, lambda c, t: _progress("airways", c, t))
-    processed += counts["airways"]
-    _progress("airways", counts["airways"], counts["airways"])
+        edges = _build_edges(cursor, builder, id_to_iid, lambda c, t: _progress("airways", c, t))
+        processed += counts["airways"]
+        _progress("airways", counts["airways"], counts["airways"])
 
-    airports = _build_airports(cursor, builder, wp_names, lambda c, t: _progress("airports", c, t))
-    processed += counts["airports"]
-    _progress("airports", counts["airports"], counts["airports"])
+        airports = _build_airports(
+            cursor, builder, wp_names, lambda c, t: _progress("airports", c, t)
+        )
+        processed += counts["airports"]
+        _progress("airports", counts["airports"], counts["airports"])
 
-    navaids = _build_navaids(cursor, builder, lambda c, t: _progress("navaids", c, t))
-    processed += counts["navaids"]
-    _progress("navaids", counts["navaids"], counts["navaids"])
+        navaids = _build_navaids(cursor, builder, lambda c, t: _progress("navaids", c, t))
+        processed += counts["navaids"]
+        _progress("navaids", counts["navaids"], counts["navaids"])
 
-    holdings = _build_holdings(cursor, builder, lambda c, t: _progress("holdings", c, t))
-    processed += counts["holdings"]
-    _progress("holdings", counts["holdings"], counts["holdings"])
+        holdings = _build_holdings(cursor, builder, lambda c, t: _progress("holdings", c, t))
+        processed += counts["holdings"]
+        _progress("holdings", counts["holdings"], counts["holdings"])
 
-    markers = _build_markers(cursor, builder, lambda c, t: _progress("markers", c, t))
-    processed += counts["markers"]
-    _progress("markers", counts["markers"], counts["markers"])
+        markers = _build_markers(cursor, builder, lambda c, t: _progress("markers", c, t))
+        processed += counts["markers"]
+        _progress("markers", counts["markers"], counts["markers"])
 
-    gls_list = _build_gls(cursor, builder, lambda c, t: _progress("gls", c, t))
-    processed += counts["gls"]
-    _progress("gls", counts["gls"], counts["gls"])
+        gls_list = _build_gls(cursor, builder, lambda c, t: _progress("gls", c, t))
+        processed += counts["gls"]
+        _progress("gls", counts["gls"], counts["gls"])
 
-    grid_mora = _build_grid_mora(cursor, builder, lambda c, t: _progress("grid_mora", c, t))
-    processed += counts["grid_mora"]
-    _progress("grid_mora", counts["grid_mora"], counts["grid_mora"])
+        grid_mora = _build_grid_mora(cursor, builder, lambda c, t: _progress("grid_mora", c, t))
+        processed += counts["grid_mora"]
+        _progress("grid_mora", counts["grid_mora"], counts["grid_mora"])
 
-    airport_comms = _build_airport_comms(
-        cursor, builder, lambda c, t: _progress("airport_comms", c, t)
-    )
-    processed += counts["airport_comms"]
-    _progress("airport_comms", counts["airport_comms"], counts["airport_comms"])
+        airport_comms = _build_airport_comms(
+            cursor, builder, lambda c, t: _progress("airport_comms", c, t)
+        )
+        processed += counts["airport_comms"]
+        _progress("airport_comms", counts["airport_comms"], counts["airport_comms"])
 
-    # Serialization phase
-    _progress("serialization", 0, 1)
+        # Serialization phase
+        _progress("serialization", 0, 1)
 
-    # Create string fields for root
-    cycle_off = builder.CreateString(cycle)
-    from_off = builder.CreateString(effective_from)
-    to_off = builder.CreateString(effective_to)
+        # Create string fields for root
+        cycle_off = builder.CreateString(cycle)
+        from_off = builder.CreateString(effective_from)
+        to_off = builder.CreateString(effective_to)
 
-    # Build root vectors
-    NavDataStartNodesVector(builder, len(nodes))
-    for n in reversed(nodes):
-        builder.PrependUOffsetTRelative(n)
-    nodes_vec = builder.EndVector()
+        # Build root vectors
+        NavDataStartNodesVector(builder, len(nodes))
+        for n in reversed(nodes):
+            builder.PrependUOffsetTRelative(n)
+        nodes_vec = builder.EndVector()
 
-    NavDataStartEdgesVector(builder, len(edges))
-    for e in reversed(edges):
-        builder.PrependUOffsetTRelative(e)
-    edges_vec = builder.EndVector()
+        NavDataStartEdgesVector(builder, len(edges))
+        for e in reversed(edges):
+            builder.PrependUOffsetTRelative(e)
+        edges_vec = builder.EndVector()
 
-    NavDataStartAirportsVector(builder, len(airports))
-    for a in reversed(airports):
-        builder.PrependUOffsetTRelative(a)
-    airports_vec = builder.EndVector()
+        NavDataStartAirportsVector(builder, len(airports))
+        for a in reversed(airports):
+            builder.PrependUOffsetTRelative(a)
+        airports_vec = builder.EndVector()
 
-    NavDataStartNavaidsVector(builder, len(navaids))
-    for n in reversed(navaids):
-        builder.PrependUOffsetTRelative(n)
-    navaids_vec = builder.EndVector()
+        NavDataStartNavaidsVector(builder, len(navaids))
+        for n in reversed(navaids):
+            builder.PrependUOffsetTRelative(n)
+        navaids_vec = builder.EndVector()
 
-    NavDataStartHoldingsVector(builder, len(holdings))
-    for h in reversed(holdings):
-        builder.PrependUOffsetTRelative(h)
-    holdings_vec = builder.EndVector()
+        NavDataStartHoldingsVector(builder, len(holdings))
+        for h in reversed(holdings):
+            builder.PrependUOffsetTRelative(h)
+        holdings_vec = builder.EndVector()
 
-    NavDataStartMarkersVector(builder, len(markers))
-    for m in reversed(markers):
-        builder.PrependUOffsetTRelative(m)
-    markers_vec = builder.EndVector()
+        NavDataStartMarkersVector(builder, len(markers))
+        for m in reversed(markers):
+            builder.PrependUOffsetTRelative(m)
+        markers_vec = builder.EndVector()
 
-    NavDataStartGlsVector(builder, len(gls_list))
-    for g in reversed(gls_list):
-        builder.PrependUOffsetTRelative(g)
-    gls_vec = builder.EndVector()
+        NavDataStartGlsVector(builder, len(gls_list))
+        for g in reversed(gls_list):
+            builder.PrependUOffsetTRelative(g)
+        gls_vec = builder.EndVector()
 
-    NavDataStartGridMoraVector(builder, len(grid_mora))
-    for g in reversed(grid_mora):
-        builder.PrependUOffsetTRelative(g)
-    grid_mora_vec = builder.EndVector()
+        NavDataStartGridMoraVector(builder, len(grid_mora))
+        for g in reversed(grid_mora):
+            builder.PrependUOffsetTRelative(g)
+        grid_mora_vec = builder.EndVector()
 
-    NavDataStartAirportCommsVector(builder, len(airport_comms))
-    for c in reversed(airport_comms):
-        builder.PrependUOffsetTRelative(c)
-    airport_comms_vec = builder.EndVector()
+        NavDataStartAirportCommsVector(builder, len(airport_comms))
+        for c in reversed(airport_comms):
+            builder.PrependUOffsetTRelative(c)
+        airport_comms_vec = builder.EndVector()
 
-    # Build root table
-    NavDataStart(builder)
-    NavDataAddCycle(builder, cycle_off)
-    NavDataAddEffectiveFrom(builder, from_off)
-    NavDataAddEffectiveTo(builder, to_off)
-    NavDataAddNodes(builder, nodes_vec)
-    NavDataAddEdges(builder, edges_vec)
-    NavDataAddAirports(builder, airports_vec)
-    NavDataAddNavaids(builder, navaids_vec)
-    NavDataAddHoldings(builder, holdings_vec)
-    NavDataAddMarkers(builder, markers_vec)
-    NavDataAddGls(builder, gls_vec)
-    NavDataAddGridMora(builder, grid_mora_vec)
-    NavDataAddAirportComms(builder, airport_comms_vec)
-    root = NavDataEnd(builder)
+        # Build root table
+        NavDataStart(builder)
+        NavDataAddCycle(builder, cycle_off)
+        NavDataAddEffectiveFrom(builder, from_off)
+        NavDataAddEffectiveTo(builder, to_off)
+        NavDataAddNodes(builder, nodes_vec)
+        NavDataAddEdges(builder, edges_vec)
+        NavDataAddAirports(builder, airports_vec)
+        NavDataAddNavaids(builder, navaids_vec)
+        NavDataAddHoldings(builder, holdings_vec)
+        NavDataAddMarkers(builder, markers_vec)
+        NavDataAddGls(builder, gls_vec)
+        NavDataAddGridMora(builder, grid_mora_vec)
+        NavDataAddAirportComms(builder, airport_comms_vec)
+        root = NavDataEnd(builder)
 
-    builder.Finish(root)
-    conn.close()
-    _progress("serialization", 1, 1)
-    return bytes(builder.Output())
+        builder.Finish(root)
+        _progress("serialization", 1, 1)
+        return bytes(builder.Output())
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -400,15 +406,18 @@ def build_from_fenix(
 # ---------------------------------------------------------------------------
 
 
-def _build_nodes(cursor, builder, progress=None) -> list[int]:
-    cursor.execute("SELECT ID, Ident, Latitude, Longtitude FROM Waypoints")
+def _build_nodes(cursor, builder, progress=None) -> tuple[list[int], dict[int, int]]:
+    cursor.execute("SELECT ID, Ident, Latitude, Longtitude FROM Waypoints ORDER BY ID")
     rows = cursor.fetchall()
     total = len(rows)
     nodes = []
+    id_to_iid: dict[int, int] = {}
     for i, row in enumerate(rows):
         name = builder.CreateString(row["Ident"] or "")
+        iid = i
+        id_to_iid[row["ID"]] = iid
         NodeStart(builder)
-        NodeAddIid(builder, (row["ID"] or 1) - 1)
+        NodeAddIid(builder, iid)
         NodeAddName(builder, name)
         NodeAddLat(builder, row["Latitude"] or 0.0)
         NodeAddLon(builder, row["Longtitude"] or 0.0)
@@ -417,7 +426,7 @@ def _build_nodes(cursor, builder, progress=None) -> list[int]:
             progress(i, total)
     if progress:
         progress(total, total)
-    return nodes
+    return nodes, id_to_iid
 
 
 # ---------------------------------------------------------------------------
@@ -425,7 +434,7 @@ def _build_nodes(cursor, builder, progress=None) -> list[int]:
 # ---------------------------------------------------------------------------
 
 
-def _build_edges(cursor, builder, progress=None) -> list[int]:
+def _build_edges(cursor, builder, id_to_iid: dict[int, int], progress=None) -> list[int]:
     cursor.execute("""
         SELECT al.Waypoint1ID, al.Waypoint2ID, aw.Ident, al.Level
         FROM AirwayLegs al
@@ -440,9 +449,11 @@ def _build_edges(cursor, builder, progress=None) -> list[int]:
         level = {"B": AirwayLevel.Both, "H": AirwayLevel.High, "L": AirwayLevel.Low}.get(
             level_str, AirwayLevel.Both
         )
+        nfrom = id_to_iid.get(row["Waypoint1ID"], -1)
+        nend = id_to_iid.get(row["Waypoint2ID"], -1)
         EdgeStart(builder)
-        EdgeAddNfrom(builder, (row["Waypoint1ID"] or 1) - 1)
-        EdgeAddNend(builder, (row["Waypoint2ID"] or 1) - 1)
+        EdgeAddNfrom(builder, nfrom)
+        EdgeAddNend(builder, nend)
         EdgeAddName(builder, name)
         EdgeAddLevel(builder, level)
         edges.append(EdgeEnd(builder))
@@ -501,7 +512,11 @@ def _build_airports(cursor, builder, wp_names: dict[int, str], progress=None) ->
         terminals_by_airport.setdefault(row["AirportID"], []).append(row)
 
     # 5. Fetch all terminal legs in one query
-    cursor.execute("""
+    # Determine available ordering column (SeqNumber preferred, fall back to ID)
+    cursor.execute("PRAGMA table_info(TerminalLegs)")
+    terminal_legs_columns = {col["name"] for col in cursor.fetchall()}
+    seq_col = "SeqNumber" if "SeqNumber" in terminal_legs_columns else "tl.ID"
+    cursor.execute(f"""
         SELECT tl.ID, tl.TerminalID, tl.WptID, tl.WptLat, tl.WptLon,
                tl.Transition, tl.Course, tl.Distance, tl.Alt, tl.Vnav,
                tl.TurnDir, tl.Type, tl.TrackCode, tl.NavID, tl.NavLat,
@@ -510,7 +525,10 @@ def _build_airports(cursor, builder, wp_names: dict[int, str], progress=None) ->
                tle.SpeedLimit
         FROM TerminalLegs tl
         LEFT JOIN TerminalLegsEx tle ON tl.ID = tle.ID
+        ORDER BY tl.TerminalID, {seq_col}
     """)
+    # Rows arrive already ordered by the SQL ORDER BY (TerminalID, seq_col),
+    # so per-terminal grouping preserves that order — no re-sort needed.
     legs_by_terminal: dict[int, list] = {}
     for row in cursor.fetchall():
         legs_by_terminal.setdefault(row["TerminalID"], []).append(row)
@@ -665,7 +683,8 @@ def _runway_base_name(ident: str) -> str:
     num = int(num_str)
     opp_num = num + 18 if num <= 18 else num - 18
     suffix_map = {"L": "R", "R": "L", "C": "C"}
-    opp_suffix = suffix_map.get(suffix, "")
+    # Preserve non-standard suffixes (e.g. T, W) instead of dropping them.
+    opp_suffix = suffix_map.get(suffix, suffix)
     opp = f"{opp_num:02d}{opp_suffix}"
     if num < opp_num or (num == opp_num and suffix in ("L", "C")):
         return f"{ident}/{opp}"
@@ -675,18 +694,21 @@ def _runway_base_name(ident: str) -> str:
 def _decode_ils_freq(raw_freq) -> str:
     """Decode Fenix ILS frequency from BCD-like hex encoding.
 
-    Fenix stores ILS frequency as an integer whose hexadecimal digits
-    represent the frequency in BCD. Trailing zeros are padding.
+    Fenix stores ILS frequency as an integer whose low 5 hexadecimal digits
+    represent the frequency in BCD with two implied decimal places.
     Examples: 0x01085000 (17321984) -> 108.50 MHz,
-              0x01115500 (17913088) -> 111.55 MHz.
+              0x01115500 (17913088) -> 111.55 MHz,
+              0x01100000 (17825792) -> 110.00 MHz.
     """
     if not raw_freq:
         return ""
     try:
-        hex_str = f"{int(raw_freq):X}".rstrip("0")
-        if not hex_str:
+        # Format to at least 5 hex digits; the low 5 digits are the BCD frequency.
+        hex_str = f"{int(raw_freq):010X}"
+        digits = hex_str[-5:]
+        if not digits or digits == "00000":
             return ""
-        freq = int(hex_str) / (10 ** (len(hex_str) - 3))
+        freq = int(digits) / 100.0
         return f"{freq:.2f} MHz"
     except (ValueError, TypeError):
         return str(raw_freq)
@@ -816,21 +838,30 @@ def _build_procedure_transitions(
     if not trans_names:
         return 0
 
+    # Pre-group legs by transition name once, avoiding O(T * L) scans.
+    terminal_legs = legs_by_terminal.get(terminal_id, [])
+    legs_by_trans_name: dict[str, list] = {}
+    for row in terminal_legs:
+        trans = row["Transition"] or ""
+        if not trans or trans == "ALL":
+            continue
+        legs_by_trans_name.setdefault(trans, []).append(row)
+
     trans_offsets = []
     for trans_name in trans_names:
-        name = builder.CreateString(trans_name)
         legs = _build_procedure_legs(
             builder,
-            legs_by_terminal.get(terminal_id, []),
+            legs_by_trans_name.get(trans_name, []),
             wp_names,
             is_main=False,
             transition_name=trans_name,
         )
-
+        if legs == 0:
+            continue
+        name = builder.CreateString(trans_name)
         ProcTransitionStart(builder)
         ProcTransitionAddName(builder, name)
-        if legs:
-            ProcTransitionAddLegs(builder, legs)
+        ProcTransitionAddLegs(builder, legs)
         trans_offsets.append(ProcTransitionEnd(builder))
 
     if not trans_offsets:
@@ -1027,17 +1058,21 @@ def _build_gls(cursor, builder, progress=None) -> list[int]:
 
 
 def _build_grid_mora(cursor, builder, progress=None) -> list[int]:
+    cursor.execute("PRAGMA table_info(GridMora)")
+    mora_cols = sorted(
+        [col["name"] for col in cursor.fetchall() if col["name"].startswith("mora")],
+        key=lambda x: int(x[4:]),
+    )
     cursor.execute("SELECT * FROM GridMora")
     rows = cursor.fetchall()
     total = len(rows)
     mora_list = []
     for i, row in enumerate(rows):
         row_dict = dict(row)
-        values = []
-        for j in range(1, 31):
-            col = f"mora{j:02d}"
-            val = row_dict.get(col)
-            values.append(str(val) if val is not None else "")
+        values = [
+            str(row_dict.get(col)) if row_dict.get(col) is not None else ""
+            for col in mora_cols
+        ]
         # Build string vector
         str_offsets = [builder.CreateString(v) for v in values]
         GridMoraStartMoraValuesVector(builder, len(str_offsets))

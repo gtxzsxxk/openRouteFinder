@@ -7,13 +7,13 @@
         <button
           v-for="mode in ['card', 'raw'] as const"
           :key="mode"
-          @click="displayMode = mode"
           :class="[
             'px-3 py-1 text-xs font-medium rounded-md transition-all duration-150',
             displayMode === mode
               ? 'bg-bg-surface text-text-primary shadow-sm'
               : 'text-text-tertiary hover:text-text-secondary',
           ]"
+          @click="displayMode = mode"
         >
           {{ mode === 'card' ? $t('weather.card') : 'Raw' }}
         </button>

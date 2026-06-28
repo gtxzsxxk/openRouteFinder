@@ -1,5 +1,6 @@
 """mmap-based FlatBuffers reader for NavData files."""
 
+import contextlib
 import mmap
 import os
 import sys
@@ -29,6 +30,19 @@ class MmappedNavData:
     def __init__(self, fb_path: Path):
         self._path = fb_path
         self._tmp_path: Path | None = None
+        self._file = None
+        self._mmap = None
+        self._nav = None
+        self._node_index: dict[tuple, GraphNode] = {}
+        self._node_by_iid: dict[int, GraphNode] = {}
+        self._airport_by_icao: dict[str, int] = {}
+        self._navaid_by_ident: dict[str, list[int]] = {}
+        # Process-lifetime cache for derived structures that are pure functions
+        # of this immutable navdata (spatial index, T-route skip table, edge
+        # distance backfill flag). Lives on the shared MmappedNavData — NOT on
+        # the per-request _NavDataRef wrapper — so it is built once per cycle and
+        # reused across every request instead of being rebuilt each query.
+        self._cache: dict = {}
 
         actual_path = fb_path
         if str(fb_path).endswith(".fb.zst"):
@@ -38,39 +52,46 @@ class MmappedNavData:
                 dctx = zstd.ZstdDecompressor()
                 with open(fb_path, "rb") as zst_in, dctx.stream_reader(zst_in) as reader:
                     while True:
-                            chunk = reader.read(1024 * 1024)
-                            if not chunk:
-                                break
-                            os.write(tmp_fd, chunk)
+                        chunk = reader.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        os.write(tmp_fd, chunk)
             finally:
                 os.close(tmp_fd)
             actual_path = Path(tmp_name)
             self._tmp_path = actual_path
 
-        self._file = open(actual_path, "rb")  # noqa: SIM115
-        self._mmap = mmap.mmap(self._file.fileno(), 0, access=mmap.ACCESS_READ)
-        self._nav = NavData.GetRootAs(self._mmap, 0)
-
-        # Build O(1) lookups
-        self._node_index: dict[tuple, GraphNode] = {}
-        self._node_by_iid: dict[int, GraphNode] = {}
-        self._airport_by_icao: dict[str, int] = {}  # icao -> index in _nav.Airports()
-        self._navaid_by_ident: dict[str, list[int]] = {}
-
-        self._build_indices()
+        try:
+            self._file = open(actual_path, "rb")  # noqa: SIM115
+            self._mmap = mmap.mmap(self._file.fileno(), 0, access=mmap.ACCESS_READ)
+            self._nav = NavData.GetRootAs(self._mmap, 0)
+            self._build_indices()
+        except Exception:
+            # Ensure temp files and file handles are released even if mmap or
+            # index building fails.
+            self.close()
+            raise
 
     def _build_indices(self):
         # Node index by (name, lat, lon)
         for i in range(self._nav.NodesLength()):
             n = self._nav.Nodes(i)
+            iid = n.Iid()
+            if iid in self._node_by_iid:
+                existing = self._node_by_iid[iid]
+                print(
+                    f"Warning: duplicate IID {iid} in navdata "
+                    f"(existing={existing.name!r}, new={n.Name()!r}); keeping first"
+                )
+                continue
             gn = GraphNode(
-                iid=n.Iid(),
+                iid=iid,
                 name=n.Name().decode("utf-8") if n.Name() else "",
                 px=n.Lat(),
                 py=n.Lon(),
             )
             self._node_index[gn.node_key()] = gn
-            self._node_by_iid[n.Iid()] = gn
+            self._node_by_iid[iid] = gn
 
         # Attach edges to nodes
         for i in range(self._nav.EdgesLength()):
@@ -194,10 +215,23 @@ class MmappedNavData:
         return self._node_index
 
     def close(self):
-        self._mmap.close()
-        self._file.close()
-        if self._tmp_path is not None and self._tmp_path.exists():
-            os.unlink(self._tmp_path)
+        """Release mmap/file handles and remove decompressed temp files.
+
+        Idempotent: safe to call multiple times.
+        """
+        if self._mmap is not None:
+            with contextlib.suppress(ValueError, OSError):
+                self._mmap.close()
+            self._mmap = None
+        if self._file is not None:
+            with contextlib.suppress(ValueError, OSError):
+                self._file.close()
+            self._file = None
+        if self._tmp_path is not None:
+            with contextlib.suppress(OSError):
+                if self._tmp_path.exists():
+                    os.unlink(self._tmp_path)
+            self._tmp_path = None
 
     def __enter__(self):
         return self

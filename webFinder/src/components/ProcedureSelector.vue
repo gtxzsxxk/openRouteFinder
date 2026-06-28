@@ -3,6 +3,7 @@
     <label class="block text-xs font-medium text-text-secondary mb-2 uppercase tracking-wider">{{ label }}</label>
     <div v-if="isLoading" class="text-xs text-text-secondary py-2">{{ $t('common.loading') }}</div>
     <div v-else-if="error" class="text-xs text-red-500 py-2">{{ $t('common.loadFailed') }}</div>
+    <div v-else-if="airportNotFound" class="text-xs text-red-500 py-2">{{ $t('search.airportNotFound') }}</div>
     <div v-else-if="!hasLoaded" class="text-xs text-text-secondary py-2 cursor-pointer hover:text-text-primary transition-colors" @click="loadProcedures">
       <span class="mr-1">&#9660;</span> {{ type === 'sid' ? $t('search.expandSID') : $t('search.expandSTAR') }}
     </div>
@@ -49,6 +50,7 @@ const label = computed(() => props.type === 'sid' ? t('search.sid') : t('search.
 const options = ref<ProcedureOption[]>([])
 const isLoading = ref(false)
 const error = ref<string | null>(null)
+const airportNotFound = ref(false)
 const hasLoaded = ref(false)
 
 const selectedValue = computed({
@@ -70,6 +72,7 @@ async function loadProcedures() {
 
   isLoading.value = true
   error.value = null
+  airportNotFound.value = false
   try {
     const url = props.cycle
       ? `/api/airports/${encodeURIComponent(props.icao)}/procedures?cycle=${encodeURIComponent(props.cycle)}`
@@ -77,7 +80,7 @@ async function loadProcedures() {
     const response = await fetch(url)
     if (!response.ok) {
       if (response.status === 404) {
-        options.value = []
+        airportNotFound.value = true
       } else {
         error.value = t('common.loadFailed')
       }
@@ -109,6 +112,7 @@ watch(() => props.icao, (newIcao, oldIcao) => {
     options.value = []
     hasLoaded.value = false
     error.value = null
+    airportNotFound.value = false
   }
 })
 
@@ -117,5 +121,6 @@ watch(() => props.cycle, () => {
   options.value = []
   hasLoaded.value = false
   error.value = null
+  airportNotFound.value = false
 })
 </script>

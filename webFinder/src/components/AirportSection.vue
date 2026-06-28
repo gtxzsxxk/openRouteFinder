@@ -1,8 +1,8 @@
 <template>
   <div>
     <button
-      @click="isOpen = !isOpen"
       class="w-full flex items-center justify-between text-left group"
+      @click="isOpen = !isOpen"
     >
       <div>
         <span class="font-mono text-sm font-semibold text-accent">{{ airport.icao }}</span>
@@ -48,8 +48,8 @@
 
         <div>
           <button
-            @click="runwaysOpen = !runwaysOpen"
             class="flex items-center gap-1.5 text-xs font-medium text-text-secondary hover:text-text-primary transition-colors"
+            @click="runwaysOpen = !runwaysOpen"
           >
             <ChevronDown
               class="w-3 h-3 transition-transform duration-200"

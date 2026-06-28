@@ -36,7 +36,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, onUnmounted } from 'vue'
 import type { Airport } from '@/types'
 
 const props = defineProps<{
@@ -54,7 +54,7 @@ const inputValue = ref(props.modelValue)
 const suggestions = ref<Airport[]>([])
 const isOpen = ref(false)
 const highlightedIndex = ref(-1)
-let debounceTimer: ReturnType<typeof setTimeout> | null = null
+const debounceTimer = ref<ReturnType<typeof setTimeout> | null>(null)
 
 watch(() => props.modelValue, (val) => {
   inputValue.value = val
@@ -72,8 +72,8 @@ async function onInput() {
     return
   }
 
-  if (debounceTimer) clearTimeout(debounceTimer)
-  debounceTimer = setTimeout(async () => {
+  if (debounceTimer.value) clearTimeout(debounceTimer.value)
+  debounceTimer.value = setTimeout(async () => {
     try {
       const response = await fetch(`/api/airports?q=${encodeURIComponent(val)}`)
       if (!response.ok) {
@@ -136,4 +136,11 @@ function onBlur() {
     isOpen.value = false
   }, 150)
 }
+
+onUnmounted(() => {
+  if (debounceTimer.value) {
+    clearTimeout(debounceTimer.value)
+    debounceTimer.value = null
+  }
+})
 </script>

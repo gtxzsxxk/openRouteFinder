@@ -4,9 +4,12 @@ import contextlib
 import dataclasses
 import pickle
 import sys
+import threading
+from collections import OrderedDict
 from threading import Lock
 
 from openRouterFinder.config import settings
+from openRouterFinder.core.airport import AirportConnection
 from openRouterFinder.core.graph import Edge as NewEdge
 from openRouterFinder.core.graph import Node as NewNode
 
@@ -19,6 +22,7 @@ if "RouteFinderLib" not in sys.modules:
 
 _nav_graph = None
 _nav_registry = None
+_registry_lock = threading.Lock()
 
 
 def _convert_old_nodes(old_nodes):
@@ -115,15 +119,18 @@ def get_nav_graph() -> NavGraph:
 
 
 def _init_registry():
-    """Initialize NavDataRegistry from data directory."""
+    """Initialize NavDataRegistry from data directory. Thread-safe."""
     global _nav_registry
     if _nav_registry is not None:
         return _nav_registry
-    from openRouterFinder.core.storage.registry import NavDataRegistry
+    with _registry_lock:
+        if _nav_registry is not None:
+            return _nav_registry
+        from openRouterFinder.core.storage.registry import NavDataRegistry
 
-    data_dir = settings.navdat_full_path.parent
-    _nav_registry = NavDataRegistry(data_dir)
-    return _nav_registry
+        data_dir = settings.navdat_full_path.parent
+        _nav_registry = NavDataRegistry(data_dir)
+        return _nav_registry
 
 
 def get_nav_registry():
@@ -138,9 +145,11 @@ def has_registry() -> bool:
 
 
 def get_nav_data(cycle: str | None = None):
-    """Get MmappedNavData for a specific cycle, or latest if None.
+    """Get a reference-counted MmappedNavData handle for a specific cycle.
 
-    Returns None if registry is empty.
+    Returns None if registry is empty.  The caller should use the returned
+    object as a context manager, or call .release() when finished, to avoid
+    keeping the underlying mmap open longer than necessary.
     """
     reg = _init_registry()
     return reg.get(cycle)
@@ -149,27 +158,14 @@ def get_nav_data(cycle: str | None = None):
 def get_data_version() -> str:
     reg = _init_registry()
     latest = reg.get()
-    return latest.cycle if latest else ""
+    if latest is None:
+        return ""
+    with latest:
+        return latest.cycle
 
 
 def get_airport_maps() -> dict:
     return {}
-
-
-def _opposite_runway(name: str) -> str:
-    """Get the opposite runway designator (e.g., 18L -> 36R)."""
-    digits = []
-    suffix = []
-    for c in name:
-        if c.isdigit():
-            digits.append(c)
-        else:
-            suffix.append(c)
-    num = int("".join(digits)) if digits else 0
-    opp_num = num + 18 if num <= 18 else num - 18
-    suffix_map = {"L": "R", "R": "L", "C": "C"}
-    opp_suffix = suffix_map.get("".join(suffix), "")
-    return f"{opp_num:02d}{opp_suffix}"
 
 
 _LIGHTING_MAP = {
@@ -183,153 +179,6 @@ _LIGHTING_MAP = {
 
 def _parse_lighting(code: str) -> str:
     return _LIGHTING_MAP.get(code, code)
-
-
-def _parse_runways(airport_str: str) -> list:
-    """Parse runway data from raw airport string."""
-    runways = {}
-    lines = airport_str.strip().split("\n")
-    for line in lines:
-        parts = line.strip().split(",")
-        if len(parts) < 10 or parts[0] != "R":
-            continue
-        name = parts[1].strip()
-        try:
-            heading = float(parts[2].strip())
-            length = float(parts[3].strip())
-            width = float(parts[4].strip())
-            lat = float(parts[8].strip())
-            lon = float(parts[9].strip())
-            elevation = int(float(parts[10].strip())) if len(parts) > 10 else None
-            raw_lighting = parts[12].strip() if len(parts) > 12 else ""
-            lighting = _parse_lighting(raw_lighting) if raw_lighting in _LIGHTING_MAP else ""
-        except (ValueError, IndexError):
-            continue
-
-        # Parse ILS info
-        ils = []
-        if len(parts) > 7 and parts[5].strip() not in ("", "0"):
-            with contextlib.suppress(ValueError):
-                ils.append(
-                    {
-                        "runwayEnd": name,
-                        "frequency": parts[6].strip(),
-                        "heading": float(parts[7].strip()),
-                        "category": "I",
-                    }
-                )
-
-        runways[name] = {
-            "name": name,
-            "heading": heading,
-            "length": length,
-            "width": width,
-            "lat": lat,
-            "lon": lon,
-            "elevation": elevation,
-            "lighting": lighting,
-            "ils": ils,
-        }
-
-    result = []
-    paired = set()
-    for name, rwy in runways.items():
-        if name in paired:
-            continue
-        opp_name = _opposite_runway(name)
-        if opp_name in runways and opp_name not in paired:
-            paired.add(name)
-            paired.add(opp_name)
-            opp = runways[opp_name]
-            result.append(
-                {
-                    "name": f"{name}/{opp_name}",
-                    "thresholds": [
-                        {
-                            "name": name,
-                            "lat": rwy["lat"],
-                            "lon": rwy["lon"],
-                            "heading": rwy["heading"],
-                            "elevationFt": rwy["elevation"],
-                        },
-                        {
-                            "name": opp_name,
-                            "lat": opp["lat"],
-                            "lon": opp["lon"],
-                            "heading": opp["heading"],
-                            "elevationFt": opp["elevation"],
-                        },
-                    ],
-                    "lengthFt": rwy["length"],
-                    "widthFt": rwy["width"],
-                    "lighting": rwy.get("lighting", ""),
-                    "ils": rwy.get("ils", []) + opp.get("ils", []),
-                }
-            )
-        else:
-            result.append(
-                {
-                    "name": name,
-                    "thresholds": [
-                        {
-                            "name": name,
-                            "lat": rwy["lat"],
-                            "lon": rwy["lon"],
-                            "heading": rwy["heading"],
-                            "elevationFt": rwy["elevation"],
-                        }
-                    ],
-                    "lengthFt": rwy["length"],
-                    "widthFt": rwy["width"],
-                    "lighting": rwy.get("lighting", ""),
-                    "ils": rwy.get("ils", []),
-                }
-            )
-    return result
-
-
-def _parse_airport_detail(icao: str) -> dict | None:
-    """Extract full airport details from raw airport data."""
-    graph = get_nav_graph()
-    icao = icao.upper()
-    if icao not in graph.airport_maps:
-        return None
-
-    name = None
-    lat = lon = None
-    elevation = transition_alt = transition_level = None
-    for line in graph.airport_maps[icao].strip().split("\n"):
-        if not line.startswith("A,"):
-            continue
-        parts = line.split(",")
-        if len(parts) >= 5:
-            name = parts[2].strip()
-            try:
-                lat = float(parts[3].strip())
-                lon = float(parts[4].strip())
-            except ValueError:
-                pass
-        if len(parts) >= 10:
-            try:
-                elevation = int(float(parts[5].strip()))
-                transition_alt = int(float(parts[6].strip()))
-                transition_level = int(float(parts[7].strip()))
-            except ValueError:
-                pass
-        break
-
-    runways = _parse_runways(graph.airport_maps[icao])
-
-    return {
-        "icao": icao,
-        "name": name or icao,
-        "lat": lat,
-        "lon": lon,
-        "elevation": elevation,
-        "transitionAltitude": transition_alt,
-        "transitionLevel": transition_level,
-        "runways": runways,
-    }
 
 
 def _get_airport_detail_from_fb(nav, icao: str) -> dict | None:
@@ -355,8 +204,10 @@ def _get_airport_detail_from_fb(nav, icao: str) -> dict | None:
 
 # Module-level caches for airport connections. AirportConnection objects are
 # read-only after construction, so they are safe to share across requests.
-_sid_cache: dict = {}
-_star_cache: dict = {}
+# OrderedDict + move_to_end gives simple LRU eviction so long-running processes
+# do not grow without bound. Size is controlled via AIRPORT_CONNECTION_CACHE_SIZE.
+_sid_cache: OrderedDict = OrderedDict()
+_star_cache: OrderedDict = OrderedDict()
 _cache_lock = Lock()
 
 
@@ -378,69 +229,119 @@ def search_route(
     if nav is None:
         return None
 
-    if nav.get_airport(orig) is None or nav.get_airport(dest) is None:
-        return None
+    with nav:
+        if nav.get_airport(orig) is None or nav.get_airport(dest) is None:
+            return None
 
-    # Use cached AirportConnection when available to avoid rebuilding
-    # procedures on every request.
+        # Use cached AirportConnection when available to avoid rebuilding
+        # procedures on every request.
+        connector = FlatbuffersAirportConnector(nav)
+
+        # Build unfiltered connections so the engine can fall back to auto-selected
+        # procedures when a filtered entry is unreachable via the airway graph.
+        sid_key = (cycle, orig)
+        with _cache_lock:
+            sid_conn = _sid_cache.get(sid_key)
+        if sid_conn is None:
+            sid_conn = connector.build_sid(orig, filter_name=None)
+            with _cache_lock:
+                _sid_cache[sid_key] = sid_conn
+        else:
+            # Each request must have isolated temp_nodes so that post-A* point
+            # insertion does not pollute the shared cache.
+            sid_conn = dataclasses.replace(sid_conn, temp_nodes=[])
+
+        star_key = (cycle, dest)
+        with _cache_lock:
+            star_conn = _star_cache.get(star_key)
+        if star_conn is None:
+            star_conn = connector.build_star(dest, filter_name=None)
+            with _cache_lock:
+                _star_cache[star_key] = star_conn
+        else:
+            star_conn = dataclasses.replace(star_conn, temp_nodes=[])
+
+        if sid_conn is None or star_conn is None:
+            return None
+        if not sid_conn.connections or not star_conn.connections:
+            return None
+
+        engine = RouteEngine(
+            nav.node_list,
+            nav.cycle,
+            node_index=nav.node_index,
+            cache=nav._cache,
+        )
+        result_json = engine.search(
+            orig,
+            dest,
+            sid_conn,
+            star_conn,
+            connector.get_airport_names(orig) + connector.get_airport_names(dest),
+            sid_exit=sid_exit,
+            star_entry=star_entry,
+        )
+
+        if result_json is None:
+            return None
+
+        import json
+
+        result = json.loads(result_json)
+
+        if isinstance(result, dict):
+            result["origAirportDetail"] = _get_airport_detail_from_fb(nav, orig)
+            result["destAirportDetail"] = _get_airport_detail_from_fb(nav, dest)
+            orig_ap = nav.get_airport(orig)
+            dest_ap = nav.get_airport(dest)
+            result["origRunways"] = _parse_runways_from_fb(orig_ap) if orig_ap else []
+            result["destRunways"] = _parse_runways_from_fb(dest_ap) if dest_ap else []
+
+        return result
+
+
+def _get_airport_connection(
+    nav,
+    icao: str,
+    proc_type: int,
+    cycle: str | None,
+) -> "AirportConnection | None":
+    """Return a cached or freshly-built airport connection for the given proc type.
+
+    proc_type: 1 for SID, 2 for STAR.  Reuses the module-level caches so API and
+    route endpoints do not rebuild procedures on every request.  The caches are
+    LRU-bounded to _MAX_AIRPORT_CACHE_SIZE entries per type.
+    """
+    from openRouterFinder.core.airport import FlatbuffersAirportConnector
+
+    cache = _sid_cache if proc_type == 1 else _star_cache
+    key = (cycle, icao)
+    with _cache_lock:
+        conn = cache.get(key)
+        if conn is not None:
+            cache.move_to_end(key)
+            return conn
+
     connector = FlatbuffersAirportConnector(nav)
+    conn = connector.build_sid(icao) if proc_type == 1 else connector.build_star(icao)
 
-    # Build unfiltered connections so the engine can fall back to auto-selected
-    # procedures when a filtered entry is unreachable via the airway graph.
-    sid_key = (cycle, orig)
     with _cache_lock:
-        sid_conn = _sid_cache.get(sid_key)
-    if sid_conn is None:
-        sid_conn = connector.build_sid(orig, filter_name=None)
-        with _cache_lock:
-            _sid_cache[sid_key] = sid_conn
-    else:
-        # Each request must have isolated temp_nodes so that post-A* point
-        # insertion does not pollute the shared cache.
-        sid_conn = dataclasses.replace(sid_conn, temp_nodes=[])
+        cache[key] = conn
+        cache.move_to_end(key)
+        max_size = settings.airport_connection_cache_size
+        while len(cache) > max_size:
+            cache.popitem(last=False)
+    return conn
 
-    star_key = (cycle, dest)
-    with _cache_lock:
-        star_conn = _star_cache.get(star_key)
-    if star_conn is None:
-        star_conn = connector.build_star(dest, filter_name=None)
-        with _cache_lock:
-            _star_cache[star_key] = star_conn
-    else:
-        star_conn = dataclasses.replace(star_conn, temp_nodes=[])
 
-    if sid_conn is None or star_conn is None:
-        return None
-    if not sid_conn.connections or not star_conn.connections:
-        return None
+def get_sid_connection(nav, icao: str, cycle: str | None = None) -> "AirportConnection | None":
+    """Cached SID connection for an airport."""
+    return _get_airport_connection(nav, icao, 1, cycle)
 
-    engine = RouteEngine(nav.node_list, nav.cycle, node_index=nav.node_index)
-    result_json = engine.search(
-        orig,
-        dest,
-        sid_conn,
-        star_conn,
-        connector.get_airport_names(orig) + connector.get_airport_names(dest),
-        sid_exit=sid_exit,
-        star_entry=star_entry,
-    )
 
-    if result_json is None:
-        return None
-
-    import json
-
-    result = json.loads(result_json)
-
-    if isinstance(result, dict):
-        result["origAirportDetail"] = _get_airport_detail_from_fb(nav, orig)
-        result["destAirportDetail"] = _get_airport_detail_from_fb(nav, dest)
-        orig_ap = nav.get_airport(orig)
-        dest_ap = nav.get_airport(dest)
-        result["origRunways"] = _parse_runways_from_fb(orig_ap) if orig_ap else []
-        result["destRunways"] = _parse_runways_from_fb(dest_ap) if dest_ap else []
-
-    return result
+def get_star_connection(nav, icao: str, cycle: str | None = None) -> "AirportConnection | None":
+    """Cached STAR connection for an airport."""
+    return _get_airport_connection(nav, icao, 2, cycle)
 
 
 def _parse_runways_from_fb(ap) -> list:

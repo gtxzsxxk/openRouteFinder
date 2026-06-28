@@ -10,16 +10,16 @@
         </h1>
         <div class="flex items-center gap-2">
           <button
-            @click="toggleLocale"
             class="w-9 h-9 flex items-center justify-center rounded-xl bg-bg-elevated border border-border text-text-secondary hover:text-text-primary hover:bg-bg-surface transition-all duration-150 active:scale-95 text-xs font-semibold"
             :title="locale === 'zh' ? '切换到 English' : 'Switch to 中文'"
+            @click="toggleLocale"
           >
             {{ locale === 'zh' ? 'EN' : '中' }}
           </button>
           <button
-            @click="toggleTheme"
             class="w-9 h-9 flex items-center justify-center rounded-xl bg-bg-elevated border border-border text-text-secondary hover:text-text-primary hover:bg-bg-surface transition-all duration-150 active:scale-95"
             :title="$t(`theme.${mode}`)"
+            @click="toggleTheme"
           >
             <Sun v-if="isDark" class="w-4 h-4" />
             <Moon v-else class="w-4 h-4" />

@@ -1,5 +1,35 @@
-# Vue 3 + TypeScript + Vite
+# OpenRouteFinder Frontend
 
-This template should help get you started developing with Vue 3 and TypeScript in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
+Vue 3 + TypeScript + Vite + Tailwind CSS SPA for the OpenRouteFinder flight route planner.
 
-Learn more about the recommended Project Setup and IDE Support in the [Vue Docs TypeScript Guide](https://vuejs.org/guide/typescript/overview.html#project-setup).
+## Project Setup
+
+```bash
+npm install
+```
+
+## Development
+
+```bash
+npm run dev          # Vite dev server on :5173, proxies /api to :9807
+npm run dev:frontend # Vite dev server only
+```
+
+## Build
+
+```bash
+npm run build        # type-check + production build
+npm run typecheck    # type-check only
+npm run preview      # preview the production build
+```
+
+## Tech Stack
+
+- Vue 3 (Composition API, `<script setup>`)
+- TypeScript
+- Vite
+- Tailwind CSS v4
+- MapLibre GL JS
+- Pinia
+- Vue Query (TanStack)
+- Vue I18n

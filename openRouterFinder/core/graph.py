@@ -3,27 +3,22 @@
 import math
 from dataclasses import dataclass, field
 
-PI = 3.1415926535898
-EARTH_RADIUS = 6378.137
+EARTH_RADIUS = 6371.0  # mean Earth radius in km (aviation standard)
 
 
 def rad(x: float) -> float:
-    return x * PI / 180.0
+    return x * math.pi / 180.0
 
 
 def great_circle_distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Calculate great-circle distance between two points in kilometers."""
     rlat1 = rad(lat1)
     rlat2 = rad(lat2)
-    a = rlat1 - rlat2
-    b = rad(lon1) - rad(lon2)
-    s = 2 * math.asin(
-        math.sqrt(
-            math.pow(math.sin(a / 2), 2)
-            + math.cos(rlat1) * math.cos(rlat2) * math.pow(math.sin(b / 2), 2)
-        )
-    )
-    return s * EARTH_RADIUS
+    dlat = rad(lat2 - lat1)
+    dlon = rad(lon2 - lon1)
+    a = math.sin(dlat / 2) ** 2 + math.cos(rlat1) * math.cos(rlat2) * math.sin(dlon / 2) ** 2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return EARTH_RADIUS * c
 
 
 def _haversine_a(lat1: float, lon1: float, lat2: float, lon2: float) -> float:

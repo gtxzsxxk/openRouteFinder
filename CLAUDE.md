@@ -37,11 +37,17 @@ cd openRouterFinder && uvicorn api:app --host 0.0.0.0 --port 9807   # production
 ```
 
 ### Testing
+
+Two-layer suite: `tests/unit/` (direct object/function tests) and `tests/e2e/`
+(boots a real uvicorn server and drives it over HTTP). Config is in
+`pyproject.toml`; the e2e layer has `tests/e2e/conftest.py`.
+
 ```bash
-pytest                   # run all tests
-pytest tests/test_dijkstra.py -v   # single test file
-pytest tests/test_airport.py::test_build_sid_with_filter -v   # single test
-PYTHONPATH=. DISABLE_CAPTCHA=true pytest tests/test_integration_routes.py -v
+PYTHONPATH=. DISABLE_CAPTCHA=true pytest      # all tests
+pytest tests/unit -v                          # unit layer only
+pytest tests/e2e -v                           # e2e layer (boots a server)
+pytest tests/unit/test_dijkstra.py -v         # single file
+pytest tests/unit/test_airport_unit.py::test_build_sid_with_filter -v   # single test
 ```
 
 ### Linting
@@ -77,11 +83,11 @@ Detailed documentation lives in `docs/claude/`. Read the relevant file before mo
 
 Key modules:
 
-- `api.py` — FastAPI app with all endpoints (`/api/route`, `/api/airports`, `/api/airports/{icao}/procedures`, `/api/admin/navdata/upload`, etc.). Route calculation runs in a `ThreadPoolExecutor` (4 workers) guarded by an `asyncio.Semaphore(8)`.
-- `core/dijkstra.py` — `RouteEngine` implements a **single mixed-graph A\*** search: temporary SID/STAR nodes and edges are injected into the global airway graph, then one A* search runs over the combined graph. Uses admissible great-circle heuristic, precomputed `edge.dist`, candidate pruning (top 50), and cycle prevention.
+- `api.py` — FastAPI app with all endpoints (`/api/route`, `/api/airports`, `/api/airports/{icao}/procedures`, `/api/admin/*`, etc.). Route calculation runs in `_dijkstra_pool` (4 workers) guarded by an `asyncio.Semaphore(4)`. Fenix builds run serially in `_build_pool` (1 worker). Admin endpoints share a `verify_admin_key` dependency. The airport prefix index is rebuilt atomically after a navdata cycle is uploaded or deleted.
+- `core/dijkstra.py` — `RouteEngine` uses a **hybrid A\* search**: it first tries a mixed-graph A\* over airway + SID/STAR nodes, then falls back to a phase-separated search when constraints cannot be satisfied. Uses admissible great-circle heuristic, precomputed `edge.dist`, candidate pruning (top 50), and cycle prevention.
 - `core/graph.py` — Immutable `Node`/`Edge` dataclasses and great-circle distance utilities. `Edge` carries a precomputed `dist` field.
 - `core/airport.py` — `FlatbuffersAirportConnector` builds temporary nodes and edges for SID/STAR procedures from FlatBuffers navdata. Also contains the legacy `AirportConnector` for pickle-based data.
-- `core/data_loader.py` — `NavGraph` singleton (legacy pickle-based) and `search_route()` orchestration. Also holds `get_nav_data()` / `get_nav_registry()` accessors.
+- `core/data_loader.py` — Legacy `NavGraph` singleton (pickle-based) and modern `NavDataRegistry` accessors. `get_nav_registry()` / `get_nav_data()` are lazily initialized in a thread-safe manner. `search_route()` orchestrates the A* search and caches built `AirportConnection` objects in bounded LRU caches keyed by `(cycle, icao)`.
 - `core/storage/registry.py` — `NavDataRegistry` manages multiple navdata cycles (thread-safe, hot reload).
 - `core/storage/reader.py` — `MmappedNavData` reads `.fb` / `.fb.zst` files via `mmap`.
 - `core/storage/builder.py` — `build_from_fenix()` converts Fenix A320 `nd.db3` SQLite files into FlatBuffers navdata.
@@ -93,7 +99,7 @@ Key modules:
 2. **FlatBuffers `.fb.zst` files** — modern format, mmapped, supports multiple cycles. This is the active path for new features.
 3. **Fenix A320 `nd.db3`** — uploaded via admin API, converted to FlatBuffers in a background thread.
 
-**Testing**: Pure pytest, no `pytest.ini` or `setup.cfg`. Tests in `tests/` import directly from `openRouterFinder.*`.
+**Testing**: Two layers — `tests/unit/` (direct object/function tests) and `tests/e2e/` (real uvicorn server over HTTP). pytest config is in `pyproject.toml [tool.pytest.ini_options]`; e2e fixtures live in `tests/e2e/conftest.py`. Tests import directly from `openRouterFinder.*`.
 
 ### Frontend (`webFinder/`)
 
@@ -119,12 +125,14 @@ For Fenix A320 data, use the admin upload API (`POST /api/admin/navdata/upload`)
 ## Environment Configuration
 
 Copy `.env.example` to `.env`:
-- `NAVDAT_PATH` / `APDAT_PATH` — paths to nav data files (relative to project root)
+- `NAVDAT_PATH` / `APDAT_PATH` — paths to nav data files. Absolute paths are used as-is; relative paths are resolved from the project root. Modern FlatBuffers deployments only need `NAVDAT_PATH` pointing at a `navdata_*.fb.zst` file.
 - `LOCAL_ASDATA_PATH` — path to raw Aerosoft data (for `pack_data.py`)
 - `ADMIN_KEY` — enables admin dashboard and navdata upload
+- `METAR_PATH` — METAR cache file location (default `data/metar.txt`)
 - `METAR_UPDATE_MINUTES` — METAR refresh interval
 - `BING_MAPS_KEY` — optional, for map tiles
 - `DISABLE_CAPTCHA` — skip captcha validation (for testing/development)
+- `AIRPORT_CONNECTION_CACHE_SIZE` — LRU cache size for built SID/STAR connections (default 1000)
 
 ## Important Notes
 
@@ -140,9 +148,9 @@ Copy `.env.example` to `.env`:
 
 `build_sid()` and `build_star()` in `core/airport.py` are symmetric: one constructs departure procedures, the other arrival procedures. When modifying either, the other **must** receive the corresponding structural fix (reversed logic). Do not copy-paste code between them; extract shared helpers (e.g., `_register_common_procedures()`) instead.
 
-### Synthetic Marker Filtering
+### Empty-Name Marker Filtering
 
-Heading+distance markers matching `^D\d+[A-Z]?$` (e.g., `D091M`, `D123`, `D194Q`) must **never** appear as standalone points in built procedures. They should be filtered out in `_leg_to_point()`; if one appears in a procedure, it indicates a parsing or merging bug.
+Fenix navdata stores all procedure waypoints in the `Waypoints` table. D-prefixed identifiers (e.g., `D321Y`) are real waypoints in this data set, not synthetic heading+distance markers, so `_leg_to_point()` does **not** filter them by name. Only legs whose decoded `Name()` is empty or `None` are filtered out. If an empty-name marker appears as a standalone point in a built procedure, it indicates a parsing or merging bug.
 
 ### Procedure Quality Invariants
 
