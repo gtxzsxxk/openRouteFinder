@@ -81,4 +81,5 @@ testpaths = ["tests"]
 addopts = "--import-mode=importlib"
 markers = [
     "e2e: end-to-end tests that boot a real uvicorn HTTP server",
+    "perf: measurement-only performance tests (no pass/fail threshold); run with -s to see numbers",
 ]

@@ -19,6 +19,7 @@ pytest tests/unit -v                                # unit layer only
 pytest tests/e2e -v                                 # e2e layer only (boots a server)
 pytest tests/unit/test_dijkstra.py -v               # single file
 pytest tests/unit/test_airport_unit.py::test_build_sid_with_filter -v   # single test
+pytest tests/e2e/test_perf_e2e.py -s -m perf        # perf numbers (need -s to print)
 ```
 
 The e2e layer starts uvicorn with `DISABLE_CAPTCHA=true` set automatically via
@@ -82,6 +83,53 @@ One parametrized test per airport pair (20 pairs) calls a single
 Enroute airway legs are **not** distance-checked (long oceanic legs are
 legitimate); procedure-leg teleportation is covered in the unit layer.
 `ZBAA→RKSI` is a normal pair (the former `xfail` was removed once it routed).
+
+### `test_connectivity_e2e.py`
+
+Connectivity **fuzz / discovery** test — the tool for finding region-level
+routing bugs (e.g. the CYVR→KSFO regression) that a curated pair list can never
+surface. It samples **N random distinct airport pairs from the full navdata
+pool** (all ~17k airports, read directly from `navdata_2604.fb.zst` as test
+setup) and asserts each routes in **both directions** over real HTTP.
+
+- **No distance gate.** Per CLAUDE.md, a disconnected pair is a route-engine /
+  data-pipeline bug, never "an unreachable real-world pair". Long
+  intercontinental pairs (e.g. `EDNG→NZCG`) are routable through the global
+  airway network and must connect like any other — a human can hand-build the
+  path, so `"No result."` is our bug.
+- **Bidirectional** catches asymmetric bugs (one direction routes, the reverse
+  does not).
+- **Reproducible randomness.** Each run uses a fresh seed, printed in the
+  failure report. Replay an exact run with `CONN_TEST_SEED=<seed>`. Override the
+  sample size with `CONN_TEST_PAIRS` (default 100).
+- Failures are **collected and reported together** at the end (full list of
+  disconnected `orig → dest` directions plus the replay seed), not failed
+  one-at-a-time.
+
+```bash
+# Full default run (100 pairs, fresh random seed)
+pytest tests/e2e/test_connectivity_e2e.py -v
+# Replay a specific failing sample
+CONN_TEST_SEED=3490832160 CONN_TEST_PAIRS=10 pytest tests/e2e/test_connectivity_e2e.py -s
+```
+
+This test is expected to surface real bugs until the route engine connects every
+sampled pair; a red result means "fix the engine", not "weaken the test".
+
+### `test_perf_e2e.py`
+
+**Measurement-only** latency tests (`@pytest.mark.perf`) — they never assert a
+time threshold (machine/load dependent, would be flaky) and are always green.
+They time real HTTP route queries over the same 20 connected pairs and print
+statistics (min/median/mean/p95/max). Run with `-s` to see the numbers.
+
+| Test | Pattern |
+|------|---------|
+| `test_perf_continuous` | Back-to-back over the pair set, several rounds. Round 1 = cold procedure builds, later rounds = cache-warm. Shows the cache effect. |
+| `test_perf_interval_random` | One request per second, random order, biased to the longest (intercontinental) pairs. Models spread-out real traffic on diverse procedures. |
+
+Tunables (env): `PERF_ROUNDS` (default 3), `PERF_INTERVAL_REQUESTS` (default
+10), `PERF_INTERVAL_SECONDS` (default 1.0).
 
 ### `test_procedures_e2e.py`
 
