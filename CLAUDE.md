@@ -114,23 +114,15 @@ Key modules:
 
 ## Data Preprocessing
 
-Navigation data must be preprocessed before use. The raw Aerosoft data on disk is too slow for Dijkstra queries.
-
-1. Set `LOCAL_ASDATA_PATH` in `.env` to the Aerosoft data directory.
-2. Run `python openRouterFinder/scripts/pack_data.py`.
-3. Answer `y` for airport data (outputs `airport_$(cycle).air`) or `n` for global airways (outputs `navidata_$(cycle).map`).
-
-For Fenix A320 data, use the admin upload API (`POST /api/admin/navdata/upload`) which converts `nd.db3` to `.fb.zst` automatically.
+Navigation data must be available as zstd-compressed FlatBuffers files (`data/navdata_$(cycle).fb.zst`) before the server starts. The Fenix A320 data pipeline is the current source: upload `nd.db3` via the admin API (`POST /api/admin/navdata/upload`) and it is converted automatically.
 
 ## Environment Configuration
 
 Copy `.env.example` to `.env`:
-- `NAVDAT_PATH` / `APDAT_PATH` — paths to nav data files. Absolute paths are used as-is; relative paths are resolved from the project root. Modern FlatBuffers deployments only need `NAVDAT_PATH` pointing at a `navdata_*.fb.zst` file.
-- `LOCAL_ASDATA_PATH` — path to raw Aerosoft data (for `pack_data.py`)
+- `NAVDATA_DIR` — directory containing `navdata_*.fb.zst` cycle files (default `data`)
 - `ADMIN_KEY` — enables admin dashboard and navdata upload
 - `METAR_PATH` — METAR cache file location (default `data/metar.txt`)
 - `METAR_UPDATE_MINUTES` — METAR refresh interval
-- `BING_MAPS_KEY` — optional, for map tiles
 - `DISABLE_CAPTCHA` — skip captcha validation (for testing/development)
 - `AIRPORT_CONNECTION_CACHE_SIZE` — LRU cache size for built SID/STAR connections (default 1000)
 
@@ -140,7 +132,6 @@ Copy `.env.example` to `.env`:
 - `docs/superpowers/` and `.superpowers/` are in `.gitignore` and should not be committed.
 - The frontend dev proxy only works when the backend is on `localhost:9807`. Use `start.bash` for a convenience script that starts both, rebuilds the frontend dist, and cleans caches.
 - `core/storage/NavData/` contains auto-generated FlatBuffers code. Do not hand-edit these files.
-- The `_compat.py` module is registered as `sys.modules["RouteFinderLib"]` so legacy pickle `.map` files can still load.
 
 ## Development Principles
 

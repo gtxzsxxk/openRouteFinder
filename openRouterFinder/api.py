@@ -172,6 +172,7 @@ _route_semaphore = asyncio.Semaphore(4)
 
 # --- Valid code storage ---
 
+
 class _TTLCodeStore:
     """Thread-safe captcha token store with TTL and bounded size."""
 
@@ -214,6 +215,7 @@ _valid_codes = _TTLCodeStore()
 
 
 # --- Admin key verification ---
+
 
 def verify_admin_key(
     x_admin_key: str = Header(default=""),
@@ -351,7 +353,7 @@ async def admin_logging(request: Request, call_next):
         client_ip = request.client.host
     else:
         client_ip = "unknown"
-    client_ip = client_ip[: 45]  # IPv6 max length
+    client_ip = client_ip[:45]  # IPv6 max length
     record_request(client_ip, request.method, request.url.path, response.status_code, duration_ms)
     return response
 
@@ -595,7 +597,6 @@ async def post_route(req: RouteRequest):
     return _rename_single_runway_all(result)
 
 
-
 @app.get("/api/metar/{icao}")
 def get_metar(icao: str):
     return {"icao": icao.upper(), "metar": read_metar(icao)}
@@ -799,7 +800,7 @@ async def upload_navdata(
     import tempfile
     import zipfile
 
-    data_dir = settings.navdat_full_path.parent
+    data_dir = settings.navdata_dir_path
     tmp_dir = tempfile.mkdtemp()
     db_path = None
 

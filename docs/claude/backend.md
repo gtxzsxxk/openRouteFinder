@@ -89,25 +89,19 @@ class Settings(BaseSettings):
     )
     listen_port: int = 9807
     metar_update_minutes: int = 15
-    bing_maps_key: str = ""
     admin_key: str = ""
-    navdat_path: str = "data/navdata_2405.fb.zst"
-    apdat_path: str = "data/airport_2405.air"
-    navdat_cycle: str = "AUTO"
-    local_asdata_path: str = ""
+    navdata_dir: str = "data"
     disable_captcha: bool = False
     airport_connection_cache_size: int = 1000
     metar_path: str = "data/metar.txt"
 
     @property
-    def navdat_full_path(self) -> Path: ...
-    @property
-    def apdat_full_path(self) -> Path: ...
+    def navdata_dir_path(self) -> Path: ...
     @property
     def metar_full_path(self) -> Path: ...
 ```
 
-`navdat_path`/`apdat_path` accept absolute paths or paths relative to `PROJECT_ROOT`. `.env` file is resolved from `PROJECT_ROOT`.
+`navdata_dir` is the directory that `NavDataRegistry` scans for `navdata_*.fb.zst` cycle files. It accepts an absolute path or a path relative to `PROJECT_ROOT`. `.env` file is resolved from `PROJECT_ROOT`.
 
 ---
 
@@ -203,7 +197,7 @@ class SearchingNode:
 
 ## data_loader.py — Data Loading & Orchestration
 
-### NavGraph (Legacy Singleton)
+### NavGraph (In-Memory Graph)
 
 ```python
 class NavGraph:
@@ -212,7 +206,10 @@ class NavGraph:
     def find_nodes_by_name(self, name) -> List[Node]
 ```
 
-Legacy pickle-based navdata. `_compat.py` is registered as `sys.modules["RouteFinderLib"]` so legacy `.map` files can still load.
+A read-only in-memory graph with an O(1) node index. The legacy pickle loader
+that populated it has been removed; the class is retained as a lightweight
+graph structure (exercised directly by `tests/unit/test_data_loader.py`). The
+active navdata path is `NavDataRegistry` below.
 
 ### NavDataRegistry (Modern, FlatBuffers)
 

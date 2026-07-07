@@ -17,16 +17,12 @@ class Settings(BaseSettings):
 
     listen_port: int = 9807
     metar_update_minutes: int = 15
-    bing_maps_key: str = ""
     admin_key: str = ""
 
-    # Navdata paths. Modern FlatBuffers files live in data/; legacy pickle files
-    # are only used if get_nav_graph() is called explicitly.
-    navdat_path: str = "data/navdata_2405.fb.zst"
-    apdat_path: str = "data/airport_2405.air"
-    navdat_cycle: str = "AUTO"
+    # Directory containing navdata_*.fb.zst cycle files. The registry discovers
+    # every cycle in this directory at runtime.
+    navdata_dir: str = "data"
 
-    local_asdata_path: str = ""
     disable_captcha: bool = False
 
     # LRU cache size for built airport SID/STAR connections.
@@ -43,12 +39,8 @@ class Settings(BaseSettings):
         return p if p.is_absolute() else PROJECT_ROOT / p
 
     @property
-    def navdat_full_path(self) -> Path:
-        return self._resolve_path(self.navdat_path)
-
-    @property
-    def apdat_full_path(self) -> Path:
-        return self._resolve_path(self.apdat_path)
+    def navdata_dir_path(self) -> Path:
+        return self._resolve_path(self.navdata_dir)
 
     @property
     def metar_full_path(self) -> Path:

@@ -98,35 +98,13 @@ cd openRouterFinder && uvicorn api:app --host 0.0.0.0 --port 9807
 
 ---
 
-## 导航数据的预处理 / Navigation Data Preprocessing
+## 导航数据 / Navigation Data
 
-本项目需要对 `aerosoft` 提供的导航数据进行预处理。
-This project requires preprocessing of `aerosoft` navigation data.
-
-`aerosoft` 提供的导航数据存储在磁盘上，如果直接使用 Dijkstra 算法查询，由于涉及 IO 读写，效率会非常低。
-The raw data is stored on disk; direct I/O would be too slow for Dijkstra queries.
-
-因此我们需要将航路全部加载进内存并组织结构。预处理由 `openRouterFinder/scripts/pack_data.py` 完成。
-We load all airways into memory and organize them. Preprocessing is done by `openRouterFinder/scripts/pack_data.py`.
-
-在使用前，请先配置好 `.env` 或环境变量：
-Before using, configure `.env` or environment variables:
+运行服务需要预先准备 FlatBuffers 格式的导航数据文件 `data/navdata_$(cycle).fb.zst`。这些文件通常由 Fenix A320 的 `nd.db3` 通过管理后台上传转换得到，或从其他渠道获取。
 
 ```bash
-LOCAL_ASDATA_PATH="/path/to/aerosoft/data"
+NAVDATA_DIR=data
 ```
-
-接着执行 / Then run:
-```bash
-$ python3 openRouterFinder/scripts/pack_data.py
-Read Airports' data?(y/n strictly):
-```
-
-输入 `y` 预处理机场数据（输出到 `airport_$(navCycle).air`），输入 `n` 预处理全球航路（输出到 `navidata_$(navCycle).map`）。
-Type `y` to preprocess airport data (output to `airport_$(navCycle).air`), `n` for global airways (`navidata_$(navCycle).map`).
-
-注意：预处理可能花费分钟级别的时间。
-Note: Preprocessing may take several minutes.
 
 ---
 
@@ -147,7 +125,6 @@ openRouteFinder/
 │   │   ├── validcode.py      # 验证码 / Captcha
 │   │   └── metar.py          # METAR 天气 / METAR weather
 │   └── scripts/
-│       ├── pack_data.py      # 数据预处理 / Data preprocessing
 │       └── demo.py           # CLI 演示 / CLI demo
 ├── webFinder/         # Vue 3 SPA
 │   ├── src/

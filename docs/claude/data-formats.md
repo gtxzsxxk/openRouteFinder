@@ -1,14 +1,17 @@
 # Data Formats
 
-The codebase supports three navdata backends.
+The codebase supports one active navdata backend: FlatBuffers `.fb.zst` files.
+The legacy pickle format and its preprocessing tooling have been removed.
 
-## 1. Legacy Pickle Files (`.map` / `.air`)
+## 1. Legacy Pickle Files (`.map` / `.air`) — Removed
 
 - `navidata_2206.map` — Global airways (pickle of `RouteFinderLib` objects)
 - `airport_2206.air` — Airport data (pickle)
-- Loaded by `NavGraph` in `data_loader.py`
-- `_compat.py` registered as `sys.modules["RouteFinderLib"]` for backward compatibility
-- **Deprecated** but still supported
+- **No longer loaded.** The `load_nav_data()`/`get_nav_graph()` loader, the
+  `_compat.py` (`sys.modules["RouteFinderLib"]`) shim, and the
+  `scripts/pack_data.py` preprocessing tool have all been deleted. The
+  `NavGraph` class remains only as an in-memory graph structure (tested directly
+  by `tests/unit/test_data_loader.py`).
 
 ## 2. FlatBuffers (`.fb.zst`) — Modern, Active
 
@@ -89,21 +92,10 @@ Uploaded via admin API, converted to FlatBuffers in background thread.
 - Procedures: maps Fenix `Proc` field (1=arrival, 2=departure) to schema enum
 - Procedure legs: `Transition="ALL"` = main legs, named = transitions
 
-## Preprocessing (Legacy)
+## Preprocessing (Removed)
 
-For raw Aerosoft data:
-
-```bash
-# Set in .env
-LOCAL_ASDATA_PATH="/path/to/aerosoft/data"
-
-# Run preprocessor
-python openRouterFinder/scripts/pack_data.py
-# Answer y for airport data → airport_$(cycle).air
-# Answer n for global airways → navidata_$(cycle).map
-```
-
-Note: Preprocessing may take several minutes.
+The legacy Aerosoft preprocessor (`scripts/pack_data.py`) has been deleted.
+Current navdata is produced from Fenix A320 `nd.db3` uploads via the admin API.
 
 ## Data Directory (`data/`)
 

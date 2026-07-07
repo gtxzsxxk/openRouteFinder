@@ -2,44 +2,16 @@
 
 import contextlib
 import dataclasses
-import pickle
-import sys
 import threading
 from collections import OrderedDict
 from threading import Lock
 
 from openRouterFinder.config import settings
 from openRouterFinder.core.airport import AirportConnection
-from openRouterFinder.core.graph import Edge as NewEdge
 from openRouterFinder.core.graph import Node as NewNode
 
-# Register pickle compatibility module so old .map files load correctly
-if "RouteFinderLib" not in sys.modules:
-    from openRouterFinder.core import _compat
-
-    sys.modules["RouteFinderLib"] = _compat
-
-
-_nav_graph = None
 _nav_registry = None
 _registry_lock = threading.Lock()
-
-
-def _convert_old_nodes(old_nodes):
-    """Convert RouteFinderLib pickle objects to new graph objects."""
-    new_nodes = []
-    for old in old_nodes:
-        n = NewNode(iid=old.iid, name=old.name, px=old.px, py=old.py)
-        for old_edge in old.nextList:
-            e = NewEdge(
-                nfrom=old_edge.nfrom,
-                nend=old_edge.nend,
-                name=old_edge.name,
-                color=old_edge.color if hasattr(old_edge, "color") else (0, 0, 0),
-            )
-            n.next_list.append(e)
-        new_nodes.append(n)
-    return new_nodes
 
 
 class NavGraph:
@@ -82,42 +54,6 @@ class NavGraph:
         return [n for n in self.node_list if n.name == name]
 
 
-def load_nav_data() -> NavGraph:
-    """Load navigation data. Idempotent."""
-    global _nav_graph
-    if _nav_graph is not None:
-        return _nav_graph
-
-    with open(settings.navdat_full_path, "rb") as f:
-        old_nodes = pickle.load(f)
-
-    node_list = _convert_old_nodes(old_nodes)
-
-    with open(settings.apdat_full_path, "rb") as f:
-        airport_maps = pickle.load(f)
-
-    # Resolve data version
-    version = settings.navdat_cycle
-    if version == "AUTO":
-        import os
-
-        cycle_path = os.path.join(settings.local_asdata_path, "Cycle.txt")
-        if os.path.exists(cycle_path):
-            with open(cycle_path) as f:
-                version = f.read().strip()
-        else:
-            version = "UNKNOWN"
-
-    _nav_graph = NavGraph(node_list, airport_maps, version)
-    return _nav_graph
-
-
-def get_nav_graph() -> NavGraph:
-    if _nav_graph is None:
-        return load_nav_data()
-    return _nav_graph
-
-
 def _init_registry():
     """Initialize NavDataRegistry from data directory. Thread-safe."""
     global _nav_registry
@@ -128,7 +64,7 @@ def _init_registry():
             return _nav_registry
         from openRouterFinder.core.storage.registry import NavDataRegistry
 
-        data_dir = settings.navdat_full_path.parent
+        data_dir = settings.navdata_dir_path
         _nav_registry = NavDataRegistry(data_dir)
         return _nav_registry
 
