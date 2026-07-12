@@ -138,13 +138,44 @@ def _get_airport_detail_from_fb(nav, icao: str) -> dict | None:
     }
 
 
-# Module-level caches for airport connections. AirportConnection objects are
-# read-only after construction, so they are safe to share across requests.
-# OrderedDict + move_to_end gives simple LRU eviction so long-running processes
-# do not grow without bound. Size is controlled via AIRPORT_CONNECTION_CACHE_SIZE.
-_sid_cache: OrderedDict = OrderedDict()
-_star_cache: OrderedDict = OrderedDict()
+_MISSING = object()
+
+
+class _LRUCache:
+    """Thread-safe LRU cache with explicit maxsize.
+
+    Uses an OrderedDict so long-running processes do not grow without bound.
+    Size is controlled via ``settings.airport_connection_cache_size``.
+    """
+
+    def __init__(self, lock: Lock):
+        self._lock = lock
+        self._data: OrderedDict = OrderedDict()
+
+    def get(self, key):
+        with self._lock:
+            value = self._data.get(key, _MISSING)
+            if value is _MISSING:
+                return _MISSING
+            self._data.move_to_end(key)
+            return value
+
+    def set(self, key, value) -> None:
+        with self._lock:
+            self._data[key] = value
+            self._data.move_to_end(key)
+            max_size = settings.airport_connection_cache_size
+            while len(self._data) > max_size:
+                self._data.popitem(last=False)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._data.clear()
+
+
 _cache_lock = Lock()
+_sid_cache = _LRUCache(_cache_lock)
+_star_cache = _LRUCache(_cache_lock)
 
 
 def search_route(
@@ -166,35 +197,21 @@ def search_route(
         return None
 
     with nav:
+        resolved_cycle = nav.cycle
         if nav.get_airport(orig) is None or nav.get_airport(dest) is None:
             return None
 
         # Use cached AirportConnection when available to avoid rebuilding
-        # procedures on every request.
-        connector = FlatbuffersAirportConnector(nav)
-
-        # Build unfiltered connections so the engine can fall back to auto-selected
-        # procedures when a filtered entry is unreachable via the airway graph.
-        sid_key = (cycle, orig)
-        with _cache_lock:
-            sid_conn = _sid_cache.get(sid_key)
-        if sid_conn is None:
-            sid_conn = connector.build_sid(orig, filter_name=None)
-            with _cache_lock:
-                _sid_cache[sid_key] = sid_conn
-        else:
+        # procedures on every request.  Resolve cycle=None to the concrete
+        # latest cycle so a later hot-load does not hit stale cache entries.
+        sid_conn = _get_airport_connection(nav, orig, 1, resolved_cycle)
+        if sid_conn is not None:
             # Each request must have isolated temp_nodes so that post-A* point
             # insertion does not pollute the shared cache.
             sid_conn = dataclasses.replace(sid_conn, temp_nodes=[])
 
-        star_key = (cycle, dest)
-        with _cache_lock:
-            star_conn = _star_cache.get(star_key)
-        if star_conn is None:
-            star_conn = connector.build_star(dest, filter_name=None)
-            with _cache_lock:
-                _star_cache[star_key] = star_conn
-        else:
+        star_conn = _get_airport_connection(nav, dest, 2, resolved_cycle)
+        if star_conn is not None:
             star_conn = dataclasses.replace(star_conn, temp_nodes=[])
 
         if sid_conn is None or star_conn is None:
@@ -202,6 +219,7 @@ def search_route(
         if not sid_conn.connections or not star_conn.connections:
             return None
 
+        connector = FlatbuffersAirportConnector(nav)
         engine = RouteEngine(
             nav.node_list,
             nav.cycle,
@@ -245,28 +263,25 @@ def _get_airport_connection(
     """Return a cached or freshly-built airport connection for the given proc type.
 
     proc_type: 1 for SID, 2 for STAR.  Reuses the module-level caches so API and
-    route endpoints do not rebuild procedures on every request.  The caches are
-    LRU-bounded to _MAX_AIRPORT_CACHE_SIZE entries per type.
+    route endpoints do not rebuild procedures on every request.  A ``cycle`` of
+    ``None``/"" is resolved to the concrete cycle identifier of ``nav`` so cache
+    keys remain stable across hot reloads.  The caches are LRU-bounded to
+    ``settings.airport_connection_cache_size`` entries per type.
     """
     from openRouterFinder.core.airport import FlatbuffersAirportConnector
 
+    resolved_cycle = cycle or nav.cycle
     cache = _sid_cache if proc_type == 1 else _star_cache
-    key = (cycle, icao)
-    with _cache_lock:
-        conn = cache.get(key)
-        if conn is not None:
-            cache.move_to_end(key)
-            return conn
+    key = (resolved_cycle, icao)
+    conn = cache.get(key)
+    if conn is not _MISSING:
+        return conn
 
     connector = FlatbuffersAirportConnector(nav)
     conn = connector.build_sid(icao) if proc_type == 1 else connector.build_star(icao)
 
-    with _cache_lock:
-        cache[key] = conn
-        cache.move_to_end(key)
-        max_size = settings.airport_connection_cache_size
-        while len(cache) > max_size:
-            cache.popitem(last=False)
+    if conn is not None:
+        cache.set(key, conn)
     return conn
 
 
@@ -278,6 +293,17 @@ def get_sid_connection(nav, icao: str, cycle: str | None = None) -> "AirportConn
 def get_star_connection(nav, icao: str, cycle: str | None = None) -> "AirportConnection | None":
     """Cached STAR connection for an airport."""
     return _get_airport_connection(nav, icao, 2, cycle)
+
+
+def clear_airport_connection_caches() -> None:
+    """Clear module-level SID/STAR connection caches.
+
+    Called after navdata cycles are deleted or uploaded so cached
+    AirportConnection objects (which reference node IIDs/mmaps) are not
+    reused across different navdata versions.
+    """
+    _sid_cache.clear()
+    _star_cache.clear()
 
 
 def _parse_runways_from_fb(ap) -> list:

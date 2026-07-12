@@ -28,6 +28,7 @@ from openRouterFinder.core.admin import (
     record_route_search,
 )
 from openRouterFinder.core.data_loader import (
+    clear_airport_connection_caches,
     get_data_version,
     get_nav_data,
     get_nav_registry,
@@ -169,6 +170,7 @@ def _rename_single_runway_all(data: dict) -> dict:
 _dijkstra_pool = ThreadPoolExecutor(max_workers=4)
 _build_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="navdata-build")
 _route_semaphore = asyncio.Semaphore(4)
+_navdata_upload_lock = asyncio.Lock()
 
 # --- Valid code storage ---
 
@@ -664,6 +666,7 @@ def delete_navdata_cycle(cycle: str, _: str = Depends(verify_admin_key)):
         raise HTTPException(status_code=404, detail="Cycle not found")
     reg.unregister(cycle)
     _build_airport_index()
+    clear_airport_connection_caches()
     return {"success": True, "cycle": cycle}
 
 
@@ -754,6 +757,7 @@ def _do_build_navdata(
         reg = get_nav_registry()
         reg.register(cycle, fb_path)
         _build_airport_index()
+        clear_airport_connection_caches()
         info = reg.get_cycle_info(cycle)
         _build_tasks[build_id] = {
             "status": "done",
@@ -775,6 +779,7 @@ def _do_build_navdata(
         traceback.print_exc()
         _build_tasks[build_id] = {
             "status": "error",
+            "cycle": cycle,
             "detail": detail,
             "finished_at": time.time(),
         }
@@ -874,21 +879,30 @@ async def upload_navdata(
             raise HTTPException(status_code=400, detail=str(e)) from e
 
         cycle = cycle_info["cycle"]
-
-        # Check if cycle already exists
         reg = get_nav_registry()
-        if reg.has_cycle(cycle):
-            raise HTTPException(status_code=409, detail=f"Cycle {cycle} already exists")
 
-        # Start background build
-        build_id = str(uuid.uuid4())
-        _build_tasks[build_id] = {
-            "status": "building",
-            "step": "starting",
-            "current": 0,
-            "total": 1,
-            "percent": 0,
-        }
+        # Guard the has_cycle check + build-task registration so two concurrent
+        # uploads of the same cycle cannot both start conflicting builds. The
+        # long-running build itself runs outside this lock.
+        async with _navdata_upload_lock:
+            if reg.has_cycle(cycle):
+                raise HTTPException(status_code=409, detail=f"Cycle {cycle} already exists")
+
+            for task in _build_tasks.values():
+                if task.get("status") == "building" and task.get("cycle") == cycle:
+                    raise HTTPException(
+                        status_code=409, detail=f"Cycle {cycle} is already being built"
+                    )
+
+            build_id = str(uuid.uuid4())
+            _build_tasks[build_id] = {
+                "status": "building",
+                "step": "starting",
+                "current": 0,
+                "total": 1,
+                "percent": 0,
+                "cycle": cycle,
+            }
 
         loop = asyncio.get_event_loop()
         loop.run_in_executor(

@@ -56,17 +56,18 @@ class FlatbuffersAirportConnector:
 2. `_collect_procedures(icao, proc_type=2)` — collect all STAR procedures
 3. `_apply_filter(filter_name, ...)`
 4. `_collect_approach_bridges(icao)` — collect Type=3 approach procedures to extend STAR paths to runway
-5. Build internal edges along procedure legs (network→airport order)
-6. Build transition edges (reversed: network→airport)
-7. Merge runway segments with common segments; prefer options with matching approach bridges
-8. Key procedures by network-side entry point (`merged_points[0][0]`)
-9. Merge approach bridges into STAR procedures so full path to runway is available
-10. Build connections from each procedure's **first** point (network-side entry) to the airport
-11. Add internal edges for used approach bridges
-12. **Fallback**: when no STAR procedures exist (and no filter is active), create virtual STAR procedures from approach bridges
-13. `_ensure_continuous_paths()` — add missing edges for consecutive points in merged procedures
-14. `_add_boundary_bridges()` — bridge isolated entry nodes from nearest airway-connected node
-15. Deduplicate `internal_edges`
+5. **Append runway endpoints**: symmetric to `build_sid`, but STAR procedures are network→airport so the `DERxx`/`DExx` marker is appended to segments that lack it
+6. Build internal edges along procedure legs (network→airport order)
+7. Build transition edges (reversed: network→airport)
+8. Merge runway segments with common segments; prefer options with matching approach bridges
+9. Key procedures by network-side entry point (`merged_points[0][0]`)
+10. Merge approach bridges into STAR procedures so full path to runway is available
+11. Build connections from each procedure's **first** point (network-side entry) to the airport
+12. Add internal edges for used approach bridges
+13. **Fallback**: when no STAR procedures exist (and no filter is active), create virtual STAR procedures from approach bridges
+14. `_ensure_continuous_paths()` — add missing edges for consecutive points in merged procedures
+15. `_add_boundary_bridges()` — bridge isolated entry nodes from nearest airway-connected node
+16. Deduplicate `internal_edges`
 
 ---
 
@@ -89,7 +90,7 @@ The core of SID/STAR parsing. Returns three things:
 Fenix navdata stores procedures with:
 - Main legs (Transition="ALL")
 - Transition legs (Transition=specific name)
-- Segment separators: consecutive legs with identical coordinates `(0, 0)`
+- Segment separators: unnamed legs with coordinates `(0, 0)`
 - Runway endpoint markers: names matching `DER\d+[A-Z]?$` or `DE\d+[A-Z]?$`
 
 ### STAR Transition Handling
@@ -121,7 +122,7 @@ def _leg_to_point(self, leg) -> Optional[Tuple[str, float, float]]:
     return (name, float(leg.Lat()), float(leg.Lon()))
 ```
 
-Runway endpoint markers (`DER01L`, `DE36L`, etc.) are preserved alongside all other named waypoints.
+Runway endpoint markers (`DER01L`, `DE36L`, etc.) are preserved alongside all other named waypoints. In `_extract_transition_segments()`, only unnamed `(0, 0)` legs are treated as segment separators; a leg with a valid name at `(0.0, 0.0)` is retained as a real waypoint.
 
 ---
 

@@ -393,7 +393,7 @@ class FlatbuffersAirportConnector:
                     segments.append(self._dedup_consecutive(current))
                     current = list(pending)
                     pending = []
-            elif lat != 0.0 or lon != 0.0:
+            else:
                 pt = self._leg_to_point(leg)
                 if pt:
                     current.append(pt)
@@ -450,6 +450,57 @@ class FlatbuffersAirportConnector:
                     best_dist = dist
                     best_runway = end_name
         return best_runway
+
+    def _collect_runway_endpoints(self, runway_segments) -> dict[str, tuple[str, float, float]]:
+        """Scan runway segments to find each runway's endpoint marker (DERxx/DExx)."""
+        runway_endpoints: dict[str, tuple[str, float, float]] = {}
+        for _proc_name, runway, _exit_node, points, _transitions, _is_main in runway_segments:
+            if not runway or not points:
+                continue
+            for name, lat, lon in points:
+                if name == f"DER{runway}":
+                    runway_endpoints[runway] = (name, lat, lon)
+                    break
+                if name == f"DE{runway}" and runway not in runway_endpoints:
+                    runway_endpoints[runway] = (name, lat, lon)
+            if runway in runway_endpoints and runway_endpoints[runway][0] == f"DER{runway}":
+                continue
+        return runway_endpoints
+
+    def _fix_runway_endpoint_order(
+        self,
+        proc_type: int,
+        runway_segments: list,
+        runway_endpoints: dict[str, tuple[str, float, float]],
+    ) -> list:
+        """Prepend (SID) or append (STAR) runway endpoints to segments lacking them.
+
+        SID procedures are airport->network, so the runway endpoint marker must
+        be the first point.  STAR procedures are network->airport, so the marker
+        must be the last point.  This keeps the pooled internal_edges graph from
+        branching at intermediate points when some procedures for a runway lack
+        the common endpoint.
+        """
+        fixed = []
+        for proc_name, runway, anchor_node, points, transitions, is_main in runway_segments:
+            if runway in runway_endpoints:
+                re_name, re_lat, re_lon = runway_endpoints[runway]
+                if proc_type == 1:  # SID: runway end at start
+                    if not points or points[0][0] not in (f"DER{runway}", f"DE{runway}"):
+                        new_points = [(re_name, re_lat, re_lon), *list(points)]
+                        fixed.append(
+                            (proc_name, runway, anchor_node, new_points, transitions, is_main)
+                        )
+                        continue
+                else:  # STAR: runway end at end
+                    if not points or points[-1][0] not in (f"DER{runway}", f"DE{runway}"):
+                        new_points = [*list(points), (re_name, re_lat, re_lon)]
+                        fixed.append(
+                            (proc_name, runway, anchor_node, new_points, transitions, is_main)
+                        )
+                        continue
+            fixed.append((proc_name, runway, anchor_node, points, transitions, is_main))
+        return fixed
 
     def _resolve_node(self, name: str, lat: float, lon: float) -> Node:
         """Find node in network or create temp node."""
@@ -821,6 +872,7 @@ class FlatbuffersAirportConnector:
         approach_bridges: dict[tuple[str, str], list[tuple[str, float, float]]] | None = None,
         ap=None,
         runway_endpoints: dict[str, tuple[str, float, float]] | None = None,
+        proc_type: int = 1,
     ):
         """Register common segment procedures for runways covered by their transitions.
 
@@ -836,9 +888,10 @@ class FlatbuffersAirportConnector:
         the segment's final point so the frontend never sees "ALL".
 
         When runway_endpoints is provided and the inferred runway has a known
-        endpoint marker, the marker is prepended to the procedure points so
-        that all procedures for the same runway share the same starting point.
-        This prevents pooled-edge branching in the internal_edges graph.
+        endpoint marker, the marker is prepended (SID) or appended (STAR) to the
+        procedure points so that all procedures for the same runway share the
+        same endpoint. This prevents pooled-edge branching in the internal_edges
+        graph.
 
         Single-point common segments (after filtering synthetic markers) are
         skipped because they provide no meaningful path.
@@ -895,11 +948,18 @@ class FlatbuffersAirportConnector:
                     inferred = self._infer_runway_from_location(_lat, _lon, ap)
                     if inferred and runway_endpoints and inferred in runway_endpoints:
                         re_name, re_lat, re_lon = runway_endpoints[inferred]
-                        if not merged_points or merged_points[0][0] not in (
-                            f"DER{inferred}",
-                            f"DE{inferred}",
-                        ):
-                            merged_points = [(re_name, re_lat, re_lon), *list(merged_points)]
+                        if proc_type == 1:
+                            if not merged_points or merged_points[0][0] not in (
+                                f"DER{inferred}",
+                                f"DE{inferred}",
+                            ):
+                                merged_points = [(re_name, re_lat, re_lon), *list(merged_points)]
+                        else:
+                            if not merged_points or merged_points[-1][0] not in (
+                                f"DER{inferred}",
+                                f"DE{inferred}",
+                            ):
+                                merged_points = [*list(merged_points), (re_name, re_lat, re_lon)]
                     proc = Procedure(
                         name=proc_name,
                         runway=inferred if inferred else "ALL",
@@ -923,11 +983,18 @@ class FlatbuffersAirportConnector:
                 inferred = self._infer_runway_from_location(_lat, _lon, ap)
                 if inferred and runway_endpoints and inferred in runway_endpoints:
                     re_name, re_lat, re_lon = runway_endpoints[inferred]
-                    if not merged_points or merged_points[0][0] not in (
-                        f"DER{inferred}",
-                        f"DE{inferred}",
-                    ):
-                        merged_points = [(re_name, re_lat, re_lon), *list(merged_points)]
+                    if proc_type == 1:
+                        if not merged_points or merged_points[0][0] not in (
+                            f"DER{inferred}",
+                            f"DE{inferred}",
+                        ):
+                            merged_points = [(re_name, re_lat, re_lon), *list(merged_points)]
+                    else:
+                        if not merged_points or merged_points[-1][0] not in (
+                            f"DER{inferred}",
+                            f"DE{inferred}",
+                        ):
+                            merged_points = [*list(merged_points), (re_name, re_lat, re_lon)]
                 proc = Procedure(
                     name=proc_name,
                     runway=inferred if inferred else "ALL",
@@ -1043,38 +1110,8 @@ class FlatbuffersAirportConnector:
         # then show branching at the first transition point instead of at the
         # runway end.  We scan all segments to find each runway's endpoint
         # and prepend it to any segment that lacks it.
-        runway_endpoints: dict[str, tuple[str, float, float]] = {}
-        for _proc_name, runway, _exit_node, points, _transitions, _is_main in runway_segments:
-            if not runway or not points:
-                continue
-            for name, lat, lon in points:
-                if name == f"DER{runway}":
-                    runway_endpoints[runway] = (name, lat, lon)
-                    break
-                if name == f"DE{runway}" and runway not in runway_endpoints:
-                    runway_endpoints[runway] = (name, lat, lon)
-            # If we found DER, stop scanning this runway (DER preferred over DE)
-            if runway in runway_endpoints and runway_endpoints[runway][0] == f"DER{runway}":
-                continue
-
-        fixed_runway_segments = []
-        for proc_name, runway, anchor_node, points, transitions, is_main in runway_segments:
-            if runway in runway_endpoints:
-                re_name, re_lat, re_lon = runway_endpoints[runway]
-                if not points or points[0][0] not in (f"DER{runway}", f"DE{runway}"):
-                    new_points = [(re_name, re_lat, re_lon), *list(points)]
-                    fixed_runway_segments.append(
-                        (proc_name, runway, anchor_node, new_points, transitions, is_main)
-                    )
-                else:
-                    fixed_runway_segments.append(
-                        (proc_name, runway, anchor_node, points, transitions, is_main)
-                    )
-            else:
-                fixed_runway_segments.append(
-                    (proc_name, runway, anchor_node, points, transitions, is_main)
-                )
-        runway_segments = fixed_runway_segments
+        runway_endpoints = self._collect_runway_endpoints(runway_segments)
+        runway_segments = self._fix_runway_endpoint_order(1, runway_segments, runway_endpoints)
 
         # In the mixed-graph approach, only the airport and SID exit points
         # participate in routing.  Internal procedure points and transitions
@@ -1302,6 +1339,15 @@ class FlatbuffersAirportConnector:
             # filter means the requested procedure does not exist, so we must
             # return empty rather than fabricate a radar-vector leg.
             self._add_synthetic_vector_fallback(result, 1)
+        self._ensure_continuous_paths(result, "SID")
+        seen_edges = set()
+        deduped = []
+        for e in result.internal_edges:
+            key = (e.nfrom, e.nend)
+            if key not in seen_edges:
+                seen_edges.add(key)
+                deduped.append(e)
+        result.internal_edges = deduped
         self._add_boundary_bridges(result, 1)
         return result
 
@@ -1467,6 +1513,16 @@ class FlatbuffersAirportConnector:
         # Collect approach bridges (Type=3) to extend STAR paths to the runway.
         approach_bridges = self._collect_approach_bridges(icao)
 
+        # --- Append runway endpoints to STAR segments that lack them ---
+        # Fenix sometimes stores STAR legs (main or transition) without the
+        # runway endpoint marker (DERxx / DExx) as the last point.  When
+        # multiple procedures share the same runway, the pooled internal_edges
+        # then show branching at the last transition point instead of at the
+        # runway end.  We scan all segments to find each runway's endpoint
+        # and append it to any segment that lacks it.
+        runway_endpoints = self._collect_runway_endpoints(runway_segments)
+        runway_segments = self._fix_runway_endpoint_order(2, runway_segments, runway_endpoints)
+
         # In the mixed-graph approach, only the STAR entry points and airport
         # participate in routing.  Internal procedure points and transitions
         # are display-only (frontend draws them from procedures data).
@@ -1612,7 +1668,13 @@ class FlatbuffersAirportConnector:
         # Only offer for runways covered by this procedure's transitions.
         # For common segments without transitions, infer runway from approach bridges.
         self._register_common_procedures(
-            common_segments, procedures, lambda pts: pts[0][0], approach_bridges, ap=ap
+            common_segments,
+            procedures,
+            lambda pts: pts[0][0],
+            approach_bridges,
+            ap=ap,
+            runway_endpoints=runway_endpoints,
+            proc_type=2,
         )
 
         procedures = self._deduplicate_procedures(procedures)
@@ -1730,6 +1792,15 @@ class FlatbuffersAirportConnector:
             # non-matching filter means the requested procedure does not exist,
             # so we must return empty rather than fabricate a radar-vector leg.
             self._add_synthetic_vector_fallback(result, 2)
+        self._ensure_continuous_paths(result, "STAR")
+        seen_edges = set()
+        deduped = []
+        for e in result.internal_edges:
+            key = (e.nfrom, e.nend)
+            if key not in seen_edges:
+                seen_edges.add(key)
+                deduped.append(e)
+        result.internal_edges = deduped
         self._add_boundary_bridges(result, 2)
         return result
 

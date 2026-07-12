@@ -126,13 +126,17 @@ import AirportInfo from '@/components/AirportInfo.vue'
 import WeatherCard from '@/components/WeatherCard.vue'
 
 const store = useRouteStore()
-const { mutate: searchRoute } = useRouteQuery()
+const { mutate: searchRoute, cancel: cancelSearch } = useRouteQuery()
 
 const queryTime = ref(0)
 let timer: ReturnType<typeof setInterval> | null = null
 let queryStartTime = 0
+let requestId = 0
 
 function handleSearch(params: { orig: string; dest: string; validCode: string; validToken: string; sidExit: string; starEntry: string; cycle: string }) {
+  requestId += 1
+  const thisRequestId = requestId
+
   store.setLoading(true)
   store.setError(null)
   queryTime.value = 0
@@ -149,11 +153,14 @@ function handleSearch(params: { orig: string; dest: string; validCode: string; v
 
   searchRoute(params, {
     onSuccess: (data) => {
+      if (thisRequestId !== requestId) return
       store.setRouteResult(data)
       store.setLoading(false)
       if (timer) clearInterval(timer)
     },
     onError: (err) => {
+      if (thisRequestId !== requestId) return
+      if (err.name === 'AbortError') return
       store.setError(err.message)
       store.setLoading(false)
       if (timer) clearInterval(timer)
@@ -169,6 +176,7 @@ watch(() => store.isLoading, (loading) => {
 })
 
 onUnmounted(() => {
+  cancelSearch()
   if (timer) {
     clearInterval(timer)
     timer = null

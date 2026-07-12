@@ -233,7 +233,6 @@ class RouteEngine:
                     {},
                     [],
                 )
-            prev_star_t = star_t_name
 
             # Select best SID for current STAR boundary
             if sid_candidates:

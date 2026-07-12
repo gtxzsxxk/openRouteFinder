@@ -12,7 +12,9 @@ interface RouteQueryParams {
 }
 
 export function useRouteQuery() {
-  return useMutation<RouteResult, Error, RouteQueryParams>({
+  let currentController: AbortController | null = null
+
+  const { mutate: rawMutate, ...rest } = useMutation<RouteResult, Error, RouteQueryParams>({
     mutationFn: async (params) => {
       const response = await fetch('/api/route', {
         method: 'POST',
@@ -20,6 +22,7 @@ export function useRouteQuery() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(params),
+        signal: currentController?.signal,
       })
 
       if (!response.ok) {
@@ -30,4 +33,17 @@ export function useRouteQuery() {
       return response.json()
     },
   })
+
+  const mutate: typeof rawMutate = (params, options) => {
+    currentController?.abort()
+    currentController = new AbortController()
+    rawMutate(params, options)
+  }
+
+  const cancel = () => {
+    currentController?.abort()
+    currentController = null
+  }
+
+  return { ...rest, mutate, cancel }
 }

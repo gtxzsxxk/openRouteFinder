@@ -244,20 +244,6 @@ export function useMap(
     return null
   }
 
-  // Find the opposite runway end (e.g., "36L" -> "18R")
-  function findOppositeRunwayEnd(runways: Runway[] | undefined, runwayName: string): RunwayThreshold | null {
-    if (!runways || runwayName === 'ALL') return null
-    for (const rwy of runways) {
-      for (const end of rwy.thresholds) {
-        if (end.name === runwayName) {
-          const other = rwy.thresholds.find(t => t.name !== runwayName)
-          return other || end
-        }
-      }
-    }
-    return null
-  }
-
   function updateMap() {
     if (!map.value || !isMapReady.value || !routeResult.value) return
     if (isUpdating.value) {
@@ -522,9 +508,8 @@ export function useMap(
       let sidFeatures: any[] = []
       if (selectedSID.value) {
         const sidPoints = selectedSID.value.points
-        // SID starts at the opposite end of the departure runway
-        // (aircraft takes off along the runway and exits at the far end)
-        const sidEnd = findOppositeRunwayEnd(origRunways, selectedSID.value.runway)
+        // SID starts at the actual departure runway threshold
+        const sidEnd = findRunwayEnd(origRunways, selectedSID.value.runway)
         const sidStart = sidEnd
           ? [sidEnd.lon, sidEnd.lat]
           : [nodes[0].lon, nodes[0].lat]
